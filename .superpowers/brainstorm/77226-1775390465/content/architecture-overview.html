@@ -1,0 +1,165 @@
+<h2>Solar — Architecture Overview</h2>
+<p class="subtitle">How the major systems connect</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">System Architecture</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre; overflow-x: auto;">
+┌─────────────────────────────────────────────────────────────────────┐
+│                        MAIN THREAD                                  │
+│                                                                     │
+│  ┌─────────────┐    ┌──────────────────────────────────────────┐   │
+│  │  Game Mode   │    │           Zustand Stores                 │   │
+│  │  State       │    │                                          │   │
+│  │  Machine     │    │  ┌────────────┐  ┌───────────────────┐  │   │
+│  │             │───▶│  │ Mode Store │  │ Simulation Store  │  │   │
+│  │  • Flight    │    │  │ (which mode│  │ (body positions,  │  │   │
+│  │  • Editor    │    │  │  is active)│  │  velocities —     │  │   │
+│  │  • Map       │    │  └────────────┘  │  written by       │  │   │
+│  │  • Menu      │    │                  │  worker bridge)   │  │   │
+│  └─────────────┘    │  ┌────────────┐  └───────────────────┘  │   │
+│                      │  │ Camera     │  ┌───────────────────┐  │   │
+│                      │  │ Store      │  │ Input Store       │  │   │
+│                      │  │ (origin,   │  │ (commands to send │  │   │
+│                      │  │  target)   │  │  to worker)       │  │   │
+│                      │  └────────────┘  └───────────────────┘  │   │
+│                      └──────────────────────────────────────────┘   │
+│                                │                                    │
+│                                ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │                     R3F / Three.js Layer                      │  │
+│  │                                                               │  │
+│  │   For each object:                                            │  │
+│  │   renderPos = simPos - floatingOrigin                         │  │
+│  │                                                               │  │
+│  │   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │  │
+│  │   │  Sun     │  │  Earth   │  │  Moon    │  │  Vessel  │   │  │
+│  │   │ (emissive│  │ (sphere  │  │ (sphere) │  │ (parts)  │   │  │
+│  │   │  sphere) │  │  + atmo) │  │          │  │          │   │  │
+│  │   └──────────┘  └──────────┘  └──────────┘  └──────────┘   │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│         ▲ state snapshots              commands ▼                   │
+│         │ (interpolated)               (throttle, warp)             │
+│  ┌──────┴──────────────────────────────────────┬────────────────┐  │
+│  │              Worker Bridge (postMessage)     │                │  │
+│  └──────┬──────────────────────────────────────┴────────────────┘  │
+└─────────┼───────────────────────────────────────────────────────────┘
+          │
+┌─────────┼───────────────────────────────────────────────────────────┐
+│  ┌──────┴──────────────────────────────────────────────────────┐   │
+│  │                    WEB WORKER                                │   │
+│  │                                                              │   │
+│  │  ┌────────────────────┐   ┌──────────────────────────────┐  │   │
+│  │  │  Integrator        │   │  Simulation State (float64)  │  │   │
+│  │  │  (Störmer-Verlet   │   │                              │  │   │
+│  │  │   or RK4)          │   │  Bodies: [{                  │  │   │
+│  │  │                    │   │    id, mass,                  │  │   │
+│  │  │  Fixed timestep    │──▶│    position: [x,y,z],        │  │   │
+│  │  │  (e.g. 1/60s)     │   │    velocity: [x,y,z]         │  │   │
+│  │  │                    │   │  }]                           │  │   │
+│  │  │  Time warp:        │   │                              │  │   │
+│  │  │  N steps per msg   │   │  Units: meters, kg, m/s      │  │   │
+│  │  └────────────────────┘   └──────────────────────────────┘  │   │
+│  │                                                              │   │
+│  │  ┌──────────────────────────────────────────────────────┐   │   │
+│  │  │  Coordinate Transforms                                │   │   │
+│  │  │  • Simulation frame (heliocentric, float64)           │   │   │
+│  │  │  • Local body frame (relative to parent)              │   │   │
+│  │  │  • Render frame = sim - origin (sent to main thread)  │   │   │
+│  │  └──────────────────────────────────────────────────────┘   │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                        WORKER THREAD                                │
+└─────────────────────────────────────────────────────────────────────┘
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">Project Structure</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.8; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+src/
+├── sim/                  ← Pure TypeScript. No React/Three imports.
+│   ├── worker.ts              Worker entry point
+│   ├── integrator.ts          Physics stepping (Euler → Verlet → RK4)
+│   ├── bodies.ts              Body state types & initialization
+│   ├── gravity.ts             N-body gravitational acceleration
+│   ├── coordinates.ts         Frame transforms (sim ↔ local ↔ render)
+│   └── constants.ts           G, AU, body masses, radii
+│
+├── state/                ← Zustand stores + worker bridge
+│   ├── simulation.ts          Body positions/velocities (from worker)
+│   ├── camera.ts              Floating origin, follow target
+│   ├── mode.ts                Game mode state machine
+│   ├── input.ts               Commands buffer (→ worker)
+│   └── bridge.ts              Worker ↔ store message protocol
+│
+├── render/               ← R3F components. Consume stores.
+│   ├── Scene.tsx              Top-level Canvas + floating origin logic
+│   ├── Body.tsx               Renders a celestial body (sphere + effects)
+│   ├── OrbitLine.tsx          Projected orbit path
+│   ├── CameraRig.tsx          Camera controllers per mode
+│   └── SkyBox.tsx             Background stars
+│
+├── modes/                ← Top-level screens
+│   ├── Flight.tsx             Simulation view (renders Scene + HUD)
+│   ├── Editor.tsx             Part assembly (future)
+│   └── MapView.tsx            Orbital map (future)
+│
+├── ui/                   ← HTML/CSS overlay (not 3D)
+│   ├── HUD.tsx                Speed, altitude, warp controls
+│   └── MainMenu.tsx           Mode selection
+│
+├── App.tsx               ← Mode router
+└── main.tsx              ← Entry point
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">Coordinate System — The Key Insight</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+THE PROBLEM:
+  Sun to Neptune ≈ 4.5 × 10¹² meters
+  A spacecraft part ≈ 0.01 meters
+  That's ~15 orders of magnitude
+
+  JavaScript numbers (float64): ~15-16 significant digits  ✓ OK for simulation
+  GPU floats (float32):         ~7 significant digits       ✗ Jitter at large distances
+
+THE SOLUTION: Floating-origin, camera-relative rendering
+
+  ┌─ SIMULATION (float64, in worker) ──────────────────────────────┐
+  │                                                                 │
+  │  Sun:    [0, 0, 0]                                             │
+  │  Earth:  [1.496e11, 0, 0]          ← real distances in meters  │
+  │  Moon:   [1.4964e11, 0, 0]                                     │
+  │  Craft:  [1.4960002e11, 3.5, 0]    ← near Earth surface        │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+                    │
+                    │  floatingOrigin = craft position
+                    │  renderPos = simPos - floatingOrigin
+                    ▼
+  ┌─ RENDERING (float32, on GPU) ──────────────────────────────────┐
+  │                                                                 │
+  │  Sun:    [-1.496e11, 0, 0]    ← big but far away, precision    │
+  │  Earth:  [-2e4, 0, 0]             doesn't matter for distant   │
+  │  Moon:   [4e5, 0, 0]              objects — they're small       │
+  │  Craft:  [0, 3.5, 0]         ← near origin, full precision ✓  │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+
+  Everything close to the camera has small coordinates → no jitter.
+  Everything far away has big coordinates but is tiny on screen → jitter invisible.
+</pre>
+    </div>
+  </div>
+</div>

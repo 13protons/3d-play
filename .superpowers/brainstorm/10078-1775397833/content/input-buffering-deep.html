@@ -1,0 +1,253 @@
+<h2>Input Buffering — The Details</h2>
+<p class="subtitle">Command timing, time warp, and the worker message loop</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">The Basic Loop (1x Speed)</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  At 1x speed, sim time ≈ wall time. Simple case.
+
+  MAIN THREAD                              WORKER
+  ──────────                               ──────
+  frame 1 (t=0ms)
+    user presses W → throttle cmd
+    buffer: [{ type:'set-throttle',
+               value:1.0, simTime:0.0 }]
+    bridge drains buffer ─────────────────▶ receives commands
+                                            applies: throttle = 1.0
+                                            integrates 1 step (dt = 1/60s)
+                                  ◀──────── posts snapshot { simTime: 0.0167, bodies: [...] }
+    store.setState(snapshot)
+    R3F renders from store
+
+  frame 2 (t=16ms)
+    no new input
+    buffer: []
+    bridge sends empty batch ─────────────▶ no commands to apply
+                                            integrates 1 step
+                                  ◀──────── posts snapshot { simTime: 0.0333, bodies: [...] }
+    store.setState(snapshot)
+    R3F renders
+
+  Clean, simple. One physics step per frame.
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">Time Warp — Where It Gets Interesting</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  At 1000x warp, we need 1000 physics steps per frame.
+  But the user might issue a command mid-frame.
+  When in sim-time should it apply?
+
+  APPROACH 1: "Apply at next step" (simple, good enough to start)
+  ──────────────────────────────────────────────────────────────
+  Commands apply at the BEGINNING of the next batch of steps.
+
+  Main sends:  { commands: [{ type:'set-throttle', value:0 }], warp: 1000 }
+  Worker does:
+    apply throttle = 0          ← before any integration
+    for (let i = 0; i < 1000; i++) {
+      integrate(dt)             ← all 1000 steps see throttle = 0
+    }
+    post snapshot
+
+  Simple. Slight inaccuracy: the command applies at the batch
+  boundary, not the exact moment the user pressed the key.
+  At 1000x warp, each batch = ~16 seconds of sim time.
+  The command could be "early" by up to 16 sim-seconds.
+
+  For orbital maneuvers at high warp, this is fine — you'd
+  drop to 1x for precision burns anyway.
+
+
+  APPROACH 2: "Timestamped insertion" (precise, add later if needed)
+  ──────────────────────────────────────────────────────────────────
+  Commands carry a target sim-time. Worker inserts them mid-batch.
+
+  Main sends:  { commands: [{ type:'set-throttle', value:0,
+                               simTime: 45000.5 }], warp: 1000 }
+  Worker does:
+    for (let i = 0; i < 1000; i++) {
+      if (commands.length && simTime >= commands[0].simTime) {
+        apply(commands.shift())   ← applied at exact sim tick
+      }
+      integrate(dt)
+    }
+    post snapshot
+
+  More precise, slightly more complex. Worth adding when you
+  have maneuver nodes that need exact timing.
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  RECOMMENDATION: Start with Approach 1. It's 5 lines of    │
+  │  code and handles 95% of cases. Approach 2 is a drop-in    │
+  │  upgrade — same message format, just smarter application    │
+  │  logic in the worker. No architectural change needed.       │
+  └─────────────────────────────────────────────────────────────┘
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">The Worker's Inner Loop</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  // worker.ts — the heart of the simulation
+
+  let state: SimState          // bodies, vessels, simTime
+  let warpRate = 1
+  const DT = 1 / 60            // fixed physics timestep (seconds)
+
+  self.onmessage = (e: MessageEvent) => {
+    const msg = e.data
+
+    if (msg.type === 'commands') {
+      // Apply commands (Approach 1: all at once before stepping)
+      for (const cmd of msg.commands) {
+        applyCommand(state, cmd)
+      }
+    }
+
+    if (msg.type === 'set-warp') {
+      warpRate = msg.rate
+    }
+  }
+
+  // Run physics at fixed interval, independent of message timing
+  function tick() {
+    const stepsPerTick = warpRate   // at 100x, do 100 steps
+
+    for (let i = 0; i < stepsPerTick; i++) {
+      integrate(state, DT)          // one physics step
+      state.simTime += DT
+    }
+
+    // Post snapshot to main thread
+    self.postMessage({
+      type: 'state',
+      simTime: state.simTime,
+      bodies: serializeBodies(state.bodies),
+    })
+  }
+
+  // Tick at 60fps inside the worker
+  // (setInterval is available in workers, or use a self-posting message loop)
+  setInterval(tick, 1000 / 60)
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">The Bridge (Main Thread Side)</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  // bridge.ts — connects Zustand stores to the worker
+
+  const worker = new Worker(new URL('../sim/worker.ts', import.meta.url),
+                            { type: 'module' })
+
+  // OUTBOUND: drain command buffer → worker
+  function flushCommands() {
+    const commands = useInputStore.getState().drain()  // returns & clears buffer
+    if (commands.length > 0) {
+      worker.postMessage({ type: 'commands', commands })
+    }
+  }
+
+  // INBOUND: worker snapshot → Zustand store
+  worker.onmessage = (e: MessageEvent) => {
+    const msg = e.data
+    if (msg.type === 'state') {
+      useSimulationStore.getState().pushSnapshot(msg)
+    }
+    if (msg.type === 'event') {
+      // handle sim events (collision, SOI change, etc.)
+    }
+  }
+
+  // Flush on every frame
+  // (called from a useFrame hook in the R3F scene, or a rAF loop)
+  export function bridgeTick() {
+    flushCommands()
+  }
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">Snapshot Interpolation (Smooth Rendering)</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  The worker posts snapshots at ~60Hz. The renderer also runs at ~60Hz.
+  But they're NOT synchronized — they're in different threads.
+
+  Without interpolation:
+    frame renders → grabs latest snapshot → objects jump to new positions
+    Result: visually choppy, especially at low warp
+
+  With interpolation:
+    Store keeps the TWO most recent snapshots (prev, curr)
+    Each render frame computes: t = (wallTime - prevTime) / (currTime - prevTime)
+    Render position = lerp(prev.position, curr.position, t)
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  worker posts:     S0 ──────── S1 ──────── S2 ────────     │
+  │  renderer frames:    R  R  R  R  R  R  R  R  R  R  R       │
+  │                      ↑  ↑  ↑                                │
+  │                      these interpolate between S0 and S1    │
+  └─────────────────────────────────────────────────────────────┘
+
+  At high warp (1000x), objects move fast. Interpolation keeps
+  them smooth between snapshots. At 1x, the motion is so small
+  that interpolation vs. snapping is nearly invisible — but
+  having it from the start means you never need to retrofit.
+
+  NOTE: Interpolation happens on the RENDER FRAME positions
+  (after floating-origin subtraction), not on SectorPositions.
+  You interpolate small camera-relative vectors, not big
+  absolute coordinates. This avoids precision issues entirely.
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">Command Types — What Gets Buffered</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  type Command =
+    | { type: 'set-throttle';   value: number }          // 0-1
+    | { type: 'set-attitude';   pitch: number;           // rotation rates
+                                yaw: number;
+                                roll: number }
+    | { type: 'stage' }                                   // activate next stage
+    | { type: 'set-warp';       rate: number }            // time warp
+    | { type: 'focus-body';     bodyId: string }          // camera target (UI only?)
+
+  WHAT GETS BUFFERED (→ worker):
+    Anything that affects simulation state.
+    Throttle, attitude, staging, SAS toggles.
+
+  WHAT DOES NOT GET BUFFERED (stays on main thread):
+    Camera movement, UI toggles, map zoom.
+    These affect rendering only — no sim state.
+
+  The distinction: "Would replaying this command reproduce
+  the same flight?" If yes → buffer it. If no → main thread only.
+</pre>
+    </div>
+  </div>
+</div>

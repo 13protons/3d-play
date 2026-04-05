@@ -1,0 +1,175 @@
+<h2>Segmented Coordinate System</h2>
+<p class="subtitle">Sector grid + local offset — avoids both precision limits and binary division errors</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">The Problem with One Big Number</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  float64 has ~15-16 significant digits.
+
+  Earth's position:     149,600,000,000.00   meters  (12 digits before decimal)
+  + a craft offset:                   0.035  meters  (needs 3 digits after)
+                        ─────────────────────────
+  Combined:             149,600,000,000.035          (15 digits — at the limit)
+
+  This WORKS in float64, but you're spending almost all your precision budget
+  on the "where in the solar system" part, leaving almost nothing for the
+  "where exactly on this ship" part.
+
+  And any arithmetic on these numbers accumulates error fast because
+  the operands differ by 13 orders of magnitude.
+
+  Worse: numbers like 0.1, 0.3, 149600000000.035 are NOT exactly
+  representable in binary floating point. Each operation on large
+  numbers with small offsets compounds these representation errors.
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">The Solution: Sector + Local Offset</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  Split every position into two parts:
+
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  SECTOR (integer)           LOCAL OFFSET (float64)              │
+  │  Which 1000km cube          Where inside that cube              │
+  │  are you in?                (0 to 999,999.999... meters)        │
+  │                                                                  │
+  │  type: [ix, iy, iz]        type: [x, y, z]                     │
+  │  no floating point error!   max value ~1e6 → 10 digits of       │
+  │  integers are exact.        headroom for sub-mm precision       │
+  └──────────────────────────────────────────────────────────────────┘
+
+  Example — a craft orbiting Earth:
+
+  ┌─ OLD WAY (one float64 per axis) ─────────────────────────────┐
+  │  position.x = 149_600_023_456.035   ← 15 significant digits │
+  │  (precision budget nearly exhausted)                          │
+  └───────────────────────────────────────────────────────────────┘
+
+  ┌─ NEW WAY (sector + local) ───────────────────────────────────┐
+  │  sector   = [149600, 0, 0]          ← integers, exact        │
+  │  local    = [23_456.035, 0.0, 0.0]  ← small float64, precise │
+  │                                                               │
+  │  Absolute pos = sector × 1e6 + local                         │
+  │  149600 × 1,000,000 + 23,456.035 = 149,600,023,456.035       │
+  │                                                               │
+  │  But we NEVER compute that combined number.                   │
+  │  All math happens on the local part.                          │
+  └───────────────────────────────────────────────────────────────┘
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">Sector Grid — Solar System Scale</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  1 sector = 1,000 km = 1,000,000 meters
+
+  Sun to Neptune ≈ 4.5e12 m = 4,500,000 sectors per axis
+  Fits comfortably in a 32-bit integer (max ~2.1 billion)
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │               Sector [149600, 0, 0]                         │
+  │          ┌─── 1000 km ───┐                                  │
+  │          │                │     Earth sits in this sector    │
+  │          │   ● Earth      │     and nearby ones              │
+  │          │   ↑ craft      │                                  │
+  │          │                │                                  │
+  │          └────────────────┘                                  │
+  │                                                              │
+  │  Within this sector, a craft at altitude 400km:              │
+  │  local = [500_000, 400_000, 0]   ← all values < 1e6         │
+  │                                                              │
+  │  Docking with another craft 0.5m away:                       │
+  │  craft A local = [500_000.000, 400_000.000, 0]               │
+  │  craft B local = [500_000.500, 400_000.000, 0]               │
+  │  delta = 0.5 meters  ← computed with full float64 precision  │
+  └─────────────────────────────────────────────────────────────┘
+
+  CROSSING SECTORS: When local.x > 1e6, subtract 1e6 and
+  increment sector.ix. Like rolling over an odometer.
+  All integer math — no precision loss.
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">How Rendering Works With Sectors</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  Camera is always at the floating origin. To render any object:
+
+  1. Compute sector delta (integer subtraction — exact):
+     dSector = object.sector - camera.sector    // e.g., [3, 0, -1]
+
+  2. Compute local delta (float64 subtraction — precise, small numbers):
+     dLocal = object.local - camera.local       // e.g., [234.5, -12.0, 800.3]
+
+  3. Combine for render position:
+     renderPos = dSector × 1e6 + dLocal         // small enough for float32
+
+  WHY THIS IS SAFE:
+  ─────────────────
+  Nearby objects: dSector = [0,0,0], renderPos = dLocal → tiny numbers, full precision
+  Distant objects: dSector is large, renderPos is large → but they're far away,
+                   so float32 pixel-level jitter is invisible
+
+  You ONLY combine sector + local into one number at the very end,
+  for rendering, where the precision of distant objects doesn't matter.
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  Physics math:    local₁ - local₂         (small - small = ✓)  │
+  │  Gravity math:    sector deltas → distance (integer + small = ✓)│
+  │  Render math:     dSector × 1e6 + dLocal  (only for GPU, ✓)    │
+  │  Never:           big_float + tiny_float   (catastrophic cancel)│
+  └─────────────────────────────────────────────────────────────────┘
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">TypeScript Types</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  // The fundamental position type — used everywhere in sim/
+  interface SectorPosition {
+    sector: [ix: number, iy: number, iz: number]  // integers (Math.floor'd)
+    local:  [x: number, y: number, z: number]     // 0 ≤ val < SECTOR_SIZE
+  }
+
+  const SECTOR_SIZE = 1_000_000  // 1000 km in meters
+
+  // Normalize after any mutation (keeps local in bounds)
+  function normalize(pos: SectorPosition): SectorPosition { ... }
+
+  // Distance between two sector positions (returns float64 scalar)
+  function distance(a: SectorPosition, b: SectorPosition): number { ... }
+
+  // Convert to render-frame coordinates relative to camera
+  function toRenderFrame(pos: SectorPosition, camera: SectorPosition): [number, number, number] { ... }
+
+  // A simulation body
+  interface SimBody {
+    id: string
+    mass: number                    // kg
+    radius: number                  // meters
+    position: SectorPosition
+    velocity: [vx: number, vy: number, vz: number]  // m/s (local-scale, no sector needed)
+  }
+</pre>
+    </div>
+  </div>
+</div>

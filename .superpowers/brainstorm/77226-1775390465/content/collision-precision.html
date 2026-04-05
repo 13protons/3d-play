@@ -1,0 +1,183 @@
+<h2>Cross-Sector Collision: Where Does Precision Live?</h2>
+<p class="subtitle">How to compute centimeter-accurate relative positions across sector boundaries</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">The Scenario</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  An Earth-like planet (radius 6,371 km) and a craft skimming its surface.
+  The planet center and the craft are in DIFFERENT sectors.
+
+  Planet center:  { sector: [100, 50, 50], local: [500_000, 500_000, 500_000] }
+  Craft:          { sector: [106, 50, 50], local: [871_000.035, 500_002.1, 500_000] }
+
+  The craft is ~6,371,000.035 meters from the planet center.
+  We need to detect surface collision at centimeter precision.
+
+  The craft and planet center are 6 sectors apart on the x-axis.
+  The planet's radius spans across those sectors.
+  How do we get a precise relative vector?
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">Step 1: Compute the Relative Vector</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  The goal: get a single float64 vector from planet center → craft.
+  This is the ONLY number collision math needs.
+
+  function relativePosition(from: SectorPosition, to: SectorPosition): [number, number, number] {
+    return [
+      (to.sector[0] - from.sector[0]) * SECTOR_SIZE + (to.local[0] - from.local[0]),
+      (to.sector[1] - from.sector[1]) * SECTOR_SIZE + (to.local[1] - from.local[1]),
+      (to.sector[2] - from.sector[2]) * SECTOR_SIZE + (to.local[2] - from.local[2]),
+    ]
+  }
+
+  Let's trace the x-axis:
+
+    sectorDelta = 106 - 100 = 6                        ← integer, exact
+    localDelta  = 871_000.035 - 500_000 = 371_000.035   ← float64, both < 1e6, exact
+
+    x = 6 × 1_000_000 + 371_000.035
+      = 6_000_000 + 371_000.035
+      = 6_371_000.035                                    ← the relative distance
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">Step 2: Is That Final Addition Safe?</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  THIS is your real question. We compute:
+
+    6_000_000 + 371_000.035 = 6_371_000.035
+
+  Is precision lost? Let's check.
+
+  6_000_000        is an integer × 1e6. EXACT in float64. Always.
+                   (integers up to 2⁵³ are exact)
+
+  371_000.035      is a small float64. The .035 has the usual binary
+                   representation error (~1e-16 relative), but at this
+                   scale that's ~3.7e-11 meters. Picometers. Irrelevant.
+
+  The sum:         6_371_000.035
+                   This number has 10 significant digits.
+                   float64 gives you 15-16.
+                   You have ~5-6 digits of SPARE precision.
+
+  That means sub-millimeter accuracy. For surface collision of a
+  vehicle with landing gear, that's more than enough.
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  PRECISION BUDGET FOR RELATIVE VECTORS                          │
+  │                                                                 │
+  │  float64 significant digits:          ~15.9                     │
+  │                                                                 │
+  │  Body          Radius        Digits    Spare     Min resolution │
+  │  ──────────    ──────────    ──────    ─────     ────────────── │
+  │  Moon          1,737 km       7        ~9        nanometers     │
+  │  Earth         6,371 km       7        ~9        nanometers     │
+  │  Jupiter      69,911 km       8        ~8        nanometers     │
+  │  Sun         696,000 km       9        ~7        sub-micrometer │
+  │  Earth orbit  1.496e8 km     12        ~4        centimeters    │
+  │                                                                 │
+  │  Surface collision = body radius scale = 7-9 digits             │
+  │  → 6-9 spare digits → sub-micrometer precision. Plenty.        │
+  │                                                                 │
+  │  Orbit-scale distances are larger, but you don't need           │
+  │  centimeter precision for orbital mechanics — meters is fine.   │
+  └─────────────────────────────────────────────────────────────────┘
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">Why This Is Better Than Regrounding to a Shared Sector</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  You might think: "rebasing both objects into the same sector first
+  would keep everything in small local coordinates."
+
+  But that doesn't help — and here's why:
+
+  REGROUNDING APPROACH (tempting but unnecessary):
+  ────────────────────
+  Pick planet's sector as reference.
+  Rebase craft: local.x = (106-100) × 1e6 + 871_000.035 = 6_871_000.035
+                                                            ↑ same magnitude
+
+  You did the same addition, just earlier. The number is the same size
+  because the PHYSICAL DISTANCE is the same size. No encoding trick
+  changes the fact that the craft is ~6.4 million meters from the center.
+
+  RELATIVE VECTOR APPROACH (what we actually do):
+  ────────────────────────
+  Don't rebase. Just compute the relative vector directly.
+  Same math, same precision, less indirection.
+
+  ┌───────────────────────────────────────────────────────────────┐
+  │  KEY INSIGHT                                                   │
+  │                                                                │
+  │  Sectors protect you from ABSOLUTE position magnitude          │
+  │  (1.496e11 meters from the Sun).                               │
+  │                                                                │
+  │  They can't protect you from RELATIVE distance magnitude       │
+  │  (6.371e6 meters from a planet center).                        │
+  │                                                                │
+  │  But they don't need to — because relative distances at        │
+  │  body-radius scale are ALREADY small enough for float64        │
+  │  to give you nanometer precision. The problem was never        │
+  │  "Earth's radius is too big for float64." It was               │
+  │  "Earth's distance from the Sun + its radius" in one number.  │
+  │  Sectors solve that by keeping the Sun-distance in integers.  │
+  └───────────────────────────────────────────────────────────────┘
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <div class="mockup">
+    <div class="mockup-header">The Collision Check — Complete</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 24px; background: #1a1a2e; color: #e0e0e0;">
+<pre style="margin:0; white-space: pre;">
+  function checkSurfaceCollision(body: SimBody, craft: SimBody): boolean {
+    // relativePosition handles sector deltas internally
+    const rel = relativePosition(body.position, craft.position)
+
+    // rel is a small float64 vector (body-radius scale)
+    // Full precision for the physics that follows
+    const distSq = rel[0] ** 2 + rel[1] ** 2 + rel[2] ** 2
+    const radiusSq = (body.radius + craft.radius) ** 2
+
+    return distSq <= radiusSq
+  }
+
+  For more detailed collision (landing gear on terrain):
+
+  function surfaceAltitude(body: SimBody, craft: SimBody): number {
+    const rel = relativePosition(body.position, craft.position)
+    const dist = Math.sqrt(rel[0] ** 2 + rel[1] ** 2 + rel[2] ** 2)
+    return dist - body.radius  // altitude above surface, sub-mm precision
+  }
+
+  Everything downstream of relativePosition() works with plain
+  float64 vectors that are small. No sector awareness needed.
+  The sector → relative conversion is the boundary. Cross it once,
+  then do normal math.
+</pre>
+    </div>
+  </div>
+</div>
