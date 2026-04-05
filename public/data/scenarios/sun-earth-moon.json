@@ -1,0 +1,22 @@
+{
+  "id": "sun-earth-moon",
+  "name": "Sun-Earth-Moon System",
+  "epoch": 0,
+  "bodies": {
+    "sun": {
+      "position": { "sector": [0, 0, 0], "local": [0, 0, 0] },
+      "velocity": [0, 0, 0],
+      "rotationPhase": 0
+    },
+    "earth": {
+      "position": { "sector": [149600, 0, 0], "local": [0, 0, 0] },
+      "velocity": [0, 0, 29783],
+      "rotationPhase": 0
+    },
+    "moon": {
+      "position": { "sector": [149984, 0, 0], "local": [400000, 0, 0] },
+      "velocity": [0, 0, 30805],
+      "rotationPhase": 0
+    }
+  }
+}
