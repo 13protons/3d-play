@@ -10,6 +10,7 @@
 import type { CelestialBody, TrajectoryCurve, SectorPosition } from '../types'
 import { toAbsolute } from '../coordinates'
 import { integrate } from './integrator'
+import { gravityAtPoint } from './gravity'
 
 interface InitBody {
   id: string
@@ -103,5 +104,11 @@ onmessage = (e: MessageEvent) => {
 
   if (msg.type === 'set-warp') {
     warpRate = msg.rate
+  }
+
+  if (msg.type === 'request-patch') {
+    const points: [number, number, number][] = msg.points
+    const gravityVectors = points.map((pt) => gravityAtPoint(bodies, pt))
+    postMessage({ type: 'cube-patch-response', gravityVectors })
   }
 }
