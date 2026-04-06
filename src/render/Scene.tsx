@@ -39,6 +39,9 @@ export function Scene() {
       {Object.keys(vehicles).map((id) => (
         <VehicleMarker key={`vm-${id}`} vehicleId={id} />
       ))}
+      {Object.keys(vehicles).map((id) => (
+        <OrbitTrace key={`vtrace-${id}`} bodyId={id} />
+      ))}
     </Canvas>
   )
 }

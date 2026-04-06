@@ -29,7 +29,9 @@ export function OrbitTrace({ bodyId }: OrbitTraceProps) {
   const [visible, setVisible] = useState(false)
 
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
-  const parentId = body?.parentId
+  const vehicle = useTrajectoriesStore((s) => s.vehicles[bodyId])
+  const parentId = body?.parentId ?? vehicle?.parentId
+  const color = body?.color ?? '#00ff88'
 
   const lineObj = useMemo(() => {
     const geom = new BufferGeometry()
@@ -37,7 +39,7 @@ export function OrbitTrace({ bodyId }: OrbitTraceProps) {
       transparent: true,
       depthWrite: false,
       uniforms: {
-        uColor: { value: new Color(body?.color ?? '#5566aa') },
+        uColor: { value: new Color(color) },
       },
       vertexShader: `
         attribute float alpha;
@@ -56,7 +58,7 @@ export function OrbitTrace({ bodyId }: OrbitTraceProps) {
       `,
     })
     return new ThreeLine(geom, mat)
-  }, [body?.color])
+  }, [color])
 
   useFrame(() => {
     const group = groupRef.current

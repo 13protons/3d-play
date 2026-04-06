@@ -16,9 +16,6 @@ let currentPatch: Float64Array | null = null
 let lastVehiclePosition: [number, number, number] | null = null
 let lastVehicleVelocity: [number, number, number] | null = null
 let pendingPatchResolve: ((gravityVectors: [number, number, number][]) => void) | null = null
-// pendingBounds tracks the bounds of the in-flight patch request (for debugging)
-let pendingBounds: [number, number, number, number, number, number] | null = null
-void pendingBounds
 
 const DT = 1 / 60
 
@@ -59,7 +56,6 @@ function requestPatchFromOrbital(
   bounds: [number, number, number, number, number, number],
 ): Promise<Float64Array> {
   return new Promise((resolve) => {
-    pendingBounds = bounds
     pendingPatchResolve = (gravityVectors) => {
       const patch = assemblePatch(bounds, gravityVectors)
       currentPatch = patch
@@ -129,7 +125,6 @@ export async function startSim(scenarioId: string): Promise<void> {
     if (msg.type === 'cube-patch-response' && pendingPatchResolve) {
       pendingPatchResolve(msg.gravityVectors)
       pendingPatchResolve = null
-      pendingBounds = null
     }
   }
 
@@ -245,6 +240,5 @@ export function stopSim(): void {
   lastVehiclePosition = null
   lastVehicleVelocity = null
   pendingPatchResolve = null
-  pendingBounds = null
   useTrajectoriesStore.getState().reset()
 }

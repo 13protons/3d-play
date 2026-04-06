@@ -25,7 +25,7 @@
       "name": "Orbiter",
       "parentId": "earth",
       "position": { "sector": [149600, 0, 0], "local": [6771000, 0, 0] },
-      "velocity": [0, 0, 7670],
+      "velocity": [0, 0, 37453],
       "mesh": "cylinder"
     }
   ]
