@@ -27,6 +27,8 @@ interface TrajectoriesState {
   lastUpdateWallTime: number
 
   updateCurves: (curves: TrajectoryCurve[], simTime: number) => void
+  /** Merge curves into the store without touching simTime. Used by vehicle worker. */
+  mergeCurves: (curves: TrajectoryCurve[]) => void
   setBodies: (bodies: BodyMeta[]) => void
   setVehicles: (vehicles: VehicleMeta[]) => void
   setWarpRate: (rate: number) => void
@@ -50,6 +52,15 @@ export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
         updated[curve.id] = curve
       }
       return { curves: updated, simTime, lastUpdateWallTime: performance.now() }
+    }),
+
+  mergeCurves: (curves) =>
+    set((state) => {
+      const updated = { ...state.curves }
+      for (const curve of curves) {
+        updated[curve.id] = curve
+      }
+      return { curves: updated }
     }),
 
   setBodies: (bodies) =>

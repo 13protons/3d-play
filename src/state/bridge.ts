@@ -173,7 +173,7 @@ export async function startSim(scenarioId: string): Promise<void> {
     vehicleWorker.onmessage = (e: MessageEvent) => {
       const msg = e.data
       if (msg.type === 'vehicle-trajectories') {
-        useTrajectoriesStore.getState().updateCurves(msg.curves, msg.simTime)
+        useTrajectoriesStore.getState().mergeCurves(msg.curves)
       }
       if (msg.type === 'vehicle-position') {
         lastVehiclePosition = msg.position
