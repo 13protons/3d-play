@@ -1,6 +1,13 @@
 import { create } from 'zustand'
 import type { TrajectoryCurve } from '../sim/types'
 
+export interface VehicleMeta {
+  id: string
+  name: string
+  parentId: string
+  mesh: string
+}
+
 export interface BodyMeta {
   id: string
   name: string
@@ -14,12 +21,14 @@ export interface BodyMeta {
 interface TrajectoriesState {
   curves: Record<string, TrajectoryCurve>
   bodies: Record<string, BodyMeta>
+  vehicles: Record<string, VehicleMeta>
   simTime: number
   warpRate: number
   lastUpdateWallTime: number
 
   updateCurves: (curves: TrajectoryCurve[], simTime: number) => void
   setBodies: (bodies: BodyMeta[]) => void
+  setVehicles: (vehicles: VehicleMeta[]) => void
   setWarpRate: (rate: number) => void
   reset: () => void
   /** Interpolated sim time — use this everywhere for consistent positioning. */
@@ -29,6 +38,7 @@ interface TrajectoriesState {
 export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
   curves: {},
   bodies: {},
+  vehicles: {},
   simTime: 0,
   warpRate: 1,
   lastUpdateWallTime: performance.now(),
@@ -47,6 +57,11 @@ export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
       bodies: Object.fromEntries(bodies.map((b) => [b.id, b])),
     }),
 
+  setVehicles: (vehicles) =>
+    set({
+      vehicles: Object.fromEntries(vehicles.map((v) => [v.id, v])),
+    }),
+
   setWarpRate: (rate) => set({ warpRate: rate }),
 
   getSimTime: () => {
@@ -62,6 +77,7 @@ export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
     set({
       curves: {},
       bodies: {},
+      vehicles: {},
       simTime: 0,
       warpRate: 1,
       lastUpdateWallTime: performance.now(),

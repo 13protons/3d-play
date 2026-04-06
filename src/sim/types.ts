@@ -25,45 +25,6 @@ export interface TrajectoryCurve {
 }
 
 // ---------------------------------------------------------------------------
-// Environment Patches
-// ---------------------------------------------------------------------------
-
-/** Local field approximation sent from orbital → vehicle worker. See notes/06-environment-patches.md */
-export interface EnvironmentPatch {
-  center: SectorPosition
-  radius: number
-  bodyId: string
-  t0: number
-  t1: number
-
-  atmosphere?: {
-    density: number
-    densityGradient: [number, number, number]
-    temperature: number
-    temperatureGradient: [number, number, number]
-    pressure: number
-    windVelocity: [number, number, number]
-  }
-
-  terrain?: {
-    gridOrigin: [number, number]
-    gridSize: number
-    gridResolution: number
-    heights: Float32Array
-    normals?: Float32Array
-  }
-
-  gravity?: {
-    acceleration: [number, number, number]
-    tidal: [
-      number, number, number,
-      number, number, number,
-      number, number, number,
-    ]
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
@@ -78,6 +39,38 @@ export type SimCommand =
   | { type: 'set-warp'; rate: number; simTime: number }
 
 export type Command = VehicleCommand | SimCommand
+
+// ---------------------------------------------------------------------------
+// Vehicle Worker Messages
+// ---------------------------------------------------------------------------
+
+/** Inbound messages to the vehicle worker */
+export type VehicleWorkerInbound =
+  | {
+      type: 'init'
+      vehicle: {
+        id: string
+        position: SectorPosition
+        velocity: [number, number, number]
+      }
+      cubePatch: Float64Array
+      warpRate: number
+    }
+  | { type: 'cube-patch'; data: Float64Array }
+  | { type: 'set-warp'; rate: number }
+
+/** Outbound messages from the vehicle worker */
+export type VehicleWorkerOutbound =
+  | {
+      type: 'vehicle-trajectories'
+      simTime: number
+      curves: TrajectoryCurve[]
+    }
+  | {
+      type: 'vehicle-position'
+      position: [number, number, number]
+      velocity: [number, number, number]
+    }
 
 // ---------------------------------------------------------------------------
 // Celestial Bodies (runtime state in the orbital worker)
@@ -137,17 +130,20 @@ export interface VesselPhysics {
 export type OrbitalInbound =
   | { type: 'commands'; commands: SimCommand[] }
   | { type: 'vehicle-positions'; vehicles: { id: string; position: SectorPosition }[] }
-
-export type VehicleInbound =
-  | { type: 'commands'; commands: VehicleCommand[] }
-  | { type: 'environment-patch'; patch: EnvironmentPatch }
+  | {
+      type: 'request-patch'
+      points: [number, number, number][] // 6 face-center positions (absolute)
+    }
 
 export type WorkerOutbound =
   | { type: 'trajectories'; simTime: number; curves: TrajectoryCurve[] }
   | { type: 'active'; simTime: number; entities: Float64Array }
   | { type: 'event'; event: SimEvent }
-  | { type: 'environment-patch'; patch: EnvironmentPatch }
   | { type: 'vehicle-position'; id: string; position: SectorPosition }
+  | {
+      type: 'cube-patch-response'
+      gravityVectors: [number, number, number][] // 6 gravity vectors at requested points
+    }
 
 export interface SimEvent {
   kind: string
