@@ -18,5 +18,15 @@
       "velocity": [0, 0, 30805],
       "rotationPhase": 0
     }
-  }
+  },
+  "vehicles": [
+    {
+      "id": "vehicle-1",
+      "name": "Orbiter",
+      "parentId": "earth",
+      "position": { "sector": [149600, 0, 0], "local": [6771000, 0, 0] },
+      "velocity": [0, 0, 7670],
+      "mesh": "cylinder"
+    }
+  ]
 }
