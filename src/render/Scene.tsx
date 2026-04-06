@@ -3,10 +3,12 @@ import { Stars } from '@react-three/drei'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { Body } from './Body'
 import { OrbitTrace } from './OrbitTrace'
+import { VehicleMarker } from './VehicleMarker'
 import { CameraRig } from './CameraRig'
 
 export function Scene() {
   const bodies = useTrajectoriesStore((s) => s.bodies)
+  const vehicles = useTrajectoriesStore((s) => s.vehicles)
   const bodyIds = Object.keys(bodies)
 
   return (
@@ -33,6 +35,9 @@ export function Scene() {
       ))}
       {bodyIds.map((id) => (
         <OrbitTrace key={`trace-${id}`} bodyId={id} />
+      ))}
+      {Object.keys(vehicles).map((id) => (
+        <VehicleMarker key={`vm-${id}`} vehicleId={id} />
       ))}
     </Canvas>
   )

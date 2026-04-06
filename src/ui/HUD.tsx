@@ -1,6 +1,7 @@
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useCameraStore } from '../state/camera'
 import { useInputStore } from '../state/input'
+import { useModeStore } from '../state/mode'
 import { WARP_RATES } from '../sim/warp'
 
 function formatTime(seconds: number): string {
@@ -19,9 +20,12 @@ export function HUD() {
   const simTime = useTrajectoriesStore((s) => s.simTime)
   const warpRate = useTrajectoriesStore((s) => s.warpRate)
   const bodies = useTrajectoriesStore((s) => s.bodies)
+  const vehicles = useTrajectoriesStore((s) => s.vehicles)
   const followTargetId = useCameraStore((s) => s.followTargetId)
   const setFollowTarget = useCameraStore((s) => s.setFollowTarget)
-  const targetName = bodies[followTargetId]?.name ?? followTargetId
+  const activeView = useModeStore((s) => s.activeView)
+  const toggleView = useModeStore((s) => s.toggleView)
+  const targetName = bodies[followTargetId]?.name ?? vehicles[followTargetId]?.name ?? followTargetId
 
   function setWarp(rate: number) {
     useInputStore
@@ -57,6 +61,10 @@ export function HUD() {
           <div style={{ opacity: 0.6, fontSize: 11 }}>FOLLOWING</div>
           <div>{targetName}</div>
         </div>
+        <div>
+          <div style={{ opacity: 0.6, fontSize: 11 }}>VIEW</div>
+          <div>{activeView.toUpperCase()}</div>
+        </div>
       </div>
 
       <div
@@ -88,6 +96,37 @@ export function HUD() {
             {body.name}
           </button>
         ))}
+        {Object.values(vehicles).map((v) => (
+          <button
+            key={v.id}
+            onClick={() => setFollowTarget(v.id)}
+            style={{
+              background: followTargetId === v.id ? '#335533' : '#1a1a2e',
+              color: followTargetId === v.id ? '#88ff88' : '#ccc',
+              border: '1px solid #333',
+              padding: '4px 8px',
+              cursor: 'pointer',
+              fontFamily: 'monospace',
+              fontSize: 12,
+            }}
+          >
+            {v.name}
+          </button>
+        ))}
+        <button
+          onClick={toggleView}
+          style={{
+            background: '#1a1a2e',
+            color: '#ccc',
+            border: '1px solid #333',
+            padding: '4px 8px',
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            fontSize: 12,
+          }}
+        >
+          Toggle View (V)
+        </button>
       </div>
 
       <div
@@ -122,8 +161,8 @@ export function HUD() {
       </div>
 
       <div style={{ marginTop: 8, opacity: 0.4, fontSize: 11 }}>
-        [ / ] warp &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc
-        menu
+        [ / ] warp &nbsp; V toggle view &nbsp; scroll to zoom &nbsp; drag to
+        orbit &nbsp; esc menu
       </div>
     </div>
   )

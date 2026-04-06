@@ -10,6 +10,7 @@ import {
 import type { Group } from 'three'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useCameraStore } from '../state/camera'
+import { useModeStore } from '../state/mode'
 import { evaluateCurve } from '../sim/curves'
 
 const MAX_POINTS = 1000
@@ -60,6 +61,7 @@ export function OrbitTrace({ bodyId }: OrbitTraceProps) {
   useFrame(() => {
     const group = groupRef.current
     if (!group || !parentId) return
+    if (useModeStore.getState().activeView !== 'orbital') return
 
     const store = useTrajectoriesStore.getState()
     const { curves } = store

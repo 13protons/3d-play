@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import type { Mesh, PointLight } from 'three'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useCameraStore } from '../state/camera'
+import { useModeStore } from '../state/mode'
 import { evaluateCurve } from '../sim/curves'
 
 interface BodyProps {
@@ -15,6 +16,7 @@ export function Body({ bodyId }: BodyProps) {
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
 
   useFrame(() => {
+    if (useModeStore.getState().activeView !== 'orbital') return
     const mesh = meshRef.current
     if (!mesh) return
 
