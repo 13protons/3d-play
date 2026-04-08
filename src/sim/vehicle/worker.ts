@@ -1,12 +1,12 @@
 /**
  * Vehicle worker — owns vehicle state, runs Störmer-Verlet integration
- * against a cube patch gravity field, emits trajectory curves and position
- * updates to the main thread.
+ * against gravity computed directly from body positions, emits trajectory
+ * curves and position updates to the main thread.
  *
  * See notes/05-physics-workers.md for architecture.
  */
 
-import type { TrajectoryCurve, VehicleWorkerInbound } from '../types'
+import type { TrajectoryCurve, VehicleWorkerInbound, GravitySource } from '../types'
 import { toAbsolute } from '../coordinates'
 import { integrateVehicle, type VehicleState } from './integrate'
 
@@ -14,7 +14,8 @@ const DT = 1 / 60
 
 let vehicleId = ''
 let state: VehicleState | null = null
-let cubePatch: Float64Array | null = null
+let gravitySources: GravitySource[] = []
+let gravitySrcTime = 0 // simTime when sources were last updated
 let warpRate = 1
 let simTime = 0
 
@@ -64,15 +65,48 @@ function emitCurves(): void {
   snapshotPrev()
 }
 
-function tick(): void {
-  if (!state || !cubePatch) return
+/**
+ * Compute gravitational acceleration at (x,y,z) from all gravity sources.
+ * Body positions are linearly predicted from their last known state.
+ */
+function gravityAt(x: number, y: number, z: number, out: [number, number, number]): void {
+  out[0] = out[1] = out[2] = 0
+  const elapsed = simTime - gravitySrcTime
+  for (let i = 0; i < gravitySources.length; i++) {
+    const src = gravitySources[i]
+    // Predict body position at current simTime
+    const bx = src.position[0] + src.velocity[0] * elapsed
+    const by = src.position[1] + src.velocity[1] * elapsed
+    const bz = src.position[2] + src.velocity[2] * elapsed
+    const dx = bx - x
+    const dy = by - y
+    const dz = bz - z
+    const r2 = dx * dx + dy * dy + dz * dz
+    const r = Math.sqrt(r2)
+    if (r < 1) continue
+    const f = src.gm / (r2 * r)
+    out[0] += f * dx
+    out[1] += f * dy
+    out[2] += f * dz
+  }
+}
 
-  for (let i = 0; i < warpRate; i++) {
-    integrateVehicle(state, cubePatch, DT)
+function tick(): void {
+  if (!state || gravitySources.length === 0) return
+
+  // Cap advancement: don't race more than one tick ahead of the latest
+  // gravity source update. Without this, the vehicle worker's faster tick
+  // (fewer computations) causes simTime to drift ahead of the orbital
+  // worker, making body position predictions extrapolate too far.
+  const ceiling = gravitySrcTime + warpRate * DT
+  const maxSteps = Math.min(warpRate, Math.max(0, Math.floor((ceiling - simTime) / DT)))
+
+  for (let i = 0; i < maxSteps; i++) {
+    integrateVehicle(state, gravityAt, DT)
     simTime += DT
   }
 
-  emitCurves()
+  if (maxSteps > 0) emitCurves()
 
   // Self-schedule instead of setInterval to prevent queuing when ticks are slow
   setTimeout(tick, 1000 / 60)
@@ -88,7 +122,8 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       position: absPos,
       velocity: [...msg.vehicle.velocity] as [number, number, number],
     }
-    cubePatch = msg.cubePatch
+    gravitySources = msg.gravitySources
+    gravitySrcTime = 0
     warpRate = msg.warpRate
     simTime = 0
 
@@ -96,8 +131,9 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     setTimeout(tick, 1000 / 60)
   }
 
-  if (msg.type === 'cube-patch') {
-    cubePatch = msg.data
+  if (msg.type === 'gravity-sources') {
+    gravitySources = msg.bodies
+    gravitySrcTime = msg.simTime
   }
 
   if (msg.type === 'set-warp') {

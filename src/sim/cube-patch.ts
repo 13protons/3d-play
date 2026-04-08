@@ -28,10 +28,14 @@ export const CP_GRAVITY_SIZE = 24
 // ── evaluateGravity ────────────────────────────────────────────────────
 
 /**
- * Trilinear interpolation of gravity within a cube patch.
+ * Linear interpolation of gravity within a cube patch.
  *
- * Normalizes (x,y,z) to [0,1] within the cube, lerps between opposing
- * face gravity samples along each axis, then averages the three contributions.
+ * Reconstructs a linear gravity field from 6 face-center samples:
+ *   g(r) = g_center + Jx·(x-cx) + Jy·(y-cy) + Jz·(z-cz)
+ *
+ * where g_center is the average of all face samples and each gradient
+ * Jk = (g(+k) - g(-k)) / side_k uses the full difference between
+ * opposing faces.
  *
  * @param patch  Float64Array(24) cube patch
  * @param x      world-space x position
@@ -44,26 +48,34 @@ export function evaluateGravity(
   x: number, y: number, z: number,
   out: [number, number, number],
 ): void {
-  const tx = (x - patch[CP_MIN_X]) / (patch[CP_MAX_X] - patch[CP_MIN_X])
-  const ty = (y - patch[CP_MIN_Y]) / (patch[CP_MAX_Y] - patch[CP_MIN_Y])
-  const tz = (z - patch[CP_MIN_Z]) / (patch[CP_MAX_Z] - patch[CP_MIN_Z])
+  const sX = patch[CP_MAX_X] - patch[CP_MIN_X]
+  const sY = patch[CP_MAX_Y] - patch[CP_MIN_Y]
+  const sZ = patch[CP_MAX_Z] - patch[CP_MIN_Z]
 
-  // Lerp between opposing face gravity vectors along each axis
-  const gXx = patch[CP_G_NEG_X]     + (patch[CP_G_POS_X]     - patch[CP_G_NEG_X])     * tx
-  const gXy = patch[CP_G_NEG_X + 1] + (patch[CP_G_POS_X + 1] - patch[CP_G_NEG_X + 1]) * tx
-  const gXz = patch[CP_G_NEG_X + 2] + (patch[CP_G_POS_X + 2] - patch[CP_G_NEG_X + 2]) * tx
+  // Displacement from cube center
+  const dx = x - (patch[CP_MIN_X] + patch[CP_MAX_X]) * 0.5
+  const dy = y - (patch[CP_MIN_Y] + patch[CP_MAX_Y]) * 0.5
+  const dz = z - (patch[CP_MIN_Z] + patch[CP_MAX_Z]) * 0.5
 
-  const gYx = patch[CP_G_NEG_Y]     + (patch[CP_G_POS_Y]     - patch[CP_G_NEG_Y])     * ty
-  const gYy = patch[CP_G_NEG_Y + 1] + (patch[CP_G_POS_Y + 1] - patch[CP_G_NEG_Y + 1]) * ty
-  const gYz = patch[CP_G_NEG_Y + 2] + (patch[CP_G_POS_Y + 2] - patch[CP_G_NEG_Y + 2]) * ty
+  // Center value: average of all 6 face-center samples
+  const g0x = (patch[CP_G_NEG_X]   + patch[CP_G_POS_X]   + patch[CP_G_NEG_Y]   + patch[CP_G_POS_Y]   + patch[CP_G_NEG_Z]   + patch[CP_G_POS_Z])   / 6
+  const g0y = (patch[CP_G_NEG_X+1] + patch[CP_G_POS_X+1] + patch[CP_G_NEG_Y+1] + patch[CP_G_POS_Y+1] + patch[CP_G_NEG_Z+1] + patch[CP_G_POS_Z+1]) / 6
+  const g0z = (patch[CP_G_NEG_X+2] + patch[CP_G_POS_X+2] + patch[CP_G_NEG_Y+2] + patch[CP_G_POS_Y+2] + patch[CP_G_NEG_Z+2] + patch[CP_G_POS_Z+2]) / 6
 
-  const gZx = patch[CP_G_NEG_Z]     + (patch[CP_G_POS_Z]     - patch[CP_G_NEG_Z])     * tz
-  const gZy = patch[CP_G_NEG_Z + 1] + (patch[CP_G_POS_Z + 1] - patch[CP_G_NEG_Z + 1]) * tz
-  const gZz = patch[CP_G_NEG_Z + 2] + (patch[CP_G_POS_Z + 2] - patch[CP_G_NEG_Z + 2]) * tz
-
-  out[0] = (gXx + gYx + gZx) / 3
-  out[1] = (gXy + gYy + gZy) / 3
-  out[2] = (gXz + gYz + gZz) / 3
+  // Linear field: g(r) = g0 + Jx·dx + Jy·dy + Jz·dz
+  // where Jk = (g(+k) - g(-k)) / side_k
+  out[0] = g0x
+    + (patch[CP_G_POS_X]   - patch[CP_G_NEG_X])   / sX * dx
+    + (patch[CP_G_POS_Y]   - patch[CP_G_NEG_Y])   / sY * dy
+    + (patch[CP_G_POS_Z]   - patch[CP_G_NEG_Z])   / sZ * dz
+  out[1] = g0y
+    + (patch[CP_G_POS_X+1] - patch[CP_G_NEG_X+1]) / sX * dx
+    + (patch[CP_G_POS_Y+1] - patch[CP_G_NEG_Y+1]) / sY * dy
+    + (patch[CP_G_POS_Z+1] - patch[CP_G_NEG_Z+1]) / sZ * dz
+  out[2] = g0z
+    + (patch[CP_G_POS_X+2] - patch[CP_G_NEG_X+2]) / sX * dx
+    + (patch[CP_G_POS_Y+2] - patch[CP_G_NEG_Y+2]) / sY * dy
+    + (patch[CP_G_POS_Z+2] - patch[CP_G_NEG_Z+2]) / sZ * dz
 }
 
 // ── isInsideInnerBox ───────────────────────────────────────────────────

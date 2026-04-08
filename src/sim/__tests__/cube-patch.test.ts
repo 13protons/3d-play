@@ -64,61 +64,81 @@ describe('evaluateGravity', () => {
     expect(out[2]).toBeCloseTo(0, 10)
   })
 
-  it('returns correct value at a box corner with varying faces', () => {
-    // Set up a patch where -X face has g=(1,0,0) and +X face has g=(3,0,0)
-    // -Y face has g=(0,2,0), +Y has g=(0,4,0), -Z has g=(0,0,5), +Z has g=(0,0,7)
+  it('exactly reproduces a linear field sampled at face centers', () => {
+    // Linear field: g(x,y,z) = (0.5*x, -0.3*y, 0.1*z)
+    // Cube [0, 10]^3, center = (5, 5, 5)
     const p = new Float64Array(24)
     p[CP_MIN_X] = 0; p[CP_MIN_Y] = 0; p[CP_MIN_Z] = 0
     p[CP_MAX_X] = 10; p[CP_MAX_Y] = 10; p[CP_MAX_Z] = 10
 
-    // -X face gravity
-    p[CP_G_NEG_X] = 1; p[CP_G_NEG_X + 1] = 0; p[CP_G_NEG_X + 2] = 0
-    // +X face gravity
-    p[CP_G_POS_X] = 3; p[CP_G_POS_X + 1] = 0; p[CP_G_POS_X + 2] = 0
-    // -Y face gravity
-    p[CP_G_NEG_Y] = 0; p[CP_G_NEG_Y + 1] = 2; p[CP_G_NEG_Y + 2] = 0
-    // +Y face gravity
-    p[CP_G_POS_Y] = 0; p[CP_G_POS_Y + 1] = 4; p[CP_G_POS_Y + 2] = 0
-    // -Z face gravity
-    p[CP_G_NEG_Z] = 0; p[CP_G_NEG_Z + 1] = 0; p[CP_G_NEG_Z + 2] = 5
-    // +Z face gravity
-    p[CP_G_POS_Z] = 0; p[CP_G_POS_Z + 1] = 0; p[CP_G_POS_Z + 2] = 7
+    // Sample the linear field at each face center
+    // -X (0,5,5): g = (0, -1.5, 0.5)
+    p[CP_G_NEG_X] = 0; p[CP_G_NEG_X + 1] = -1.5; p[CP_G_NEG_X + 2] = 0.5
+    // +X (10,5,5): g = (5, -1.5, 0.5)
+    p[CP_G_POS_X] = 5; p[CP_G_POS_X + 1] = -1.5; p[CP_G_POS_X + 2] = 0.5
+    // -Y (5,0,5): g = (2.5, 0, 0.5)
+    p[CP_G_NEG_Y] = 2.5; p[CP_G_NEG_Y + 1] = 0; p[CP_G_NEG_Y + 2] = 0.5
+    // +Y (5,10,5): g = (2.5, -3, 0.5)
+    p[CP_G_POS_Y] = 2.5; p[CP_G_POS_Y + 1] = -3; p[CP_G_POS_Y + 2] = 0.5
+    // -Z (5,5,0): g = (2.5, -1.5, 0)
+    p[CP_G_NEG_Z] = 2.5; p[CP_G_NEG_Z + 1] = -1.5; p[CP_G_NEG_Z + 2] = 0
+    // +Z (5,5,10): g = (2.5, -1.5, 1)
+    p[CP_G_POS_Z] = 2.5; p[CP_G_POS_Z + 1] = -1.5; p[CP_G_POS_Z + 2] = 1
 
     const out = [0, 0, 0] as [number, number, number]
 
-    // At min corner (0,0,0): tx=0, ty=0, tz=0
-    // gX = lerp(-X, +X, 0) = (1,0,0), gY = lerp(-Y, +Y, 0) = (0,2,0), gZ = lerp(-Z, +Z, 0) = (0,0,5)
-    // avg = (1/3, 2/3, 5/3)
-    evaluateGravity(p, 0, 0, 0, out)
-    expect(out[0]).toBeCloseTo(1 / 3, 10)
-    expect(out[1]).toBeCloseTo(2 / 3, 10)
-    expect(out[2]).toBeCloseTo(5 / 3, 10)
+    // Test at several arbitrary points — should match the linear field exactly
+    const testPoints: [number, number, number][] = [
+      [5, 5, 5],     // center
+      [0, 5, 5],     // -X face center
+      [10, 5, 5],    // +X face center
+      [3, 7, 2],     // arbitrary interior
+      [8, 1, 9],     // another arbitrary point
+    ]
+    for (const [px, py, pz] of testPoints) {
+      evaluateGravity(p, px, py, pz, out)
+      expect(out[0]).toBeCloseTo(0.5 * px, 10)
+      expect(out[1]).toBeCloseTo(-0.3 * py, 10)
+      expect(out[2]).toBeCloseTo(0.1 * pz, 10)
+    }
   })
 
-  it('interpolates between opposing faces correctly', () => {
+  it('applies full gradient magnitude (not 1/3)', () => {
+    // Key regression test: the old code averaged 3 independent axis lerps,
+    // which diluted the gradient by 1/3. Verify full-strength gradient.
     const p = new Float64Array(24)
     p[CP_MIN_X] = 0; p[CP_MIN_Y] = 0; p[CP_MIN_Z] = 0
     p[CP_MAX_X] = 10; p[CP_MAX_Y] = 10; p[CP_MAX_Z] = 10
 
-    // Only X axis has non-zero gravity: -X=(0,0,0), +X=(6,0,0)
-    p[CP_G_POS_X] = 6
+    // Uniform field except the X axis: -X=(10,0,0), +X=(20,0,0)
+    // All faces get (15,0,0) except the X pair
+    for (const off of [CP_G_NEG_X, CP_G_POS_X, CP_G_NEG_Y, CP_G_POS_Y, CP_G_NEG_Z, CP_G_POS_Z]) {
+      p[off] = 15; p[off + 1] = 0; p[off + 2] = 0
+    }
+    p[CP_G_NEG_X] = 10
+    p[CP_G_POS_X] = 20
 
     const out = [0, 0, 0] as [number, number, number]
 
-    // At midpoint x=5: tx=0.5, lerp(0,6,0.5)=3
-    // gX=(3,0,0), gY=(0,0,0), gZ=(0,0,0), avg=(1,0,0)
+    // Center: g0x = (10+20+15+15+15+15)/6 = 90/6 = 15
     evaluateGravity(p, 5, 5, 5, out)
-    expect(out[0]).toBeCloseTo(1, 10)
+    expect(out[0]).toBeCloseTo(15, 10)
 
-    // At x=10 (tx=1): lerp(0,6,1)=6
-    // avg x = 6/3 = 2
+    // At +X face (10,5,5): dx=5, gradient=(20-10)/10=1.0, so 15+1.0*5 = 20
     evaluateGravity(p, 10, 5, 5, out)
-    expect(out[0]).toBeCloseTo(2, 10)
+    expect(out[0]).toBeCloseTo(20, 10)
 
-    // At x=2.5 (tx=0.25): lerp(0,6,0.25)=1.5
-    // avg x = 1.5/3 = 0.5
-    evaluateGravity(p, 2.5, 5, 5, out)
-    expect(out[0]).toBeCloseTo(0.5, 10)
+    // At -X face (0,5,5): 15+1.0*(-5) = 10
+    evaluateGravity(p, 0, 5, 5, out)
+    expect(out[0]).toBeCloseTo(10, 10)
+
+    // At x=7.5: 15+1.0*2.5 = 17.5
+    evaluateGravity(p, 7.5, 5, 5, out)
+    expect(out[0]).toBeCloseTo(17.5, 10)
+
+    // OLD BUG: the 1/3 gradient would have given:
+    // at x=10: 15 + 1.0*5/3 ≈ 16.67 (not 20)
+    // at x=0:  15 - 1.0*5/3 ≈ 13.33 (not 10)
   })
 })
 

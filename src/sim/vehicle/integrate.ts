@@ -1,26 +1,27 @@
-import { evaluateGravity } from '../cube-patch'
-
 export interface VehicleState {
   position: [number, number, number]
   velocity: [number, number, number]
 }
 
+/** Gravity evaluator: writes acceleration at (x,y,z) into `out`. */
+export type GravityFn = (x: number, y: number, z: number, out: [number, number, number]) => void
+
 /** Module-level scratch array for zero-allocation gravity evaluation. */
 const _g: [number, number, number] = [0, 0, 0]
 
 /**
- * Störmer-Verlet integration for a single vehicle using cube patch gravity.
+ * Störmer-Verlet integration for a single vehicle.
  * Mutates state in place.
  */
 export function integrateVehicle(
   state: VehicleState,
-  patch: Float64Array,
+  gravityAt: GravityFn,
   dt: number,
 ): void {
   const halfDt = dt * 0.5
 
   // Step 1: half-velocity update
-  evaluateGravity(patch, state.position[0], state.position[1], state.position[2], _g)
+  gravityAt(state.position[0], state.position[1], state.position[2], _g)
   state.velocity[0] += _g[0] * halfDt
   state.velocity[1] += _g[1] * halfDt
   state.velocity[2] += _g[2] * halfDt
@@ -31,7 +32,7 @@ export function integrateVehicle(
   state.position[2] += state.velocity[2] * dt
 
   // Step 3: second half-velocity update
-  evaluateGravity(patch, state.position[0], state.position[1], state.position[2], _g)
+  gravityAt(state.position[0], state.position[1], state.position[2], _g)
   state.velocity[0] += _g[0] * halfDt
   state.velocity[1] += _g[1] * halfDt
   state.velocity[2] += _g[2] * halfDt

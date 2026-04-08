@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { integrateVehicle } from '../vehicle/integrate'
+import { evaluateGravity } from '../cube-patch'
 import { CP_GRAVITY_SIZE } from '../cube-patch'
 import { G } from '../constants'
 
@@ -18,14 +19,31 @@ function makeGravityPatch(
   return patch
 }
 
+/** Create a gravity function from a uniform cube patch */
+function uniformGravity(gx: number, gy: number, gz: number) {
+  return (_x: number, _y: number, _z: number, out: [number, number, number]) => {
+    out[0] = gx; out[1] = gy; out[2] = gz
+  }
+}
+
+/** Create a gravity function from a point mass at origin */
+function pointMassGravity(GM: number) {
+  return (x: number, y: number, z: number, out: [number, number, number]) => {
+    const r2 = x * x + y * y + z * z
+    const r = Math.sqrt(r2)
+    if (r < 1) { out[0] = out[1] = out[2] = 0; return }
+    const f = -GM / (r2 * r)
+    out[0] = f * x; out[1] = f * y; out[2] = f * z
+  }
+}
+
 describe('integrateVehicle', () => {
   it('constant velocity with zero gravity', () => {
     const state = {
       position: [0, 0, 0] as [number, number, number],
       velocity: [100, 0, 0] as [number, number, number],
     }
-    const patch = makeGravityPatch([-1e6, -1e6, -1e6], [1e6, 1e6, 1e6], [0, 0, 0])
-    integrateVehicle(state, patch, 1)
+    integrateVehicle(state, uniformGravity(0, 0, 0), 1)
     expect(state.position[0]).toBeCloseTo(100, 5)
     expect(state.velocity[0]).toBeCloseTo(100, 5)
   })
@@ -35,13 +53,12 @@ describe('integrateVehicle', () => {
       position: [0, 0, 0] as [number, number, number],
       velocity: [0, 0, 0] as [number, number, number],
     }
-    const patch = makeGravityPatch([-1e6, -1e6, -1e6], [1e6, 1e6, 1e6], [0, -9.81, 0])
-    integrateVehicle(state, patch, 1)
+    integrateVehicle(state, uniformGravity(0, -9.81, 0), 1)
     expect(state.velocity[1]).toBeCloseTo(-9.81, 2)
     expect(state.position[1]).toBeCloseTo(-4.905, 2)
   })
 
-  it('conserves energy in circular orbit over 100 steps', () => {
+  it('conserves energy in circular orbit over 100 steps (cube patch)', () => {
     const r = 6_771_000
     const M = 5.972e24
     const v = Math.sqrt(G * M / r)
@@ -67,7 +84,7 @@ describe('integrateVehicle', () => {
         [px + half, py + half, pz + half],
         [gx, gy, gz],
       )
-      integrateVehicle(state, patch, dt)
+      integrateVehicle(state, (x, y, z, out) => evaluateGravity(patch, x, y, z, out), dt)
     }
 
     const finalSpeed = Math.sqrt(
@@ -79,5 +96,35 @@ describe('integrateVehicle', () => {
     const finalE = 0.5 * finalSpeed * finalSpeed - G * M / finalDist
     const drift = Math.abs((finalE - initialE) / initialE)
     expect(drift).toBeLessThan(0.001) // <0.1%
+  })
+
+  it('conserves energy in circular orbit with direct point-mass gravity', () => {
+    const r = 6_771_000
+    const M = 5.972e24
+    const GM = G * M
+    const v = Math.sqrt(GM / r)
+    const state = {
+      position: [r, 0, 0] as [number, number, number],
+      velocity: [0, 0, v] as [number, number, number],
+    }
+    const dt = 1 / 60
+    const initialE = 0.5 * v * v - GM / r
+
+    const gravity = pointMassGravity(GM)
+
+    // 10,000 steps ≈ 2.7 minutes of sim time
+    for (let step = 0; step < 10_000; step++) {
+      integrateVehicle(state, gravity, dt)
+    }
+
+    const finalSpeed = Math.sqrt(
+      state.velocity[0] ** 2 + state.velocity[1] ** 2 + state.velocity[2] ** 2,
+    )
+    const finalDist = Math.sqrt(
+      state.position[0] ** 2 + state.position[1] ** 2 + state.position[2] ** 2,
+    )
+    const finalE = 0.5 * finalSpeed * finalSpeed - GM / finalDist
+    const drift = Math.abs((finalE - initialE) / initialE)
+    expect(drift).toBeLessThan(0.0001) // <0.01% — much tighter with exact gravity
   })
 })

@@ -41,6 +41,16 @@ export type SimCommand =
 export type Command = VehicleCommand | SimCommand
 
 // ---------------------------------------------------------------------------
+// Gravity Sources (sent from bridge to vehicle worker)
+// ---------------------------------------------------------------------------
+
+export interface GravitySource {
+  gm: number // G * mass
+  position: [number, number, number] // absolute position at reference time
+  velocity: [number, number, number] // absolute velocity for prediction
+}
+
+// ---------------------------------------------------------------------------
 // Vehicle Worker Messages
 // ---------------------------------------------------------------------------
 
@@ -53,10 +63,10 @@ export type VehicleWorkerInbound =
         position: SectorPosition
         velocity: [number, number, number]
       }
-      cubePatch: Float64Array
+      gravitySources: GravitySource[]
       warpRate: number
     }
-  | { type: 'cube-patch'; data: Float64Array }
+  | { type: 'gravity-sources'; bodies: GravitySource[]; simTime: number }
   | { type: 'set-warp'; rate: number }
 
 /** Outbound messages from the vehicle worker */
