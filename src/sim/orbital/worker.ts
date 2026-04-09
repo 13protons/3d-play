@@ -1,16 +1,14 @@
 /**
- * Orbital worker — owns celestial body state, runs n-body integration,
- * emits trajectory curves to the main thread.
+ * Orbital worker — owns celestial body state, runs adaptive n-body
+ * integration, emits trajectory curves to the main thread.
  *
- * For v1: all curves are absolute (not parent-relative). This simplifies
- * the renderer at the cost of curve accuracy for moons. The architecture
- * supports parent-relative curves when we're ready (see notes/05).
+ * Driven by the bridge via 'advance' messages. No self-scheduling.
  */
 
-import type { CelestialBody, TrajectoryCurve, SectorPosition } from '../types'
+import type { TrajectoryCurve, SectorPosition } from '../types'
 import { toAbsolute } from '../coordinates'
-import { integrate } from './integrator'
-import { gravityAtPoint } from './gravity'
+import { advanceTo } from '../integrator/adaptive'
+import { nBodyDerivatives } from '../integrator/derivatives'
 
 interface InitBody {
   id: string
@@ -23,92 +21,73 @@ interface InitBody {
   velocity: [number, number, number]
 }
 
-interface PrevState {
-  absPos: [number, number, number]
-  velocity: [number, number, number]
-  simTime: number
-}
-
-const DT = 1 / 60
-
-let bodies: CelestialBody[] = []
+let bodyIds: string[] = []
+let masses: number[] = []
+let stateVec: Float64Array | null = null
 let simTime = 0
-let warpRate = 1
-const prevStates = new Map<string, PrevState>()
+let deriv: ReturnType<typeof nBodyDerivatives> | null = null
 
-function snapshotPrev(): void {
-  for (const body of bodies) {
-    prevStates.set(body.id, {
-      absPos: toAbsolute(body.position),
-      velocity: [...body.velocity] as [number, number, number],
-      simTime,
-    })
-  }
-}
-
-function emitCurves(): void {
+/** Unpack state vector back to absolute positions + velocities per body. */
+function emitCurves(prevTime: number, prevState: Float64Array): void {
+  if (!stateVec) return
   const curves: TrajectoryCurve[] = []
-
-  for (const body of bodies) {
-    const prev = prevStates.get(body.id)
-    if (!prev) continue
-
+  for (let i = 0; i < bodyIds.length; i++) {
+    const b = i * 6
     curves.push({
-      id: body.id,
+      id: bodyIds[i],
       parentId: '',
-      p0: prev.absPos,
-      v0: prev.velocity,
-      t0: prev.simTime,
-      p1: toAbsolute(body.position),
-      v1: [...body.velocity] as [number, number, number],
+      p0: [prevState[b], prevState[b + 1], prevState[b + 2]],
+      v0: [prevState[b + 3], prevState[b + 4], prevState[b + 5]],
+      t0: prevTime,
+      p1: [stateVec[b], stateVec[b + 1], stateVec[b + 2]],
+      v1: [stateVec[b + 3], stateVec[b + 4], stateVec[b + 5]],
       t1: simTime,
     })
   }
-
   postMessage({ type: 'trajectories', simTime, curves })
-  snapshotPrev()
-}
-
-function tick(): void {
-  for (let i = 0; i < warpRate; i++) {
-    integrate(bodies, DT)
-    simTime += DT
-  }
-  emitCurves()
-
-  // Self-schedule instead of setInterval to prevent queuing when ticks are slow
-  setTimeout(tick, 1000 / 60)
 }
 
 onmessage = (e: MessageEvent) => {
   const msg = e.data
 
   if (msg.type === 'init') {
-    bodies = (msg.bodies as InitBody[]).map((b) => ({
-      id: b.id,
-      name: b.name,
-      parentId: b.parentId,
-      mass: b.mass,
-      radius: b.radius,
-      soiRadius: b.soiRadius,
-      position: b.position,
-      velocity: b.velocity,
-      orientation: [0, 0, 0, 1] as [number, number, number, number],
-      angularVelocity: 0,
-    }))
+    const bodies = msg.bodies as InitBody[]
+    bodyIds = bodies.map((b) => b.id)
+    masses = bodies.map((b) => b.mass)
+    deriv = nBodyDerivatives(masses)
 
+    // Pack initial state vector: [x0,y0,z0,vx0,vy0,vz0, x1,...]
+    stateVec = new Float64Array(bodies.length * 6)
+    for (let i = 0; i < bodies.length; i++) {
+      const abs = toAbsolute(bodies[i].position)
+      const b = i * 6
+      stateVec[b] = abs[0]; stateVec[b + 1] = abs[1]; stateVec[b + 2] = abs[2]
+      stateVec[b + 3] = bodies[i].velocity[0]
+      stateVec[b + 4] = bodies[i].velocity[1]
+      stateVec[b + 5] = bodies[i].velocity[2]
+    }
     simTime = 0
-    snapshotPrev()
-    setTimeout(tick, 1000 / 60)
+
+    // Emit initial curves (zero-length, establishes starting positions)
+    const initState = new Float64Array(stateVec)
+    emitCurves(0, initState)
   }
 
-  if (msg.type === 'set-warp') {
-    warpRate = msg.rate
-  }
+  if (msg.type === 'advance') {
+    if (!stateVec || !deriv) return
+    const targetTime = msg.targetTime as number
+    if (targetTime <= simTime) {
+      // Already there — emit current state
+      emitCurves(simTime, new Float64Array(stateVec))
+      return
+    }
 
-  if (msg.type === 'request-patch') {
-    const points: [number, number, number][] = msg.points
-    const gravityVectors = points.map((pt) => gravityAtPoint(bodies, pt))
-    postMessage({ type: 'cube-patch-response', gravityVectors })
+    const prevTime = simTime
+    const prevState = new Float64Array(stateVec)
+
+    advanceTo(stateVec, simTime, targetTime, deriv, 1e-10)
+    simTime = targetTime
+
+    emitCurves(prevTime, prevState)
   }
 }
