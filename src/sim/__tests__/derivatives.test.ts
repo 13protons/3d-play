@@ -21,7 +21,12 @@ describe('nBodyDerivatives', () => {
     // Earth acceleration: toward Sun (negative x)
     expect(dydt[3]).toBeLessThan(0)
     const expectedAcc = G * 1.989e30 / (1.496e11) ** 2
-    expect(Math.abs(dydt[3])).toBeCloseTo(expectedAcc, 0)
+    expect(Math.abs(dydt[3])).toBeCloseTo(expectedAcc, 5)
+
+    // Newton's third law: Sun acceleration should be equal and opposite (scaled by mass ratio)
+    const expectedSunAcc = G * 5.972e24 / (1.496e11) ** 2
+    expect(dydt[9]).toBeGreaterThan(0) // Sun accelerates toward Earth (+x)
+    expect(Math.abs(dydt[9])).toBeCloseTo(expectedSunAcc, 5)
   })
 })
 
@@ -42,12 +47,12 @@ describe('pointMassDerivatives', () => {
     deriv(0, y, dydt)
 
     // Velocity derivatives = velocity
-    expect(dydt[0]).toBeCloseTo(0, 5)
-    expect(dydt[2]).toBeCloseTo(7670, 5)
+    expect(dydt[0]).toBe(0)
+    expect(dydt[2]).toBe(7670)
     // Acceleration toward Earth (negative x)
     expect(dydt[3]).toBeLessThan(0)
     const expectedAcc = G * 5.972e24 / 6_771_000 ** 2
-    expect(Math.abs(dydt[3])).toBeCloseTo(expectedAcc, 0)
+    expect(Math.abs(dydt[3])).toBeCloseTo(expectedAcc, 5)
   })
 
   it('interpolates body position from curves at mid-time', () => {
@@ -68,5 +73,27 @@ describe('pointMassDerivatives', () => {
 
     // Acceleration should point in -x direction (toward body at ~500)
     expect(dydt[3]).toBeLessThan(0)
+  })
+
+  it('silently skips curves with no matching GM entry', () => {
+    const bodyCurves: TrajectoryCurve[] = [{
+      id: 'unknown-body', parentId: '',
+      p0: [0, 0, 0], v0: [0, 0, 0], t0: 0,
+      p1: [0, 0, 0], v1: [0, 0, 0], t1: 100,
+    }]
+    // No matching entry in the GM map
+    const masses = new Map<string, number>()
+    const deriv = pointMassDerivatives(bodyCurves, masses)
+
+    const y = new Float64Array([6_771_000, 0, 0, 0, 0, 7670])
+    const dydt = new Float64Array(6)
+    deriv(0, y, dydt)
+
+    // No gravity — only velocity derivatives
+    expect(dydt[0]).toBe(0)
+    expect(dydt[2]).toBe(7670)
+    expect(dydt[3]).toBe(0)
+    expect(dydt[4]).toBe(0)
+    expect(dydt[5]).toBe(0)
   })
 })
