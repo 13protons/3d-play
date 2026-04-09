@@ -1,52 +1,31 @@
 /**
- * Vehicle worker — owns vehicle state, runs Störmer-Verlet integration
- * against gravity computed directly from body positions, emits trajectory
- * curves and position updates to the main thread.
+ * Vehicle worker — owns vehicle state, runs adaptive integration
+ * against gravity interpolated from body trajectory curves.
  *
- * See notes/05-physics-workers.md for architecture.
+ * Driven by the bridge via 'advance' messages. No self-scheduling.
  */
 
-import type { TrajectoryCurve, VehicleWorkerInbound, GravitySource } from '../types'
+import type { TrajectoryCurve, VehicleWorkerInbound } from '../types'
 import { toAbsolute } from '../coordinates'
-import { integrateVehicle, type VehicleState } from './integrate'
-
-const DT = 1 / 60
+import { advanceTo } from '../integrator/adaptive'
+import { pointMassDerivatives } from '../integrator/derivatives'
 
 let vehicleId = ''
-let state: VehicleState | null = null
-let gravitySources: GravitySource[] = []
-let gravitySrcTime = 0 // simTime when sources were last updated
-let warpRate = 1
+let stateVec: Float64Array | null = null
+let bodyGMs = new Map<string, number>()
 let simTime = 0
 
-interface PrevState {
-  absPos: [number, number, number]
-  velocity: [number, number, number]
-  simTime: number
-}
-
-let prev: PrevState | null = null
-
-function snapshotPrev(): void {
-  if (!state) return
-  prev = {
-    absPos: [...state.position] as [number, number, number],
-    velocity: [...state.velocity] as [number, number, number],
-    simTime,
-  }
-}
-
-function emitCurves(): void {
-  if (!state || !prev) return
+function emitCurves(prevTime: number, prevState: Float64Array): void {
+  if (!stateVec) return
 
   const curve: TrajectoryCurve = {
     id: vehicleId,
     parentId: '',
-    p0: prev.absPos,
-    v0: prev.velocity,
-    t0: prev.simTime,
-    p1: [...state.position] as [number, number, number],
-    v1: [...state.velocity] as [number, number, number],
+    p0: [prevState[0], prevState[1], prevState[2]],
+    v0: [prevState[3], prevState[4], prevState[5]],
+    t0: prevTime,
+    p1: [stateVec[0], stateVec[1], stateVec[2]],
+    v1: [stateVec[3], stateVec[4], stateVec[5]],
     t1: simTime,
   }
 
@@ -55,61 +34,6 @@ function emitCurves(): void {
     simTime,
     curves: [curve],
   })
-
-  postMessage({
-    type: 'vehicle-position',
-    position: [...state.position] as [number, number, number],
-    velocity: [...state.velocity] as [number, number, number],
-  })
-
-  snapshotPrev()
-}
-
-/**
- * Compute gravitational acceleration at (x,y,z) from all gravity sources.
- * Body positions are linearly predicted from their last known state.
- */
-function gravityAt(x: number, y: number, z: number, out: [number, number, number]): void {
-  out[0] = out[1] = out[2] = 0
-  const elapsed = simTime - gravitySrcTime
-  for (let i = 0; i < gravitySources.length; i++) {
-    const src = gravitySources[i]
-    // Predict body position at current simTime
-    const bx = src.position[0] + src.velocity[0] * elapsed
-    const by = src.position[1] + src.velocity[1] * elapsed
-    const bz = src.position[2] + src.velocity[2] * elapsed
-    const dx = bx - x
-    const dy = by - y
-    const dz = bz - z
-    const r2 = dx * dx + dy * dy + dz * dz
-    const r = Math.sqrt(r2)
-    if (r < 1) continue
-    const f = src.gm / (r2 * r)
-    out[0] += f * dx
-    out[1] += f * dy
-    out[2] += f * dz
-  }
-}
-
-function tick(): void {
-  if (!state || gravitySources.length === 0) return
-
-  // Cap advancement: don't race more than one tick ahead of the latest
-  // gravity source update. Without this, the vehicle worker's faster tick
-  // (fewer computations) causes simTime to drift ahead of the orbital
-  // worker, making body position predictions extrapolate too far.
-  const ceiling = gravitySrcTime + warpRate * DT
-  const maxSteps = Math.min(warpRate, Math.max(0, Math.floor((ceiling - simTime) / DT)))
-
-  for (let i = 0; i < maxSteps; i++) {
-    integrateVehicle(state, gravityAt, DT)
-    simTime += DT
-  }
-
-  if (maxSteps > 0) emitCurves()
-
-  // Self-schedule instead of setInterval to prevent queuing when ticks are slow
-  setTimeout(tick, 1000 / 60)
 }
 
 onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
@@ -118,25 +42,35 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
   if (msg.type === 'init') {
     vehicleId = msg.vehicle.id
     const absPos = toAbsolute(msg.vehicle.position)
-    state = {
-      position: absPos,
-      velocity: [...msg.vehicle.velocity] as [number, number, number],
-    }
-    gravitySources = msg.gravitySources
-    gravitySrcTime = 0
-    warpRate = msg.warpRate
+    stateVec = new Float64Array([
+      absPos[0], absPos[1], absPos[2],
+      msg.vehicle.velocity[0], msg.vehicle.velocity[1], msg.vehicle.velocity[2],
+    ])
+    bodyGMs = new Map(msg.bodyGMs)
     simTime = 0
 
-    snapshotPrev()
-    setTimeout(tick, 1000 / 60)
+    // Build derivative from initial body curves and integrate to initial time
+    const initState = new Float64Array(stateVec)
+    emitCurves(0, initState)
   }
 
-  if (msg.type === 'gravity-sources') {
-    gravitySources = msg.bodies
-    gravitySrcTime = msg.simTime
-  }
+  if (msg.type === 'advance') {
+    if (!stateVec) return
+    const targetTime = msg.targetTime
+    if (targetTime <= simTime) {
+      emitCurves(simTime, new Float64Array(stateVec))
+      return
+    }
 
-  if (msg.type === 'set-warp') {
-    warpRate = msg.rate
+    const prevTime = simTime
+    const prevState = new Float64Array(stateVec)
+
+    // Build gravity function from body trajectory curves for this batch
+    const deriv = pointMassDerivatives(msg.bodyCurves, bodyGMs)
+
+    advanceTo(stateVec, simTime, targetTime, deriv, 1e-10)
+    simTime = targetTime
+
+    emitCurves(prevTime, prevState)
   }
 }
