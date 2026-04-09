@@ -63,10 +63,14 @@ export type VehicleWorkerInbound =
         position: SectorPosition
         velocity: [number, number, number]
       }
-      gravitySources: GravitySource[]
-      warpRate: number
+      bodyCurves: TrajectoryCurve[]
+      bodyGMs: [string, number][]  // [id, G*M] pairs (Map not transferable)
     }
-  | { type: 'gravity-sources'; bodies: GravitySource[]; simTime: number }
+  | {
+      type: 'advance'
+      targetTime: number
+      bodyCurves: TrajectoryCurve[]
+    }
   | { type: 'set-warp'; rate: number }
 
 /** Outbound messages from the vehicle worker */
@@ -138,12 +142,16 @@ export interface VesselPhysics {
 // ---------------------------------------------------------------------------
 
 export type OrbitalInbound =
-  | { type: 'commands'; commands: SimCommand[] }
-  | { type: 'vehicle-positions'; vehicles: { id: string; position: SectorPosition }[] }
   | {
-      type: 'request-patch'
-      points: [number, number, number][] // 6 face-center positions (absolute)
+      type: 'init'
+      bodies: {
+        id: string; name: string; parentId: string | null
+        mass: number; radius: number; soiRadius?: number
+        position: SectorPosition; velocity: [number, number, number]
+      }[]
     }
+  | { type: 'advance'; targetTime: number }
+  | { type: 'set-warp'; rate: number }
 
 export type WorkerOutbound =
   | { type: 'trajectories'; simTime: number; curves: TrajectoryCurve[] }
