@@ -1,27 +1,44 @@
 /**
- * Worker bridge — manages worker lifecycle, routes commands, relays messages.
- * All worker communication flows through here.
+ * Worker bridge — owns simulation clock, manages worker lifecycle,
+ * routes commands, orchestrates sequential advance: orbital -> vehicle.
  */
 
 import { useTrajectoriesStore } from './trajectories'
 import { useInputStore } from './input'
 import type { BodyMeta } from './trajectories'
-import type { GravitySource } from '../sim/types'
+import type { TrajectoryCurve } from '../sim/types'
 import { G } from '../sim/constants'
 
 let orbitalWorker: Worker | null = null
-let animFrameId: number | null = null
 let vehicleWorker: Worker | null = null
+let animFrameId: number | null = null
+
+// Bridge-owned clock
+let simTime = 0
+let warpRate = 1
+let lastWallTime = 0
+
+// Worker state machine
+type WorkerState = 'idle' | 'busy'
+let orbitalState: WorkerState = 'idle'
+let vehicleState: WorkerState = 'idle'
+
+// Pending vehicle dispatch (waiting for orbital to finish)
+let pendingTargetTime: number | null = null
+
+// Body metadata for computing G*M
+let bodyGMs: [string, number][] = []
+
+// Latest orbital curves (forwarded to vehicle worker)
+let latestOrbitalCurves: TrajectoryCurve[] = []
 
 export async function startSim(scenarioId: string): Promise<void> {
-  // Load scenario
   const scenarioResp = await fetch(`/data/scenarios/${scenarioId}.json`)
   if (!scenarioResp.ok) {
     throw new Error(`Failed to load scenario: ${scenarioId} (${scenarioResp.status})`)
   }
   const scenario = await scenarioResp.json()
 
-  // Load body definitions referenced by the scenario
   const bodyIds = Object.keys(scenario.bodies)
   const bodyDefs = await Promise.all(
     bodyIds.map(async (id: string) => {
@@ -31,7 +48,7 @@ export async function startSim(scenarioId: string): Promise<void> {
     }),
   )
 
-  // Populate body metadata in the trajectory store (for the renderer)
+  // Populate body metadata in the trajectory store
   const bodyMetas: BodyMeta[] = bodyDefs.map(
     (def: Record<string, unknown>) => {
       const physics = def.physics as Record<string, unknown>
@@ -49,42 +66,40 @@ export async function startSim(scenarioId: string): Promise<void> {
   )
   useTrajectoriesStore.getState().setBodies(bodyMetas)
 
+  // Compute G*M pairs for vehicle gravity
+  bodyGMs = bodyDefs.map((def: Record<string, unknown>) => {
+    const physics = def.physics as Record<string, unknown>
+    return [def.id as string, G * (physics.mass as number)] as [string, number]
+  })
+
   // Spawn the orbital worker
   orbitalWorker = new Worker(
     new URL('../sim/orbital/worker.ts', import.meta.url),
     { type: 'module' },
   )
 
-  // Promise that resolves when the orbital worker sends its first message
-  // (indicating it is initialized and ticking)
   let resolveOrbitalReady: () => void
   const orbitalReady = new Promise<void>((resolve) => {
     resolveOrbitalReady = resolve
   })
 
-  // Handle messages from the orbital worker
   orbitalWorker.onmessage = (e: MessageEvent) => {
     const msg = e.data
     if (msg.type === 'trajectories') {
       useTrajectoriesStore.getState().updateCurves(msg.curves, msg.simTime)
+      latestOrbitalCurves = msg.curves
+      orbitalState = 'idle'
       resolveOrbitalReady()
 
-      // Relay body positions to vehicle worker as gravity sources
-      if (vehicleWorker) {
-        const bodyMap = useTrajectoriesStore.getState().bodies
-        const sources: GravitySource[] = msg.curves
-          .filter((c: { id: string }) => bodyMap[c.id])
-          .map((c: { id: string; p1: [number, number, number]; v1: [number, number, number] }) => ({
-            gm: G * bodyMap[c.id].mass,
-            position: c.p1,
-            velocity: c.v1,
-          }))
-        vehicleWorker.postMessage({ type: 'gravity-sources', bodies: sources, simTime: msg.simTime })
+      // Dispatch vehicle worker now that orbital is done
+      if (vehicleWorker && pendingTargetTime !== null) {
+        dispatchVehicle(pendingTargetTime)
+        pendingTargetTime = null
       }
     }
   }
 
-  // Send initialization data to the worker (physics only, no render data)
+  // Send init to orbital worker
   orbitalWorker.postMessage({
     type: 'init',
     bodies: bodyDefs.map((def: Record<string, unknown>) => {
@@ -104,7 +119,7 @@ export async function startSim(scenarioId: string): Promise<void> {
     }),
   })
 
-  // Load and start vehicle worker if scenario has vehicles
+  // Load vehicles
   const vehicles = scenario.vehicles ?? []
   if (vehicles.length > 0) {
     const vehicleMetas = vehicles.map((v: Record<string, unknown>) => ({
@@ -112,27 +127,7 @@ export async function startSim(scenarioId: string): Promise<void> {
     }))
     useTrajectoriesStore.getState().setVehicles(vehicleMetas)
 
-    // Wait for orbital worker to be ready before spawning vehicle worker
     await orbitalReady
-
-    // Build initial gravity sources from scenario body data
-    const initialSources: GravitySource[] = bodyDefs.map(
-      (def: Record<string, unknown>) => {
-        const physics = def.physics as Record<string, unknown>
-        const bodyId = def.id as string
-        const scenarioBody = scenario.bodies[bodyId]
-        const pos = scenarioBody.position
-        return {
-          gm: G * (physics.mass as number),
-          position: [
-            (pos.sector[0] as number) * 1_000_000 + (pos.local[0] as number),
-            (pos.sector[1] as number) * 1_000_000 + (pos.local[1] as number),
-            (pos.sector[2] as number) * 1_000_000 + (pos.local[2] as number),
-          ] as [number, number, number],
-          velocity: scenarioBody.velocity as [number, number, number],
-        }
-      },
-    )
 
     const v = vehicles[0]
 
@@ -145,32 +140,64 @@ export async function startSim(scenarioId: string): Promise<void> {
       const msg = e.data
       if (msg.type === 'vehicle-trajectories') {
         useTrajectoriesStore.getState().mergeCurves(msg.curves)
+        vehicleState = 'idle'
       }
     }
 
     vehicleWorker.postMessage({
       type: 'init',
       vehicle: { id: v.id, position: v.position, velocity: v.velocity },
-      gravitySources: initialSources,
-      warpRate: 1,
+      bodyCurves: latestOrbitalCurves,
+      bodyGMs,
     })
   }
 
-  // Start the command-flush loop on each animation frame
+  // Start the bridge clock loop
+  simTime = 0
+  warpRate = 1
+  lastWallTime = performance.now()
+
   function loop() {
+    const now = performance.now()
+    const wallDelta = (now - lastWallTime) / 1000
+    lastWallTime = now
+
+    // Flush input commands (warp changes)
     flushCommands()
+
+    // Compute target time
+    const simDelta = wallDelta * warpRate
+    const targetTime = simTime + simDelta
+
+    // Dispatch orbital worker if idle
+    if (orbitalWorker && orbitalState === 'idle') {
+      orbitalState = 'busy'
+      pendingTargetTime = vehicleWorker ? targetTime : null
+      orbitalWorker.postMessage({ type: 'advance', targetTime })
+      simTime = targetTime
+    }
+    // If orbital is busy, the renderer interpolates existing curves
+
     animFrameId = requestAnimationFrame(loop)
   }
   animFrameId = requestAnimationFrame(loop)
 }
 
+function dispatchVehicle(targetTime: number): void {
+  if (!vehicleWorker || vehicleState !== 'idle') return
+  vehicleState = 'busy'
+  vehicleWorker.postMessage({
+    type: 'advance',
+    targetTime,
+    bodyCurves: latestOrbitalCurves,
+  })
+}
+
 function flushCommands(): void {
-  if (!orbitalWorker) return
   const commands = useInputStore.getState().drain()
   for (const cmd of commands) {
     if (cmd.type === 'set-warp') {
-      orbitalWorker.postMessage({ type: 'set-warp', rate: cmd.rate })
-      vehicleWorker?.postMessage({ type: 'set-warp', rate: cmd.rate })
+      warpRate = cmd.rate
       useTrajectoriesStore.getState().setWarpRate(cmd.rate)
     }
   }
@@ -189,5 +216,11 @@ export function stopSim(): void {
     vehicleWorker.terminate()
     vehicleWorker = null
   }
+  simTime = 0
+  warpRate = 1
+  orbitalState = 'idle'
+  vehicleState = 'idle'
+  pendingTargetTime = null
+  latestOrbitalCurves = []
   useTrajectoriesStore.getState().reset()
 }
