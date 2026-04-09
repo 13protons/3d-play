@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { advanceTo, type DerivFn } from '../integrator/adaptive'
 import { G } from '../constants'
 import { gravityAtPoint } from '../orbital/gravity'
 import {
@@ -408,5 +409,59 @@ describe('gravity direction consistency', () => {
     const mag2 = Math.sqrt(out[0] ** 2 + out[1] ** 2 + out[2] ** 2)
 
     expect(mag1 / mag2).toBeCloseTo(4, 1)
+  })
+})
+
+// ── Adaptive integrator orbital dynamics ─────────────────────────────
+
+describe('adaptive integrator orbital dynamics', () => {
+  const earthMass = 5.972e24
+  const r = 6_771_000
+
+  it('conserves energy over 5 orbits with adaptive n-body', () => {
+    const GM = G * earthMass
+    const speed = orbitalSpeed(earthMass, r)
+    const vDeriv: DerivFn = (_t, y, dydt) => {
+      dydt[0] = y[3]; dydt[1] = y[4]; dydt[2] = y[5]
+      const r2 = y[0] * y[0] + y[1] * y[1] + y[2] * y[2]
+      const rr = Math.sqrt(r2)
+      const f = -GM / (r2 * rr)
+      dydt[3] = f * y[0]; dydt[4] = f * y[1]; dydt[5] = f * y[2]
+    }
+
+    const y = new Float64Array([r, 0, 0, 0, 0, speed])
+    const period = 2 * Math.PI * r / speed
+    const initialE = specificEnergy(earthMass, [r, 0, 0], [0, 0, speed])
+
+    const result = advanceTo(y, 0, period * 5, vDeriv, 1e-12)
+
+    const finalV2 = y[3] ** 2 + y[4] ** 2 + y[5] ** 2
+    const finalR = Math.sqrt(y[0] ** 2 + y[1] ** 2 + y[2] ** 2)
+    const finalE = 0.5 * finalV2 - G * earthMass / finalR
+    const drift = Math.abs((finalE - initialE) / initialE)
+
+    expect(drift).toBeLessThan(1e-8)
+    expect(result.steps).toBeLessThan(2500)
+  })
+
+  it('adaptive integrator uses far fewer steps than fixed Verlet', () => {
+    const GM = G * earthMass
+    const speed = orbitalSpeed(earthMass, r)
+    const period = 2 * Math.PI * r / speed
+
+    const vDeriv: DerivFn = (_t, y, dydt) => {
+      dydt[0] = y[3]; dydt[1] = y[4]; dydt[2] = y[5]
+      const r2 = y[0] * y[0] + y[1] * y[1] + y[2] * y[2]
+      const rr = Math.sqrt(r2)
+      const f = -GM / (r2 * rr)
+      dydt[3] = f * y[0]; dydt[4] = f * y[1]; dydt[5] = f * y[2]
+    }
+
+    const y = new Float64Array([r, 0, 0, 0, 0, speed])
+    const result = advanceTo(y, 0, period, vDeriv, 1e-10)
+
+    // Fixed Verlet would need 324,000 steps. Adaptive should need < 500.
+    expect(result.steps).toBeLessThan(500)
+    expect(result.steps).toBeGreaterThan(10) // sanity: not trivially few
   })
 })
