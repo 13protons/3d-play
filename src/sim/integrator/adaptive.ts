@@ -43,7 +43,7 @@ const B4 = 125 / 192
 const B5 = -2187 / 6784
 const B6 = 11 / 84
 
-// Error coefficients E = b5 - b4 (applied to K0-K6, includes FSAL K6)
+// Error coefficients E = b4 - b5 (applied to K0-K6, includes FSAL K6)
 const E1 = -71 / 57600
 // E2 = 0
 const E3 = 71 / 16695
@@ -56,6 +56,7 @@ const E7 = 1 / 40
 const SAFETY = 0.9
 const MIN_FACTOR = 0.2
 const MAX_FACTOR = 10.0
+const MAX_STEPS = 1_000_000
 const ERROR_EXPONENT = -1 / 5 // -1/(order+1) for RK45
 
 function rmsNorm(v: Float64Array, scale: Float64Array): number {
@@ -67,6 +68,7 @@ function rmsNorm(v: Float64Array, scale: Float64Array): number {
   return Math.sqrt(sum / v.length)
 }
 
+/** Hairer/Norsett/Wanner initial step selection. Reuses caller-owned scratch buffers. */
 function selectInitialStep(
   y0: Float64Array,
   t0: number,
@@ -74,19 +76,16 @@ function selectInitialStep(
   f0: Float64Array,
   tol: number,
   deriv: DerivFn,
+  scratch1: Float64Array, // reused as y1, then diff
+  scratch2: Float64Array, // reused as f1
+  scale: Float64Array,
 ): number {
   const n = y0.length
-  const scale = new Float64Array(n)
   for (let i = 0; i < n; i++) {
     scale[i] = tol + Math.abs(y0[i]) * tol
   }
 
-  // d0: norm of initial state
-  const scaledY0 = new Float64Array(n)
-  for (let i = 0; i < n; i++) scaledY0[i] = y0[i]
-  const d0 = rmsNorm(scaledY0, scale)
-
-  // d1: norm of initial derivative
+  const d0 = rmsNorm(y0, scale)
   const d1 = rmsNorm(f0, scale)
 
   let h0: number
@@ -98,14 +97,12 @@ function selectInitialStep(
   h0 = Math.min(h0, t1 - t0)
 
   // One Euler step to estimate second derivative
-  const y1 = new Float64Array(n)
-  for (let i = 0; i < n; i++) y1[i] = y0[i] + h0 * f0[i]
-  const f1 = new Float64Array(n)
-  deriv(t0 + h0, y1, f1)
+  for (let i = 0; i < n; i++) scratch1[i] = y0[i] + h0 * f0[i]
+  deriv(t0 + h0, scratch1, scratch2)
 
-  const diff = new Float64Array(n)
-  for (let i = 0; i < n; i++) diff[i] = (f1[i] - f0[i]) / h0
-  const d2 = rmsNorm(diff, scale)
+  // Reuse scratch1 for diff
+  for (let i = 0; i < n; i++) scratch1[i] = (scratch2[i] - f0[i]) / h0
+  const d2 = rmsNorm(scratch1, scale)
 
   let h1: number
   if (d1 > 1e-15 || d2 > 1e-15) {
@@ -135,11 +132,14 @@ export function advanceTo(
   deriv: DerivFn,
   tol: number,
 ): { y: Float64Array; steps: number } {
+  if (t0 >= t1) return { y, steps: 0 }
+
   const n = y.length
   let t = t0
 
   // Allocate stage arrays (7 stages for FSAL)
-  const K = Array.from({ length: 7 }, () => new Float64Array(n))
+  const K: Float64Array[] = []
+  for (let i = 0; i < 7; i++) K[i] = new Float64Array(n)
   const yNew = new Float64Array(n)
   const yTmp = new Float64Array(n)
   const errorVec = new Float64Array(n)
@@ -148,13 +148,17 @@ export function advanceTo(
   // Evaluate initial derivative (K0)
   deriv(t, y, K[0])
 
-  // Select initial step size
-  let h = selectInitialStep(y, t0, t1, K[0], tol, deriv)
+  // Select initial step size (reuses yTmp, errorVec, scale as scratch)
+  let h = selectInitialStep(y, t0, t1, K[0], tol, deriv, yTmp, errorVec, scale)
 
   let steps = 0
   let wasRejected = false
 
   while (t < t1) {
+    if (steps >= MAX_STEPS) break
+    // Detect stagnation: h too small to advance t in floating point
+    if (t + h === t) break
+
     // Clamp step to not overshoot target
     if (t + h > t1) h = t1 - t
 
