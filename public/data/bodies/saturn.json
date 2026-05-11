@@ -12,6 +12,7 @@
   },
   "render": {
     "color": "#c8b27a",
+    "texture": "/data/textures/saturn.png",
     "emissive": false,
     "minimumLight": 0.03
   }

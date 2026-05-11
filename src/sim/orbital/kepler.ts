@@ -1,5 +1,3 @@
-import { G } from '../constants'
-
 /**
  * Keplerian orbit math — compute orbital elements from state vectors
  * and sample points along the predicted ellipse.
@@ -17,6 +15,8 @@ export interface OrbitalElements {
   aop: number // argument of periapsis (radians)
   ta: number // true anomaly at current position (radians)
   mu: number // gravitational parameter GM
+  pHat: [number, number, number] // periapsis direction in inertial y-up frame
+  qHat: [number, number, number] // 90 degrees ahead in orbital plane
 }
 
 /** Cross product of two 3-vectors. */
@@ -39,6 +39,15 @@ function mag(v: [number, number, number]): number {
   return Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 }
 
+function scale(v: [number, number, number], s: number): [number, number, number] {
+  return [v[0] * s, v[1] * s, v[2] * s]
+}
+
+function normalize(v: [number, number, number]): [number, number, number] {
+  const m = mag(v)
+  return m > 1e-10 ? scale(v, 1 / m) : [1, 0, 0]
+}
+
 
 /**
  * Compute Keplerian orbital elements from position and velocity
@@ -46,14 +55,14 @@ function mag(v: [number, number, number]): number {
  *
  * @param r Position relative to parent (meters)
  * @param v Velocity relative to parent (m/s)
- * @param parentMass Parent body mass (kg)
+ * @param parentGm Parent gravitational parameter GM (m^3/s^2)
  */
 export function stateToElements(
   r: [number, number, number],
   v: [number, number, number],
-  parentMass: number,
+  parentGm: number,
 ): OrbitalElements {
-  const mu = G * parentMass
+  const mu = parentGm
   const rMag = mag(r)
   const vMag = mag(v)
 
@@ -102,17 +111,13 @@ export function stateToElements(
     if (aop < 0) aop += 2 * Math.PI
   }
 
-  // True anomaly
-  let ta = 0
-  if (e > 1e-10) {
-    ta = Math.acos(clamp(dot(eVec, r) / (e * rMag), -1, 1))
-    if (rv < 0) ta = 2 * Math.PI - ta
-  } else if (nMag > 1e-10) {
-    ta = Math.acos(clamp(dot(n, r) / (nMag * rMag), -1, 1))
-    if (dot(n, v) > 0) ta = 2 * Math.PI - ta // This check is approximate
-  }
+  const hHat = normalize(h)
+  const pHat = e > 1e-10 ? normalize(eVec) : normalize(r)
+  const qHat = normalize(cross(hHat, pHat))
+  let ta = Math.atan2(dot(r, qHat), dot(r, pHat))
+  if (ta < 0) ta += 2 * Math.PI
 
-  return { a, e, i, lan, aop, ta, mu }
+  return { a, e, i, lan, aop, ta, mu, pHat, qHat }
 }
 
 /**
@@ -123,40 +128,29 @@ export function sampleOrbit(
   elements: OrbitalElements,
   numPoints: number,
 ): [number, number, number][] {
-  const { a, e, i, lan, aop } = elements
+  const anomalies: number[] = []
+  for (let j = 0; j <= numPoints; j++) {
+    anomalies.push((j / numPoints) * 2 * Math.PI)
+  }
+  return sampleOrbitAtTrueAnomalies(elements, anomalies)
+}
+
+export function sampleOrbitAtTrueAnomalies(
+  elements: OrbitalElements,
+  anomalies: number[],
+): [number, number, number][] {
+  const { a, e } = elements
 
   // Can't draw parabolic/infinite orbits or degenerate cases
   if (!Number.isFinite(a) || a <= 0 || e >= 1) return []
 
   const p = a * (1 - e * e) // semi-latus rectum
 
-  // Rotation matrix from perifocal frame to parent-centered frame (y-up)
-  // Perifocal: x toward periapsis, y in orbital plane 90° ahead, z = h direction
-  const cosLan = Math.cos(lan)
-  const sinLan = Math.sin(lan)
-  const cosAop = Math.cos(aop)
-  const sinAop = Math.sin(aop)
-  const cosI = Math.cos(i)
-  const sinI = Math.sin(i)
-
-  // Rotation matrix columns (perifocal → inertial, y-up)
-  // This is the standard aerospace rotation but with y-up instead of z-up
-  const px =
-    cosLan * cosAop - sinLan * sinAop * cosI
-  const py = sinAop * sinI
-  const pz =
-    sinLan * cosAop + cosLan * sinAop * cosI
-
-  const qx =
-    -cosLan * sinAop - sinLan * cosAop * cosI
-  const qy = cosAop * sinI
-  const qz =
-    -sinLan * sinAop + cosLan * cosAop * cosI
+  const { pHat, qHat } = elements
 
   const points: [number, number, number][] = []
 
-  for (let j = 0; j <= numPoints; j++) {
-    const theta = (j / numPoints) * 2 * Math.PI
+  for (const theta of anomalies) {
     const r = p / (1 + e * Math.cos(theta))
 
     // Position in perifocal frame
@@ -165,9 +159,9 @@ export function sampleOrbit(
 
     // Transform to parent-centered inertial frame (y-up)
     points.push([
-      px * xP + qx * yP,
-      py * xP + qy * yP,
-      pz * xP + qz * yP,
+      pHat[0] * xP + qHat[0] * yP,
+      pHat[1] * xP + qHat[1] * yP,
+      pHat[2] * xP + qHat[2] * yP,
     ])
   }
 

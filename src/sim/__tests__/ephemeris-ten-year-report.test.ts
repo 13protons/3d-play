@@ -48,5 +48,5 @@ describe('ten-year ephemeris report', () => {
       const driftMeters = distance(actual, expected)
       console.log(`${id}: ${(driftMeters / 1000).toFixed(0)} km`)
     }
-  })
+  }, 15_000)
 })

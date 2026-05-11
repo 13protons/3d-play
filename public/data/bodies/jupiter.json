@@ -12,6 +12,7 @@
   },
   "render": {
     "color": "#d2b48c",
+    "texture": "/data/textures/jupiter.png",
     "emissive": false,
     "minimumLight": 0.03
   }

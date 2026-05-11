@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Stars, OrbitControls } from '@react-three/drei'
-import type { Mesh, MeshBasicMaterial, PointLight } from 'three'
+import type { Group, Mesh, MeshBasicMaterial, PointLight } from 'three'
 import { useModeStore } from '../state/mode'
 import { useTrajectoriesStore } from '../state/trajectories'
 import type { BodyMeta } from '../state/trajectories'
@@ -12,6 +12,12 @@ import {
   type SunOccluder,
   type Vec3,
 } from './lighting'
+import { RotationLine } from './RotationLine'
+import { BodyMaterial } from './BodyMaterial'
+import {
+  bodyRotationAngle,
+  shouldShowRotationAxis,
+} from './rotation'
 
 const SUN_RENDER_DISTANCE = 5e8
 
@@ -57,15 +63,18 @@ function VehicleBody({
   vehicleId: string
   visibleBodyIds: string[]
 }) {
+  const spinGroupRef = useRef<Group>(null)
   const meshRef = useRef<Mesh>(null)
   const lightRef = useRef<PointLight>(null)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
+  const showRotationAxes = useModeStore((s) => s.showRotationAxes)
 
   useFrame(() => {
     if (useModeStore.getState().activeView !== 'vehicle') return
 
     const mesh = meshRef.current
     if (!mesh) return
+    const spinGroup = spinGroupRef.current
 
     const store = useTrajectoriesStore.getState()
     const { curves } = store
@@ -99,6 +108,14 @@ function VehicleBody({
       mesh.scale.setScalar(renderBody.radius / body.radius)
     } else {
       mesh.scale.setScalar(1)
+    }
+
+    if (spinGroup) {
+      spinGroup.rotation.set(
+        0,
+        bodyRotationAngle(body.rotationPhase, body.angularVelocity, t),
+        (body.axialTilt * Math.PI) / 180,
+      )
     }
 
     const sunOccluded = body.emissive
@@ -139,18 +156,15 @@ function VehicleBody({
 
   return (
     <group>
-      <mesh ref={meshRef}>
-        <sphereGeometry args={[body.radius, 32, 32]} />
-        {body.emissive ? (
-          <meshBasicMaterial color={body.color} />
-        ) : (
-          <meshStandardMaterial
-            color={body.color}
-            emissive={body.color}
-            emissiveIntensity={body.minimumLight}
-          />
+      <group ref={spinGroupRef}>
+        <mesh ref={meshRef}>
+          <sphereGeometry args={[body.radius, 32, 32]} />
+          <BodyMaterial body={body} />
+        </mesh>
+        {shouldShowRotationAxis(true, showRotationAxes) && (
+          <RotationLine radius={body.radius} />
         )}
-      </mesh>
+      </group>
       {body.emissive && (
         <pointLight ref={lightRef} intensity={2} distance={0} decay={0} />
       )}

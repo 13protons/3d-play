@@ -12,6 +12,7 @@
   },
   "render": {
     "color": "#9a8f82",
+    "texture": "/data/textures/mercury.png",
     "emissive": false,
     "minimumLight": 0.02
   }

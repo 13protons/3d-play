@@ -4,18 +4,22 @@ interface ModeState {
   view: 'menu' | 'flight'
   scenarioId: string | null
   activeView: 'orbital' | 'vehicle'
+  showRotationAxes: boolean
   enterFlight: (scenarioId: string) => void
   enterMenu: () => void
   setActiveView: (view: 'orbital' | 'vehicle') => void
   toggleView: () => void
+  toggleRotationAxes: () => void
 }
 
 export const useModeStore = create<ModeState>((set) => ({
   view: 'menu',
   scenarioId: null,
   activeView: 'orbital',
+  showRotationAxes: false,
   enterFlight: (scenarioId) => set({ view: 'flight', scenarioId, activeView: 'orbital' }),
-  enterMenu: () => set({ view: 'menu', scenarioId: null, activeView: 'orbital' }),
+  enterMenu: () => set({ view: 'menu', scenarioId: null, activeView: 'orbital', showRotationAxes: false }),
   setActiveView: (activeView) => set({ activeView }),
   toggleView: () => set((state) => ({ activeView: state.activeView === 'orbital' ? 'vehicle' : 'orbital' })),
+  toggleRotationAxes: () => set((state) => ({ showRotationAxes: !state.showRotationAxes })),
 }))

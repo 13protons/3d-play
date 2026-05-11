@@ -24,7 +24,9 @@ export function HUD() {
   const followTargetId = useCameraStore((s) => s.followTargetId)
   const setFollowTarget = useCameraStore((s) => s.setFollowTarget)
   const activeView = useModeStore((s) => s.activeView)
+  const showRotationAxes = useModeStore((s) => s.showRotationAxes)
   const toggleView = useModeStore((s) => s.toggleView)
+  const toggleRotationAxes = useModeStore((s) => s.toggleRotationAxes)
   const targetName = bodies[followTargetId]?.name ?? vehicles[followTargetId]?.name ?? followTargetId
 
   function setWarp(rate: number) {
@@ -126,6 +128,20 @@ export function HUD() {
           }}
         >
           Toggle View (V)
+        </button>
+        <button
+          onClick={toggleRotationAxes}
+          style={{
+            background: showRotationAxes ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
+            color: '#ccc',
+            border: '1px solid #333',
+            padding: '4px 8px',
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            fontSize: 12,
+          }}
+        >
+          Rotation Axis: {showRotationAxes ? 'On' : 'Off'}
         </button>
       </div>
 

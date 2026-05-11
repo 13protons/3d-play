@@ -13,8 +13,13 @@ export interface BodyMeta {
   name: string
   parentId: string | null
   mass: number
+  gm: number
   radius: number
+  axialTilt: number
+  angularVelocity: number
+  rotationPhase: number
   color: string
+  texture?: string
   emissive: boolean
   minimumLight: number
 }

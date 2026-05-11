@@ -2,7 +2,7 @@ import { Canvas } from '@react-three/fiber'
 import { Stars } from '@react-three/drei'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { Body } from './Body'
-import { OrbitTrace } from './OrbitTrace'
+import { OrbitPrediction } from './OrbitPrediction'
 import { VehicleMarker } from './VehicleMarker'
 import { CameraRig } from './CameraRig'
 
@@ -34,13 +34,10 @@ export function Scene() {
         <Body key={id} bodyId={id} />
       ))}
       {bodyIds.map((id) => (
-        <OrbitTrace key={`trace-${id}`} bodyId={id} />
+        <OrbitPrediction key={`prediction-${id}`} bodyId={id} />
       ))}
       {Object.keys(vehicles).map((id) => (
         <VehicleMarker key={`vm-${id}`} vehicleId={id} />
-      ))}
-      {Object.keys(vehicles).map((id) => (
-        <OrbitTrace key={`vtrace-${id}`} bodyId={id} />
       ))}
     </Canvas>
   )

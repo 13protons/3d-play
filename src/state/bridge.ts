@@ -88,8 +88,13 @@ export async function startSim(scenarioId: string): Promise<void> {
         name: def.name as string,
         parentId: def.parentId as string | null,
         mass: physics.mass as number,
+        gm: (physics.gm as number | undefined) ?? G * (physics.mass as number),
         radius: physics.radius as number,
+        axialTilt: physics.axialTilt as number,
+        angularVelocity: physics.angularVelocity as number,
+        rotationPhase: (scenario.bodies[def.id as string].rotationPhase as number | undefined) ?? 0,
         color: render.color as string,
+        texture: render.texture as string | undefined,
         emissive: (render.emissive as boolean) ?? false,
         minimumLight: (render.minimumLight as number | undefined) ?? 0,
       }

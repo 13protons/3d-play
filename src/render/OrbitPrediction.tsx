@@ -1,0 +1,228 @@
+import { useMemo, useRef, useState } from 'react'
+import { useFrame } from '@react-three/fiber'
+import { Line } from '@react-three/drei'
+import type { Group } from 'three'
+import { useCameraStore } from '../state/camera'
+import { useModeStore } from '../state/mode'
+import { useTrajectoriesStore } from '../state/trajectories'
+import { evaluateCurve } from '../sim/curves'
+import { sampleOrbitAtTrueAnomalies, stateToElements } from '../sim/orbital/kepler'
+import type { TrajectoryCurve } from '../sim/types'
+
+const ORBIT_SEGMENTS = 192
+const FOCUS_HALF_ANGLE = Math.PI / 18
+const FOCUS_SEGMENTS = 48
+const RECOMPUTE_INTERVAL_SECONDS = 600
+
+interface OrbitPredictionProps {
+  bodyId: string
+}
+
+interface OrbitLineStyle {
+  color: string
+  lineWidth: number
+  opacity: number
+}
+
+const ORBIT_COLORS = new Map([
+  ['earth', '#214bb3'],
+  ['venus', '#d99a24'],
+  ['mars', '#d75a32'],
+  ['jupiter', '#c9782e'],
+  ['saturn', '#b58a3a'],
+  ['uranus', '#49b9c4'],
+  ['neptune', '#355fd8'],
+])
+
+const DIM_ORBIT_COLORS = new Map([
+  ['earth', '#102b6d'],
+  ['venus', '#6c4d12'],
+  ['mars', '#6b2d19'],
+  ['jupiter', '#633c17'],
+  ['saturn', '#5a451d'],
+  ['uranus', '#245c62'],
+  ['neptune', '#1a2f6c'],
+])
+
+interface PredictionGeometry {
+  points: [number, number, number][]
+}
+
+export function shouldRecomputeOrbitPrediction(
+  lastComputedSimTime: number | null,
+  currentSimTime: number,
+  intervalSeconds: number,
+): boolean {
+  return (
+    lastComputedSimTime === null ||
+    currentSimTime - lastComputedSimTime >= intervalSeconds
+  )
+}
+
+export function usesUniformOrbitLineOpacity(): boolean {
+  return true
+}
+
+export function orbitLineStyleForBody(
+  bodyId: string | undefined,
+  followTargetId?: string,
+): OrbitLineStyle {
+  const isFocused = bodyId !== undefined && bodyId === followTargetId
+  return {
+    color: (isFocused ? ORBIT_COLORS : DIM_ORBIT_COLORS).get(bodyId ?? '') ??
+      (isFocused ? '#7f8cff' : '#40466f'),
+    lineWidth: isFocused ? 3 : 2,
+    opacity: 1,
+  }
+}
+
+export function predictionTrueAnomalies(
+  currentAnomaly: number,
+  baseSegments: number,
+  focusHalfAngle: number,
+  focusSegments: number,
+): number[] {
+  const twoPi = Math.PI * 2
+  const angles = new Map<number, number>()
+  const add = (theta: number) => {
+    const normalized = ((theta % twoPi) + twoPi) % twoPi
+    angles.set(Math.round(normalized * 1e9), normalized)
+  }
+
+  for (let i = 0; i < baseSegments; i++) {
+    add((i / baseSegments) * twoPi)
+  }
+  for (let i = 0; i <= focusSegments; i++) {
+    const t = i / focusSegments
+    add(currentAnomaly - focusHalfAngle + t * focusHalfAngle * 2)
+  }
+
+  const sorted = Array.from(angles.values()).sort((a, b) => a - b)
+  sorted.push(twoPi)
+  return sorted
+}
+
+export function OrbitPrediction({ bodyId }: OrbitPredictionProps) {
+  const groupRef = useRef<Group>(null)
+  const lastComputedSimTimeRef = useRef<number | null>(null)
+  const [prediction, setPrediction] = useState<PredictionGeometry | null>(null)
+  const body = useTrajectoriesStore((s) => s.bodies[bodyId])
+  const parentId = body?.parentId
+  const followTargetId = useCameraStore((s) => s.followTargetId)
+  const style = useMemo(
+    () => orbitLineStyleForBody(bodyId, followTargetId),
+    [bodyId, followTargetId],
+  )
+
+  useFrame(() => {
+    const group = groupRef.current
+    if (!group || !parentId) return
+
+    const inOrbitalView = useModeStore.getState().activeView === 'orbital'
+    group.visible = inOrbitalView
+    if (!inOrbitalView) return
+
+    const store = useTrajectoriesStore.getState()
+    const { curves, bodies } = store
+    const { followTargetId } = useCameraStore.getState()
+    const parentBody = bodies[parentId]
+    const bodyCurve = curves[bodyId]
+    const parentCurve = curves[parentId]
+    const targetCurve = curves[followTargetId]
+
+    if (!parentBody || !bodyCurve || !parentCurve) {
+      group.visible = false
+      return
+    }
+
+    const t = store.getSimTime()
+    const parentPos = evaluateCurve(parentCurve, t)
+
+    let camX = 0
+    let camY = 0
+    let camZ = 0
+    if (targetCurve) {
+      const camPos = evaluateCurve(targetCurve, t)
+      camX = camPos[0]
+      camY = camPos[1]
+      camZ = camPos[2]
+    }
+    group.position.set(
+      parentPos[0] - camX,
+      parentPos[1] - camY,
+      parentPos[2] - camZ,
+    )
+
+    if (!shouldRecomputeOrbitPrediction(
+      lastComputedSimTimeRef.current,
+      t,
+      RECOMPUTE_INTERVAL_SECONDS,
+    )) {
+      return
+    }
+
+    lastComputedSimTimeRef.current = t
+    const bodyPos = evaluateCurve(bodyCurve, t)
+    const bodyVel = hermiteVelocity(bodyCurve, t)
+    const parentVel = hermiteVelocity(parentCurve, t)
+    const relPos: [number, number, number] = [
+      bodyPos[0] - parentPos[0],
+      bodyPos[1] - parentPos[1],
+      bodyPos[2] - parentPos[2],
+    ]
+    const relVel: [number, number, number] = [
+      bodyVel[0] - parentVel[0],
+      bodyVel[1] - parentVel[1],
+      bodyVel[2] - parentVel[2],
+    ]
+
+    const elements = stateToElements(relPos, relVel, parentBody.gm)
+    const anomalies = predictionTrueAnomalies(
+      elements.ta,
+      ORBIT_SEGMENTS,
+      FOCUS_HALF_ANGLE,
+      FOCUS_SEGMENTS,
+    )
+    const points = sampleOrbitAtTrueAnomalies(elements, anomalies)
+    setPrediction({
+      points,
+    })
+    group.visible = points.length > 2
+  })
+
+  if (!parentId) return null
+
+  return (
+    <group ref={groupRef} visible={false}>
+      {prediction && prediction.points.length > 2 && (
+        <Line
+          points={prediction.points}
+          color={style.color}
+          lineWidth={style.lineWidth}
+          opacity={style.opacity}
+        />
+      )}
+    </group>
+  )
+}
+
+function hermiteVelocity(
+  curve: TrajectoryCurve,
+  t: number,
+): [number, number, number] {
+  const dt = curve.t1 - curve.t0
+  if (dt < 1e-10) return [...curve.v0]
+
+  const s = (t - curve.t0) / dt
+  const s2 = s * s
+  const dh00 = 6 * s2 - 6 * s
+  const dh10 = 3 * s2 - 4 * s + 1
+  const dh01 = -6 * s2 + 6 * s
+  const dh11 = 3 * s2 - 2 * s
+
+  return [
+    (dh00 * curve.p0[0] + dh10 * dt * curve.v0[0] + dh01 * curve.p1[0] + dh11 * dt * curve.v1[0]) / dt,
+    (dh00 * curve.p0[1] + dh10 * dt * curve.v0[1] + dh01 * curve.p1[1] + dh11 * dt * curve.v1[1]) / dt,
+    (dh00 * curve.p0[2] + dh10 * dt * curve.v0[2] + dh01 * curve.p1[2] + dh11 * dt * curve.v1[2]) / dt,
+  ]
+}

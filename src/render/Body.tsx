@@ -1,12 +1,18 @@
 import { useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import type { Mesh, PointLight, Sprite } from 'three'
+import type { Group, Mesh, PointLight, Sprite } from 'three'
 import { Vector3 } from 'three'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useCameraStore } from '../state/camera'
 import { useModeStore } from '../state/mode'
 import { evaluateCurve } from '../sim/curves'
 import { OrbitalMarker } from './OrbitalMarker'
+import { RotationLine } from './RotationLine'
+import { BodyMaterial } from './BodyMaterial'
+import {
+  bodyRotationAngle,
+  shouldShowRotationAxis,
+} from './rotation'
 import {
   projectedRadiusPx,
   shouldSuppressChildSprite,
@@ -23,18 +29,21 @@ interface BodyProps {
 }
 
 export function Body({ bodyId }: BodyProps) {
+  const spinGroupRef = useRef<Group>(null)
   const meshRef = useRef<Mesh>(null)
   const spriteRef = useRef<Sprite>(null)
   const lightRef = useRef<PointLight>(null)
   const camera = useThree((s) => s.camera)
   const viewport = useThree((s) => s.size)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
+  const showRotationAxes = useModeStore((s) => s.showRotationAxes)
 
   useFrame(() => {
     if (useModeStore.getState().activeView !== 'orbital') return
     if (!body) return
     const mesh = meshRef.current
     const sprite = spriteRef.current
+    const spinGroup = spinGroupRef.current
     if (!mesh || !sprite) return
 
     const store = useTrajectoriesStore.getState()
@@ -97,6 +106,14 @@ export function Body({ bodyId }: BodyProps) {
 
     mesh.visible = !useSprite
     sprite.visible = useSprite && !suppressSprite
+    if (spinGroup) {
+      spinGroup.visible = mesh.visible
+      spinGroup.rotation.set(
+        0,
+        bodyRotationAngle(body.rotationPhase, body.angularVelocity, t),
+        (body.axialTilt * Math.PI) / 180,
+      )
+    }
     const spriteSize = spriteWorldSize(
       SPRITE_SIZE_PX,
       distanceToCamera,
@@ -114,18 +131,15 @@ export function Body({ bodyId }: BodyProps) {
 
   return (
     <group>
-      <mesh ref={meshRef}>
-        <sphereGeometry args={[body.radius, 32, 32]} />
-        {body.emissive ? (
-          <meshBasicMaterial color={body.color} />
-        ) : (
-          <meshStandardMaterial
-            color={body.color}
-            emissive={body.color}
-            emissiveIntensity={body.minimumLight}
-          />
+      <group ref={spinGroupRef}>
+        <mesh ref={meshRef}>
+          <sphereGeometry args={[body.radius, 32, 32]} />
+          <BodyMaterial body={body} />
+        </mesh>
+        {shouldShowRotationAxis(true, showRotationAxes) && (
+          <RotationLine radius={body.radius} />
         )}
-      </mesh>
+      </group>
       <OrbitalMarker
         ref={spriteRef}
         color={body.color}

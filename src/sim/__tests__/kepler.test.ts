@@ -1,18 +1,28 @@
 import { describe, it, expect } from 'vitest'
-import { stateToElements, sampleOrbit } from '../orbital/kepler'
+import { stateToElements, sampleOrbit, sampleOrbitAtTrueAnomalies } from '../orbital/kepler'
 import { G } from '../constants'
 
 const sunMass = 1.989e30
+const sunGm = G * sunMass
 const earthOrbitRadius = 1.496e11
-const earthOrbitalSpeed = Math.sqrt((G * sunMass) / earthOrbitRadius)
+const earthOrbitalSpeed = Math.sqrt(sunGm / earthOrbitRadius)
 
 describe('stateToElements', () => {
+  it('uses the supplied parent GM directly', () => {
+    const r: [number, number, number] = [earthOrbitRadius, 0, 0]
+    const v: [number, number, number] = [0, 0, earthOrbitalSpeed]
+
+    const elements = stateToElements(r, v, sunGm)
+
+    expect(elements.mu).toBe(sunGm)
+  })
+
   it('computes near-zero eccentricity for circular orbit', () => {
     // Earth-like circular orbit in xz plane (y-up)
     const r: [number, number, number] = [earthOrbitRadius, 0, 0]
     const v: [number, number, number] = [0, 0, earthOrbitalSpeed]
 
-    const elements = stateToElements(r, v, sunMass)
+    const elements = stateToElements(r, v, sunGm)
 
     expect(elements.e).toBeLessThan(0.01)
     expect(elements.a).toBeCloseTo(earthOrbitRadius, -5) // within 100km
@@ -22,7 +32,7 @@ describe('stateToElements', () => {
     const r: [number, number, number] = [earthOrbitRadius, 0, 0]
     const v: [number, number, number] = [0, 0, earthOrbitalSpeed]
 
-    const elements = stateToElements(r, v, sunMass)
+    const elements = stateToElements(r, v, sunGm)
 
     // a should be ~1 AU
     const relError = Math.abs(elements.a - earthOrbitRadius) / earthOrbitRadius
@@ -34,7 +44,7 @@ describe('stateToElements', () => {
     const r: [number, number, number] = [earthOrbitRadius, 0, 0]
     const v: [number, number, number] = [0, 0, earthOrbitalSpeed * 1.2]
 
-    const elements = stateToElements(r, v, sunMass)
+    const elements = stateToElements(r, v, sunGm)
 
     expect(elements.e).toBeGreaterThan(0.1)
     expect(elements.a).toBeGreaterThan(earthOrbitRadius) // larger orbit
@@ -52,10 +62,25 @@ describe('stateToElements', () => {
       -earthOrbitalSpeed * cos30,
     ]
 
-    const elements = stateToElements(r, v, sunMass)
+    const elements = stateToElements(r, v, sunGm)
 
     // Inclination should be ~30° = ~0.524 radians
     expect(elements.i).toBeCloseTo(Math.PI / 6, 1)
+  })
+
+  it('reconstructs the current position at the returned true anomaly', () => {
+    const r: [number, number, number] = [earthOrbitRadius, earthOrbitRadius * 0.12, earthOrbitRadius * 0.35]
+    const v: [number, number, number] = [-2200, 3600, earthOrbitalSpeed * 0.92]
+
+    const elements = stateToElements(r, v, sunGm)
+    const [reconstructed] = sampleOrbitAtTrueAnomalies(elements, [elements.ta])
+    const error = Math.hypot(
+      reconstructed[0] - r[0],
+      reconstructed[1] - r[1],
+      reconstructed[2] - r[2],
+    )
+
+    expect(error / Math.hypot(...r)).toBeLessThan(1e-9)
   })
 })
 
@@ -63,7 +88,7 @@ describe('sampleOrbit', () => {
   it('returns correct number of points for elliptical orbit', () => {
     const r: [number, number, number] = [earthOrbitRadius, 0, 0]
     const v: [number, number, number] = [0, 0, earthOrbitalSpeed]
-    const elements = stateToElements(r, v, sunMass)
+    const elements = stateToElements(r, v, sunGm)
 
     const points = sampleOrbit(elements, 64)
     expect(points.length).toBe(65) // 64 segments = 65 points (closed)
@@ -73,7 +98,7 @@ describe('sampleOrbit', () => {
     // Escape velocity = sqrt(2) * circular velocity
     const r: [number, number, number] = [earthOrbitRadius, 0, 0]
     const v: [number, number, number] = [0, 0, earthOrbitalSpeed * 2]
-    const elements = stateToElements(r, v, sunMass)
+    const elements = stateToElements(r, v, sunGm)
 
     expect(elements.e).toBeGreaterThan(1)
     const points = sampleOrbit(elements, 64)
@@ -83,7 +108,7 @@ describe('sampleOrbit', () => {
   it('orbit points lie at approximately correct distance for circular orbit', () => {
     const r: [number, number, number] = [earthOrbitRadius, 0, 0]
     const v: [number, number, number] = [0, 0, earthOrbitalSpeed]
-    const elements = stateToElements(r, v, sunMass)
+    const elements = stateToElements(r, v, sunGm)
     const points = sampleOrbit(elements, 64)
 
     for (const p of points) {
@@ -96,7 +121,7 @@ describe('sampleOrbit', () => {
   it('orbit points form a closed loop', () => {
     const r: [number, number, number] = [earthOrbitRadius, 0, 0]
     const v: [number, number, number] = [0, 0, earthOrbitalSpeed]
-    const elements = stateToElements(r, v, sunMass)
+    const elements = stateToElements(r, v, sunGm)
     const points = sampleOrbit(elements, 64)
 
     const first = points[0]

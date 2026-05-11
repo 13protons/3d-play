@@ -12,6 +12,7 @@
   },
   "render": {
     "color": "#c65f3a",
+    "texture": "/data/textures/Martian.png",
     "emissive": false,
     "minimumLight": 0.03
   }

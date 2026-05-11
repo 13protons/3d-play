@@ -12,6 +12,7 @@
   },
   "render": {
     "color": "#d8b26e",
+    "texture": "/data/textures/Venusian.png",
     "emissive": false,
     "minimumLight": 0.04
   }
