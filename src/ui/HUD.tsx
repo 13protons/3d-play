@@ -21,6 +21,7 @@ export function HUD() {
   const warpRate = useTrajectoriesStore((s) => s.warpRate)
   const bodies = useTrajectoriesStore((s) => s.bodies)
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
+  const vehicleControls = useTrajectoriesStore((s) => s.vehicleControls)
   const followTargetId = useCameraStore((s) => s.followTargetId)
   const setFollowTarget = useCameraStore((s) => s.setFollowTarget)
   const activeView = useModeStore((s) => s.activeView)
@@ -28,6 +29,8 @@ export function HUD() {
   const toggleView = useModeStore((s) => s.toggleView)
   const toggleRotationAxes = useModeStore((s) => s.toggleRotationAxes)
   const targetName = bodies[followTargetId]?.name ?? vehicles[followTargetId]?.name ?? followTargetId
+  const firstVehicle = Object.values(vehicles)[0]
+  const throttle = firstVehicle ? (vehicleControls[firstVehicle.id]?.throttle ?? 0) : 0
 
   function setWarp(rate: number) {
     useInputStore
@@ -67,6 +70,12 @@ export function HUD() {
           <div style={{ opacity: 0.6, fontSize: 11 }}>VIEW</div>
           <div>{activeView.toUpperCase()}</div>
         </div>
+        {firstVehicle && (
+          <div>
+            <div style={{ opacity: 0.6, fontSize: 11 }}>THRUST</div>
+            <div>{throttle > 0 ? 'ON' : 'OFF'}</div>
+          </div>
+        )}
       </div>
 
       <div
@@ -177,8 +186,8 @@ export function HUD() {
       </div>
 
       <div style={{ marginTop: 8, opacity: 0.4, fontSize: 11 }}>
-        [ / ] warp &nbsp; V toggle view &nbsp; scroll to zoom &nbsp; drag to
-        orbit &nbsp; esc menu
+        [ / ] warp &nbsp; Shift thrust &nbsp; WASD/QE RCS &nbsp; V toggle view
+        &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
     </div>
   )

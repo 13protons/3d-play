@@ -9,11 +9,31 @@ import type { TrajectoryCurve, VehicleWorkerInbound } from '../types'
 import { toAbsolute } from '../coordinates'
 import { advanceTo } from '../integrator/adaptive'
 import { pointMassDerivatives } from '../integrator/derivatives'
+import {
+  integrateOrientation,
+  shouldStabilizeAngularVelocityForWarp,
+  thrustAccelerationForOrientation,
+  type Quaternion,
+  type Vec3,
+} from './controls'
 
 let vehicleId = ''
 let stateVec: Float64Array | null = null
 let bodyGMs = new Map<string, number>()
 let simTime = 0
+let throttle = 0
+let orientation: Quaternion = [0, 0, 0, 1]
+let angularVelocity: Vec3 = [0, 0, 0]
+
+function emitControls(): void {
+  postMessage({
+    type: 'vehicle-controls',
+    id: vehicleId,
+    throttle,
+    orientation,
+    angularVelocity,
+  })
+}
 
 function emitCurves(prevTime: number, prevState: Float64Array): void {
   if (!stateVec) return
@@ -48,10 +68,31 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     ])
     bodyGMs = new Map(msg.bodyGMs)
     simTime = 0
+    throttle = 0
+    orientation = [0, 0, 0, 1]
+    angularVelocity = [0, 0, 0]
 
     // Build derivative from initial body curves and integrate to initial time
     const initState = new Float64Array(stateVec)
     emitCurves(0, initState)
+    emitControls()
+  }
+
+  if (msg.type === 'set-throttle') {
+    throttle = Math.max(0, Math.min(1, msg.value))
+    emitControls()
+  }
+
+  if (msg.type === 'set-attitude') {
+    angularVelocity = [msg.pitch, msg.yaw, msg.roll]
+    emitControls()
+  }
+
+  if (msg.type === 'set-warp') {
+    if (shouldStabilizeAngularVelocityForWarp(msg.rate)) {
+      angularVelocity = [0, 0, 0]
+      emitControls()
+    }
   }
 
   if (msg.type === 'advance') {
@@ -65,12 +106,20 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     const prevTime = simTime
     const prevState = new Float64Array(stateVec)
 
-    // Build gravity function from body trajectory curves for this batch
-    const deriv = pointMassDerivatives(msg.bodyCurves, bodyGMs)
+    const gravityDeriv = pointMassDerivatives(msg.bodyCurves, bodyGMs)
+    const thrust = thrustAccelerationForOrientation(orientation, throttle)
+    const deriv = (t: number, y: Float64Array, dydt: Float64Array): void => {
+      gravityDeriv(t, y, dydt)
+      dydt[3] += thrust[0]
+      dydt[4] += thrust[1]
+      dydt[5] += thrust[2]
+    }
 
     advanceTo(stateVec, simTime, targetTime, deriv, 1e-10)
+    orientation = integrateOrientation(orientation, angularVelocity, targetTime - simTime)
     simTime = targetTime
 
     emitCurves(prevTime, prevState)
+    emitControls()
   }
 }

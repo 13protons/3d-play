@@ -173,11 +173,24 @@ function VehicleBody({
 }
 
 function VehicleMesh() {
+  const vehicles = useTrajectoriesStore((s) => s.vehicles)
+  const vehicleControls = useTrajectoriesStore((s) => s.vehicleControls)
+  const firstVehicle = Object.values(vehicles)[0]
+  const controls = firstVehicle ? vehicleControls[firstVehicle.id] : undefined
+
   return (
-    <mesh>
-      <cylinderGeometry args={[1, 1.5, 4, 8]} />
-      <meshStandardMaterial color="#cccccc" />
-    </mesh>
+    <group>
+      <mesh quaternion={controls?.orientation}>
+        <cylinderGeometry args={[1, 1.5, 4, 8]} />
+        <meshStandardMaterial color="#cccccc" />
+      </mesh>
+      {controls && controls.throttle > 0 && (
+        <mesh position={[0, 0, -3]}>
+          <sphereGeometry args={[0.7, 12, 8]} />
+          <meshBasicMaterial color="#ff8a18" />
+        </mesh>
+      )}
+    </group>
   )
 }
 

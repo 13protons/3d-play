@@ -4,6 +4,7 @@ import { useTrajectoriesStore } from '../state/trajectories'
 import { Body } from './Body'
 import { OrbitPrediction } from './OrbitPrediction'
 import { VehicleMarker } from './VehicleMarker'
+import { VehicleOrbitPrediction } from './VehicleOrbitPrediction'
 import { CameraRig } from './CameraRig'
 
 export function Scene() {
@@ -38,6 +39,9 @@ export function Scene() {
       ))}
       {Object.keys(vehicles).map((id) => (
         <VehicleMarker key={`vm-${id}`} vehicleId={id} />
+      ))}
+      {Object.keys(vehicles).map((id) => (
+        <VehicleOrbitPrediction key={`vprediction-${id}`} vehicleId={id} />
       ))}
     </Canvas>
   )

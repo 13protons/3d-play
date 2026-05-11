@@ -72,6 +72,8 @@ export type VehicleWorkerInbound =
       bodyCurves: TrajectoryCurve[]
     }
   | { type: 'set-warp'; rate: number }
+  | { type: 'set-throttle'; value: number }
+  | { type: 'set-attitude'; pitch: number; yaw: number; roll: number }
 
 /** Outbound messages from the vehicle worker */
 export type VehicleWorkerOutbound =
@@ -84,6 +86,13 @@ export type VehicleWorkerOutbound =
       type: 'vehicle-position'
       position: [number, number, number]
       velocity: [number, number, number]
+    }
+  | {
+      type: 'vehicle-controls'
+      id: string
+      throttle: number
+      orientation: [number, number, number, number]
+      angularVelocity: [number, number, number]
     }
 
 // ---------------------------------------------------------------------------

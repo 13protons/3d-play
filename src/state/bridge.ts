@@ -206,6 +206,13 @@ export async function startSim(scenarioId: string): Promise<void> {
         useTrajectoriesStore.getState().mergeCurves(msg.curves)
         vehicleState = 'idle'
       }
+      if (msg.type === 'vehicle-controls') {
+        useTrajectoriesStore.getState().setVehicleControl(msg.id, {
+          throttle: msg.throttle,
+          orientation: msg.orientation,
+          angularVelocity: msg.angularVelocity,
+        })
+      }
     }
 
     vehicleWorker.postMessage({
@@ -263,6 +270,18 @@ function flushCommands(): void {
     if (cmd.type === 'set-warp') {
       warpRate = cmd.rate
       useTrajectoriesStore.getState().setWarpRate(cmd.rate)
+      if (vehicleWorker) vehicleWorker.postMessage({ type: 'set-warp', rate: cmd.rate })
+    }
+    if (cmd.type === 'set-throttle' && vehicleWorker) {
+      vehicleWorker.postMessage({ type: 'set-throttle', value: cmd.value })
+    }
+    if (cmd.type === 'set-attitude' && vehicleWorker) {
+      vehicleWorker.postMessage({
+        type: 'set-attitude',
+        pitch: cmd.pitch,
+        yaw: cmd.yaw,
+        roll: cmd.roll,
+      })
     }
   }
 }

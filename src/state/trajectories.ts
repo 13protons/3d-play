@@ -8,6 +8,12 @@ export interface VehicleMeta {
   mesh: string
 }
 
+export interface VehicleControlMeta {
+  throttle: number
+  orientation: [number, number, number, number]
+  angularVelocity: [number, number, number]
+}
+
 export interface BodyMeta {
   id: string
   name: string
@@ -28,6 +34,7 @@ interface TrajectoriesState {
   curves: Record<string, TrajectoryCurve>
   bodies: Record<string, BodyMeta>
   vehicles: Record<string, VehicleMeta>
+  vehicleControls: Record<string, VehicleControlMeta>
   simTime: number
   warpRate: number
   lastUpdateWallTime: number
@@ -37,6 +44,7 @@ interface TrajectoriesState {
   mergeCurves: (curves: TrajectoryCurve[]) => void
   setBodies: (bodies: BodyMeta[]) => void
   setVehicles: (vehicles: VehicleMeta[]) => void
+  setVehicleControl: (vehicleId: string, control: VehicleControlMeta) => void
   setWarpRate: (rate: number) => void
   reset: () => void
   /** Interpolated sim time — use this everywhere for consistent positioning. */
@@ -47,6 +55,7 @@ export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
   curves: {},
   bodies: {},
   vehicles: {},
+  vehicleControls: {},
   simTime: 0,
   warpRate: 1,
   lastUpdateWallTime: performance.now(),
@@ -79,6 +88,11 @@ export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
       vehicles: Object.fromEntries(vehicles.map((v) => [v.id, v])),
     }),
 
+  setVehicleControl: (vehicleId, control) =>
+    set((state) => ({
+      vehicleControls: { ...state.vehicleControls, [vehicleId]: control },
+    })),
+
   setWarpRate: (rate) => set({ warpRate: rate }),
 
   getSimTime: () => {
@@ -95,6 +109,7 @@ export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
       curves: {},
       bodies: {},
       vehicles: {},
+      vehicleControls: {},
       simTime: 0,
       warpRate: 1,
       lastUpdateWallTime: performance.now(),
