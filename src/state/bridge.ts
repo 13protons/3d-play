@@ -8,6 +8,10 @@ import { useInputStore } from './input'
 import type { BodyMeta } from './trajectories'
 import type { TrajectoryCurve } from '../sim/types'
 import { G } from '../sim/constants'
+import {
+  jplEclipticToAppYUpVector,
+  vectorToSectorPosition,
+} from '../sim/ephemeris'
 
 let orbitalWorker: Worker | null = null
 let vehicleWorker: Worker | null = null
@@ -32,12 +36,38 @@ let bodyGMs: [string, number][] = []
 // Latest orbital curves (forwarded to vehicle worker)
 let latestOrbitalCurves: TrajectoryCurve[] = []
 
+function sectorPositionToVector(position: {
+  sector: [number, number, number]
+  local: [number, number, number]
+}): [number, number, number] {
+  return [
+    position.sector[0] * 1_000_000 + position.local[0],
+    position.sector[1] * 1_000_000 + position.local[1],
+    position.sector[2] * 1_000_000 + position.local[2],
+  ]
+}
+
+function subtractVector(
+  a: [number, number, number],
+  b: [number, number, number],
+): [number, number, number] {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+function addVector(
+  a: [number, number, number],
+  b: [number, number, number],
+): [number, number, number] {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
 export async function startSim(scenarioId: string): Promise<void> {
   const scenarioResp = await fetch(`/data/scenarios/${scenarioId}.json`)
   if (!scenarioResp.ok) {
     throw new Error(`Failed to load scenario: ${scenarioId} (${scenarioResp.status})`)
   }
   const scenario = await scenarioResp.json()
+  const isJplEclipticFrame = scenario.coordinateFrame === 'jpl-ecliptic'
 
   const bodyIds = Object.keys(scenario.bodies)
   const bodyDefs = await Promise.all(
@@ -110,6 +140,16 @@ export async function startSim(scenarioId: string): Promise<void> {
       const physics = def.physics as Record<string, unknown>
       const bodyId = def.id as string
       const scenarioBody = scenario.bodies[bodyId]
+      const position = isJplEclipticFrame
+        ? vectorToSectorPosition(
+            jplEclipticToAppYUpVector(
+              sectorPositionToVector(scenarioBody.position),
+            ),
+          )
+        : scenarioBody.position
+      const velocity = isJplEclipticFrame
+        ? jplEclipticToAppYUpVector(scenarioBody.velocity)
+        : scenarioBody.velocity
       return {
         id: bodyId,
         name: def.name,
@@ -118,8 +158,8 @@ export async function startSim(scenarioId: string): Promise<void> {
         gm: (physics.gm as number | undefined) ?? G * (physics.mass as number),
         radius: physics.radius,
         soiRadius: physics.soiRadius,
-        position: scenarioBody.position,
-        velocity: scenarioBody.velocity,
+        position,
+        velocity,
       }
     }),
   })
@@ -135,6 +175,20 @@ export async function startSim(scenarioId: string): Promise<void> {
     await orbitalReady
 
     const v = vehicles[0]
+    let vehiclePosition = v.position
+    let vehicleVelocity = v.velocity
+    if (isJplEclipticFrame) {
+      const parentBody = scenario.bodies[v.parentId as string]
+      const parentRawPosition = sectorPositionToVector(parentBody.position)
+      const vehicleRawPosition = sectorPositionToVector(v.position)
+      const localPosition = subtractVector(vehicleRawPosition, parentRawPosition)
+      const parentAppPosition = jplEclipticToAppYUpVector(parentRawPosition)
+      const parentAppVelocity = jplEclipticToAppYUpVector(parentBody.velocity)
+      const localVelocity = subtractVector(v.velocity, parentBody.velocity)
+
+      vehiclePosition = vectorToSectorPosition(addVector(parentAppPosition, localPosition))
+      vehicleVelocity = addVector(parentAppVelocity, localVelocity)
+    }
 
     vehicleWorker = new Worker(
       new URL('../sim/vehicle/worker.ts', import.meta.url),
@@ -151,7 +205,7 @@ export async function startSim(scenarioId: string): Promise<void> {
 
     vehicleWorker.postMessage({
       type: 'init',
-      vehicle: { id: v.id, position: v.position, velocity: v.velocity },
+      vehicle: { id: v.id, position: vehiclePosition, velocity: vehicleVelocity },
       bodyCurves: latestOrbitalCurves,
       bodyGMs,
     })

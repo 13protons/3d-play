@@ -1,6 +1,7 @@
 {
   "id": "full-solar-system",
   "name": "Full Solar System",
+  "coordinateFrame": "jpl-ecliptic",
   "epoch": 2461041.5,
   "bodies": {
     "sun": {

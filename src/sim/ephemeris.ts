@@ -7,6 +7,12 @@ export interface EphemerisStateVector {
   velocity: [number, number, number]
 }
 
+export function jplEclipticToAppYUpVector(
+  vector: [number, number, number],
+): [number, number, number] {
+  return [vector[0], -vector[2], vector[1]]
+}
+
 export function toSectorPosition(valueMeters: number): { sector: number; local: number } {
   const sector = Math.floor(valueMeters / SECTOR_SIZE)
   return { sector, local: valueMeters - sector * SECTOR_SIZE }

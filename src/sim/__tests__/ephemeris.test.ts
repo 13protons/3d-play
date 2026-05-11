@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { packStateVectors, toSectorPosition } from '../ephemeris'
+import {
+  jplEclipticToAppYUpVector,
+  packStateVectors,
+  toSectorPosition,
+} from '../ephemeris'
 import { advanceTo } from '../integrator/adaptive'
 import { nBodyDerivativesFromGMs } from '../integrator/derivatives'
 import {
@@ -31,6 +35,12 @@ describe('toSectorPosition', () => {
   it('normalizes positive and negative absolute meters to sector/local coordinates', () => {
     expect(toSectorPosition(1_500_000)).toEqual({ sector: 1, local: 500_000 })
     expect(toSectorPosition(-500_000)).toEqual({ sector: -1, local: 500_000 })
+  })
+})
+
+describe('jplEclipticToAppYUpVector', () => {
+  it('maps Horizons ecliptic x/y/z into the app x/y-up/z frame', () => {
+    expect(jplEclipticToAppYUpVector([1, 2, 3])).toEqual([1, -3, 2])
   })
 })
 
