@@ -1,0 +1,18 @@
+{
+  "id": "mars",
+  "name": "Mars",
+  "parentId": "sun",
+  "physics": {
+    "mass": 6.4171e23,
+    "gm": 4.2828375662e13,
+    "radius": 3389500,
+    "axialTilt": 25.19,
+    "angularVelocity": 7.088e-5,
+    "soiRadius": 577000000
+  },
+  "render": {
+    "color": "#c65f3a",
+    "emissive": false,
+    "minimumLight": 0.03
+  }
+}

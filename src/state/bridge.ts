@@ -61,6 +61,7 @@ export async function startSim(scenarioId: string): Promise<void> {
         radius: physics.radius as number,
         color: render.color as string,
         emissive: (render.emissive as boolean) ?? false,
+        minimumLight: (render.minimumLight as number | undefined) ?? 0,
       }
     },
   )
@@ -68,8 +69,11 @@ export async function startSim(scenarioId: string): Promise<void> {
 
   // Compute G*M pairs for vehicle gravity
   bodyGMs = bodyDefs.map((def: Record<string, unknown>) => {
-    const physics = def.physics as Record<string, unknown>
-    return [def.id as string, G * (physics.mass as number)] as [string, number]
+      const physics = def.physics as Record<string, unknown>
+      return [
+        def.id as string,
+        (physics.gm as number | undefined) ?? G * (physics.mass as number),
+      ] as [string, number]
   })
 
   // Spawn the orbital worker
@@ -111,6 +115,7 @@ export async function startSim(scenarioId: string): Promise<void> {
         name: def.name,
         parentId: def.parentId,
         mass: physics.mass,
+        gm: (physics.gm as number | undefined) ?? G * (physics.mass as number),
         radius: physics.radius,
         soiRadius: physics.soiRadius,
         position: scenarioBody.position,

@@ -16,6 +16,7 @@ export interface BodyMeta {
   radius: number
   color: string
   emissive: boolean
+  minimumLight: number
 }
 
 interface TrajectoriesState {

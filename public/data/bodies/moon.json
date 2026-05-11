@@ -4,6 +4,7 @@
   "parentId": "earth",
   "physics": {
     "mass": 7.342e22,
+    "gm": 4.902800066e12,
     "radius": 1737000,
     "axialTilt": 1.54,
     "angularVelocity": 2.662e-6,
@@ -11,6 +12,7 @@
   },
   "render": {
     "color": "#C0C0C0",
-    "emissive": false
+    "emissive": false,
+    "minimumLight": 0.02
   }
 }

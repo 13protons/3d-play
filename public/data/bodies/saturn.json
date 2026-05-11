@@ -1,0 +1,18 @@
+{
+  "id": "saturn",
+  "name": "Saturn",
+  "parentId": "sun",
+  "physics": {
+    "mass": 5.6834e26,
+    "gm": 3.7931206234e16,
+    "radius": 58232000,
+    "axialTilt": 26.73,
+    "angularVelocity": 1.6379e-4,
+    "soiRadius": 54800000000
+  },
+  "render": {
+    "color": "#c8b27a",
+    "emissive": false,
+    "minimumLight": 0.03
+  }
+}

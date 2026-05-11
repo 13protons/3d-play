@@ -27,7 +27,7 @@ export function Scene() {
         height: '100%',
       }}
     >
-      <ambientLight intensity={0.08} />
+      <ambientLight intensity={0.04} />
       <Stars radius={1e14} depth={1e14} count={3000} factor={1e12} fade />
       <CameraRig />
       {bodyIds.map((id) => (

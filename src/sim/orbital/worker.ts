@@ -8,13 +8,14 @@
 import type { TrajectoryCurve, SectorPosition } from '../types'
 import { toAbsolute } from '../coordinates'
 import { advanceTo } from '../integrator/adaptive'
-import { nBodyDerivatives } from '../integrator/derivatives'
+import { nBodyDerivativesFromGMs } from '../integrator/derivatives'
 
 interface InitBody {
   id: string
   name: string
   parentId: string | null
   mass: number
+  gm: number
   radius: number
   soiRadius?: number
   position: SectorPosition
@@ -22,10 +23,10 @@ interface InitBody {
 }
 
 let bodyIds: string[] = []
-let masses: number[] = []
+let gms: number[] = []
 let stateVec: Float64Array | null = null
 let simTime = 0
-let deriv: ReturnType<typeof nBodyDerivatives> | null = null
+let deriv: ReturnType<typeof nBodyDerivativesFromGMs> | null = null
 
 /** Unpack state vector back to absolute positions + velocities per body. */
 function emitCurves(prevTime: number, prevState: Float64Array): void {
@@ -53,8 +54,8 @@ onmessage = (e: MessageEvent) => {
   if (msg.type === 'init') {
     const bodies = msg.bodies as InitBody[]
     bodyIds = bodies.map((b) => b.id)
-    masses = bodies.map((b) => b.mass)
-    deriv = nBodyDerivatives(masses)
+    gms = bodies.map((b) => b.gm)
+    deriv = nBodyDerivativesFromGMs(gms)
 
     // Pack initial state vector: [x0,y0,z0,vx0,vy0,vz0, x1,...]
     stateVec = new Float64Array(bodies.length * 6)

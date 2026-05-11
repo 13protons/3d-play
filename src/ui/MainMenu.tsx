@@ -2,6 +2,12 @@ interface MainMenuProps {
   onLaunch: (scenarioId: string) => void
 }
 
+const scenarios = [
+  { id: 'sun-earth-moon', label: 'Launch: Sun-Earth-Moon' },
+  { id: 'inner-solar-system', label: 'Launch: Inner Solar System' },
+  { id: 'full-solar-system', label: 'Launch: Full Solar System' },
+]
+
 export function MainMenu({ onLaunch }: MainMenuProps) {
   return (
     <div
@@ -22,21 +28,26 @@ export function MainMenu({ onLaunch }: MainMenuProps) {
       <p style={{ opacity: 0.5, marginBottom: 48 }}>
         n-body orbital mechanics
       </p>
-      <button
-        onClick={() => onLaunch('sun-earth-moon')}
-        style={{
-          padding: '12px 32px',
-          fontSize: 16,
-          background: 'rgba(100,180,255,0.15)',
-          color: 'white',
-          border: '1px solid rgba(100,180,255,0.4)',
-          borderRadius: 6,
-          cursor: 'pointer',
-          fontFamily: 'monospace',
-        }}
-      >
-        Launch: Sun–Earth–Moon
-      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {scenarios.map((scenario) => (
+          <button
+            key={scenario.id}
+            onClick={() => onLaunch(scenario.id)}
+            style={{
+              padding: '12px 32px',
+              fontSize: 16,
+              background: 'rgba(100,180,255,0.15)',
+              color: 'white',
+              border: '1px solid rgba(100,180,255,0.4)',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontFamily: 'monospace',
+            }}
+          >
+            {scenario.label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

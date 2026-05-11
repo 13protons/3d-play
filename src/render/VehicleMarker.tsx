@@ -1,22 +1,27 @@
 import { useRef } from 'react'
-import { useFrame } from '@react-three/fiber'
-import type { Mesh } from 'three'
+import { useFrame, useThree } from '@react-three/fiber'
+import type { Sprite } from 'three'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useCameraStore } from '../state/camera'
 import { useModeStore } from '../state/mode'
 import { evaluateCurve } from '../sim/curves'
+import { OrbitalMarker } from './OrbitalMarker'
+import { spriteWorldSize } from './lod'
+
+const VEHICLE_MARKER_SIZE_PX = 14
 
 interface VehicleMarkerProps {
   vehicleId: string
 }
 
 export function VehicleMarker({ vehicleId }: VehicleMarkerProps) {
-  const meshRef = useRef<Mesh>(null)
+  const markerRef = useRef<Sprite>(null)
+  const viewport = useThree((s) => s.size)
 
   useFrame(({ camera }) => {
     if (useModeStore.getState().activeView !== 'orbital') return
-    const mesh = meshRef.current
-    if (!mesh) return
+    const marker = markerRef.current
+    if (!marker) return
 
     const store = useTrajectoriesStore.getState()
     const { followTargetId } = useCameraStore.getState()
@@ -36,18 +41,18 @@ export function VehicleMarker({ vehicleId }: VehicleMarkerProps) {
       camY = camPos[1]
       camZ = camPos[2]
     }
-    mesh.position.set(pos[0] - camX, pos[1] - camY, pos[2] - camZ)
+    marker.position.set(pos[0] - camX, pos[1] - camY, pos[2] - camZ)
 
-    // Scale to maintain constant screen size
-    const dist = camera.position.distanceTo(mesh.position)
-    const scale = dist * 0.008
-    mesh.scale.setScalar(Math.max(scale, 1000))
+    const fov = 'fov' in camera ? (camera.fov * Math.PI) / 180 : Math.PI / 3
+    const pixelsPerRadian = viewport.height / (2 * Math.tan(fov / 2))
+    const distanceToCamera = camera.position.distanceTo(marker.position)
+    const markerSize = spriteWorldSize(
+      VEHICLE_MARKER_SIZE_PX,
+      distanceToCamera,
+      pixelsPerRadian,
+    )
+    marker.scale.set(markerSize, markerSize, 1)
   })
 
-  return (
-    <mesh ref={meshRef}>
-      <octahedronGeometry args={[1, 0]} />
-      <meshBasicMaterial color="#00ff88" />
-    </mesh>
-  )
+  return <OrbitalMarker ref={markerRef} color="#00ff88" shape="triangle" />
 }

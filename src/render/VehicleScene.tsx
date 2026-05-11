@@ -1,11 +1,19 @@
 import { useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Stars, OrbitControls } from '@react-three/drei'
-import type { Mesh, PointLight } from 'three'
+import type { Mesh, MeshBasicMaterial, PointLight } from 'three'
 import { useModeStore } from '../state/mode'
 import { useTrajectoriesStore } from '../state/trajectories'
 import type { BodyMeta } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
+import {
+  isSunOccluded,
+  projectDistantSphere,
+  type SunOccluder,
+  type Vec3,
+} from './lighting'
+
+const SUN_RENDER_DISTANCE = 5e8
 
 /**
  * Walk up from vehicleParentId to root, collecting ancestors and their direct children.
@@ -43,9 +51,11 @@ function getCelestialHierarchy(
 function VehicleBody({
   bodyId,
   vehicleId,
+  visibleBodyIds,
 }: {
   bodyId: string
   vehicleId: string
+  visibleBodyIds: string[]
 }) {
   const meshRef = useRef<Mesh>(null)
   const lightRef = useRef<PointLight>(null)
@@ -68,15 +78,60 @@ function VehicleBody({
     const bodyPos = evaluateCurve(bodyCurve, t)
     const vehiclePos = evaluateCurve(vehicleCurve, t)
 
-    // Floating origin centered on vehicle
+    const renderBody = body.emissive
+      ? projectDistantSphere(
+          vehiclePos as Vec3,
+          bodyPos as Vec3,
+          body.radius,
+          SUN_RENDER_DISTANCE,
+        )
+      : null
+
+    // Floating origin centered on vehicle. Stars use a projected proxy so the
+    // vehicle camera can keep practical clipping while still showing the Sun.
     mesh.position.set(
-      bodyPos[0] - vehiclePos[0],
-      bodyPos[1] - vehiclePos[1],
-      bodyPos[2] - vehiclePos[2],
+      renderBody ? renderBody.position[0] : bodyPos[0] - vehiclePos[0],
+      renderBody ? renderBody.position[1] : bodyPos[1] - vehiclePos[1],
+      renderBody ? renderBody.position[2] : bodyPos[2] - vehiclePos[2],
     )
+
+    if (renderBody) {
+      mesh.scale.setScalar(renderBody.radius / body.radius)
+    } else {
+      mesh.scale.setScalar(1)
+    }
+
+    const sunOccluded = body.emissive
+      ? isSunOccluded(
+          vehiclePos as Vec3,
+          bodyPos as Vec3,
+          visibleBodyIds
+            .filter((id) => id !== bodyId)
+            .map((id): SunOccluder | null => {
+              const occluder = store.bodies[id]
+              const occluderCurve = curves[id]
+              if (!occluder || !occluderCurve) return null
+              return {
+                id,
+                position: evaluateCurve(occluderCurve, t) as Vec3,
+                radius: occluder.radius,
+              }
+            })
+            .filter((occluder): occluder is SunOccluder => occluder !== null),
+        )
+      : false
+
+    mesh.visible = !sunOccluded
 
     if (lightRef.current) {
       lightRef.current.position.copy(mesh.position)
+      lightRef.current.intensity = sunOccluded ? 0 : 2
+    }
+
+    if (body.emissive && mesh.material && 'opacity' in mesh.material) {
+      const material = mesh.material as MeshBasicMaterial
+      material.opacity = sunOccluded ? 0 : 1
+      material.transparent = sunOccluded
     }
   })
 
@@ -89,7 +144,11 @@ function VehicleBody({
         {body.emissive ? (
           <meshBasicMaterial color={body.color} />
         ) : (
-          <meshStandardMaterial color={body.color} />
+          <meshStandardMaterial
+            color={body.color}
+            emissive={body.color}
+            emissiveIntensity={body.minimumLight}
+          />
         )}
       </mesh>
       {body.emissive && (
@@ -123,7 +182,7 @@ function VehicleSceneContent() {
 
   return (
     <>
-      <ambientLight intensity={0.08} />
+      <ambientLight intensity={0.04} />
       <Stars radius={1e8} depth={1e8} count={3000} factor={1e6} fade />
       <OrbitControls minDistance={5} maxDistance={1e9} />
       <VehicleMesh />
@@ -133,6 +192,7 @@ function VehicleSceneContent() {
             key={id}
             bodyId={id}
             vehicleId={firstVehicle.id}
+            visibleBodyIds={visibleBodyIds}
           />
         ))}
     </>

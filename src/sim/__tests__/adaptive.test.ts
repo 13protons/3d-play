@@ -219,7 +219,6 @@ describe('SciPy-ported: exponential decay', () => {
     const deriv: DerivFn = (_t, y, dydt) => {
       for (let i = 0; i < y.length; i++) dydt[i] = y[i]
     }
-    const y0 = new Float64Array([1.0])
     const tEnd = 5.0
 
     // Loose tolerance

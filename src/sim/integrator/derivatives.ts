@@ -9,7 +9,17 @@ import type { TrajectoryCurve } from '../types'
  * @param masses Array of body masses in the same order as the state vector.
  */
 export function nBodyDerivatives(masses: number[]): DerivFn {
-  const n = masses.length
+  return nBodyDerivativesFromGMs(masses.map((mass) => G * mass))
+}
+
+/**
+ * N-body derivative function using gravitational parameters directly.
+ * State vector layout: [x0,y0,z0,vx0,vy0,vz0, x1,y1,z1,vx1,vy1,vz1, ...]
+ *
+ * @param gms Array of G*M values in m^3/s^2 in the same order as the state vector.
+ */
+export function nBodyDerivativesFromGMs(gms: number[]): DerivFn {
+  const n = gms.length
 
   return (_t: number, y: Float64Array, dydt: Float64Array): void => {
     for (let i = 0; i < n; i++) {
@@ -30,7 +40,7 @@ export function nBodyDerivatives(masses: number[]): DerivFn {
         const r2 = dx * dx + dy * dy + dz * dz
         const r = Math.sqrt(r2)
         if (r < 1) continue
-        const f = (G * masses[j]) / (r2 * r)
+        const f = gms[j] / (r2 * r)
         ax += f * dx
         ay += f * dy
         az += f * dz

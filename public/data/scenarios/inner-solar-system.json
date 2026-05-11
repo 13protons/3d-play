@@ -1,0 +1,57 @@
+{
+  "id": "inner-solar-system",
+  "name": "Inner Solar System",
+  "epoch": 0,
+  "bodies": {
+    "sun": {
+      "position": { "sector": [0, 0, 0], "local": [0, 0, 0] },
+      "velocity": [0, 0, 0],
+      "rotationPhase": 0
+    },
+    "mercury": {
+      "position": { "sector": [57909, 0, 0], "local": [50000, 0, 0] },
+      "velocity": [0, 0, 47360],
+      "rotationPhase": 0
+    },
+    "venus": {
+      "position": { "sector": [108208, 0, 0], "local": [0, 0, 0] },
+      "velocity": [0, 0, 35020],
+      "rotationPhase": 0
+    },
+    "earth": {
+      "position": { "sector": [149600, 0, 0], "local": [0, 0, 0] },
+      "velocity": [0, 0, 29783],
+      "rotationPhase": 0
+    },
+    "moon": {
+      "position": { "sector": [149984, 0, 0], "local": [400000, 0, 0] },
+      "velocity": [0, 0, 30805],
+      "rotationPhase": 0
+    },
+    "mars": {
+      "position": { "sector": [227939, 0, 0], "local": [200000, 0, 0] },
+      "velocity": [0, 0, 24077],
+      "rotationPhase": 0
+    },
+    "phobos": {
+      "position": { "sector": [227939, 0, 0], "local": [9576000, 0, 0] },
+      "velocity": [0, 0, 26215],
+      "rotationPhase": 0
+    },
+    "deimos": {
+      "position": { "sector": [227939, 0, 0], "local": [23663200, 0, 0] },
+      "velocity": [0, 0, 25428],
+      "rotationPhase": 0
+    }
+  },
+  "vehicles": [
+    {
+      "id": "vehicle-1",
+      "name": "Earth Orbiter",
+      "parentId": "earth",
+      "position": { "sector": [149600, 0, 0], "local": [6771000, 0, 0] },
+      "velocity": [0, 0, 37453],
+      "mesh": "cylinder"
+    }
+  ]
+}

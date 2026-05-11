@@ -146,7 +146,7 @@ export type OrbitalInbound =
       type: 'init'
       bodies: {
         id: string; name: string; parentId: string | null
-        mass: number; radius: number; soiRadius?: number
+        mass: number; gm: number; radius: number; soiRadius?: number
         position: SectorPosition; velocity: [number, number, number]
       }[]
     }

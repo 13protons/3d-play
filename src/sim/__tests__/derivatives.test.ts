@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nBodyDerivatives, pointMassDerivatives } from '../integrator/derivatives'
+import { nBodyDerivatives, nBodyDerivativesFromGMs, pointMassDerivatives } from '../integrator/derivatives'
 import { G } from '../constants'
 import type { TrajectoryCurve } from '../types'
 
@@ -27,6 +27,22 @@ describe('nBodyDerivatives', () => {
     const expectedSunAcc = G * 5.972e24 / (1.496e11) ** 2
     expect(dydt[9]).toBeGreaterThan(0) // Sun accelerates toward Earth (+x)
     expect(Math.abs(dydt[9])).toBeCloseTo(expectedSunAcc, 5)
+  })
+
+  it('computes acceleration directly from GM values', () => {
+    const earthGM = 398600.435436e9
+    const sunGM = 132712440041.93938e9
+    const deriv = nBodyDerivativesFromGMs([earthGM, sunGM])
+
+    const y = new Float64Array([
+      1.496e11, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0,
+    ])
+    const dydt = new Float64Array(12)
+    deriv(0, y, dydt)
+
+    expect(Math.abs(dydt[3])).toBeCloseTo(sunGM / (1.496e11) ** 2, 5)
+    expect(Math.abs(dydt[9])).toBeCloseTo(earthGM / (1.496e11) ** 2, 5)
   })
 })
 

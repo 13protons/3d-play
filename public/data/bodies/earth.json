@@ -4,6 +4,7 @@
   "parentId": "sun",
   "physics": {
     "mass": 5.972e24,
+    "gm": 3.98600435436e14,
     "radius": 6371000,
     "axialTilt": 23.44,
     "angularVelocity": 7.292e-5,
@@ -11,6 +12,7 @@
   },
   "render": {
     "color": "#4169E1",
-    "emissive": false
+    "emissive": false,
+    "minimumLight": 0.04
   }
 }

@@ -4,12 +4,14 @@
   "parentId": null,
   "physics": {
     "mass": 1.989e30,
+    "gm": 1.3271244004193938e20,
     "radius": 696000000,
     "axialTilt": 0,
     "angularVelocity": 2.972e-6
   },
   "render": {
     "color": "#FDB813",
-    "emissive": true
+    "emissive": true,
+    "minimumLight": 0
   }
 }
