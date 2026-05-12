@@ -11,7 +11,8 @@ import { RotationLine } from './RotationLine'
 import { BodyMaterial } from './BodyMaterial'
 import {
   bodyRotationAngle,
-  shouldShowRotationAxis,
+  rotatingBodyTransform,
+  shouldShowBodyRotationAxisInView,
 } from './rotation'
 import {
   projectedRadiusPx,
@@ -71,13 +72,24 @@ export function Body({ bodyId }: BodyProps) {
       camZ = camPos[2]
     }
 
-    // Camera-relative position for float32 safety
-    mesh.position.set(pos[0] - camX, pos[1] - camY, pos[2] - camZ)
-    sprite.position.copy(mesh.position)
+    // Camera-relative position for float32 safety. The body mesh stays local to
+    // the rotating group so spin/tilt cannot rotate its orbital placement.
+    const scenePosition: [number, number, number] = [
+      pos[0] - camX,
+      pos[1] - camY,
+      pos[2] - camZ,
+    ]
+    const transform = rotatingBodyTransform(scenePosition)
+    if (spinGroup) {
+      spinGroup.position.set(...transform.groupPosition)
+    }
+    mesh.position.set(...transform.meshPosition)
+    sprite.position.set(...scenePosition)
 
     const fov = 'fov' in camera ? (camera.fov * Math.PI) / 180 : Math.PI / 3
     const pixelsPerRadian = viewport.height / (2 * Math.tan(fov / 2))
-    const distanceToCamera = mesh.position.distanceTo(camera.position)
+    const scenePositionVector = new Vector3(...scenePosition)
+    const distanceToCamera = scenePositionVector.distanceTo(camera.position)
     const radiusPx = projectedRadiusPx(body.radius, distanceToCamera, pixelsPerRadian)
     const useSprite = shouldUseBodySprite(radiusPx, MESH_THRESHOLD_PX)
 
@@ -91,7 +103,7 @@ export function Body({ bodyId }: BodyProps) {
           parentPos[1] - camY,
           parentPos[2] - camZ,
         )
-        const bodyScreen = mesh.position.clone().project(camera)
+        const bodyScreen = scenePositionVector.clone().project(camera)
         const parentScreen = parentScenePos.project(camera)
         const screenSeparationPx = Math.hypot(
           (bodyScreen.x - parentScreen.x) * viewport.width * 0.5,
@@ -123,7 +135,7 @@ export function Body({ bodyId }: BodyProps) {
 
     // Move point light with emissive bodies (Sun)
     if (lightRef.current) {
-      lightRef.current.position.copy(mesh.position)
+      lightRef.current.position.set(...scenePosition)
     }
   })
 
@@ -136,7 +148,7 @@ export function Body({ bodyId }: BodyProps) {
           <sphereGeometry args={[body.radius, 32, 32]} />
           <BodyMaterial body={body} />
         </mesh>
-        {shouldShowRotationAxis(true, showRotationAxes) && (
+        {shouldShowBodyRotationAxisInView('orbital', showRotationAxes) && (
           <RotationLine radius={body.radius} />
         )}
       </group>

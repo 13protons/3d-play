@@ -55,10 +55,11 @@ export function predictVehicleOrbit({
 
   const elements = stateToElements(relPos, relVel, parent.gm)
   if (!Number.isFinite(elements.a) || elements.a <= 0 || elements.e >= 1) {
+    const points = sampleOpenEscapeArc(elements, parent, mag(relPos), segments)
     return {
       status: 'escape',
       parentId: parent.id,
-      points: [],
+      points,
       period: null,
       warnings: ['hyperbolic-or-parabolic'],
     }
@@ -118,6 +119,93 @@ function oneCycleAnomalies(segments: number): number[] {
     anomalies.push((i / segments) * Math.PI * 2)
   }
   return anomalies
+}
+
+function sampleOpenEscapeArc(
+  elements: ReturnType<typeof stateToElements>,
+  parent: PredictionBodyState,
+  currentRadius: number,
+  segments: number,
+): [number, number, number][] {
+  const distanceLimit = parent.soiRadius ?? currentRadius * 50
+  if (elements.e <= 1 || !Number.isFinite(elements.e)) {
+    return sampleRayEscapeArc(elements, currentRadius, distanceLimit, segments)
+  }
+
+  const p = elements.a * (1 - elements.e * elements.e)
+  if (!Number.isFinite(p) || p <= 0) {
+    return sampleRayEscapeArc(elements, currentRadius, distanceLimit, segments)
+  }
+
+  const asymptote = Math.acos(-1 / elements.e)
+  const maxTheta = asymptote - 1e-4
+  const startTheta = Math.min(elements.ta, maxTheta)
+  const points: [number, number, number][] = []
+
+  for (let i = 0; i <= segments; i++) {
+    const theta = startTheta + ((maxTheta - startTheta) * i) / segments
+    const radius = p / (1 + elements.e * Math.cos(theta))
+    if (!Number.isFinite(radius) || radius > distanceLimit) {
+      points.push(pointAtTrueAnomaly(elements, theta, distanceLimit))
+      break
+    }
+    points.push(pointAtTrueAnomaly(elements, theta, radius))
+  }
+
+  return points.length > 1
+    ? points
+    : sampleRayEscapeArc(elements, currentRadius, distanceLimit, segments)
+}
+
+function sampleRayEscapeArc(
+  elements: ReturnType<typeof stateToElements>,
+  currentRadius: number,
+  distanceLimit: number,
+  segments: number,
+): [number, number, number][] {
+  const points: [number, number, number][] = []
+  const step = Math.max(distanceLimit - currentRadius, 0) / segments
+  const direction = outboundDirection(elements)
+
+  for (let i = 0; i <= segments; i++) {
+    const distance = Math.min(currentRadius + step * i, distanceLimit)
+    points.push([
+      direction[0] * distance,
+      direction[1] * distance,
+      direction[2] * distance,
+    ])
+  }
+
+  return points
+}
+
+function pointAtTrueAnomaly(
+  elements: ReturnType<typeof stateToElements>,
+  theta: number,
+  radius: number,
+): [number, number, number] {
+  const x = Math.cos(theta) * radius
+  const y = Math.sin(theta) * radius
+  return [
+    elements.pHat[0] * x + elements.qHat[0] * y,
+    elements.pHat[1] * x + elements.qHat[1] * y,
+    elements.pHat[2] * x + elements.qHat[2] * y,
+  ]
+}
+
+function outboundDirection(
+  elements: ReturnType<typeof stateToElements>,
+): [number, number, number] {
+  const theta = elements.ta
+  const x = Math.cos(theta)
+  const y = Math.sin(theta)
+  const direction: [number, number, number] = [
+    elements.pHat[0] * x + elements.qHat[0] * y,
+    elements.pHat[1] * x + elements.qHat[1] * y,
+    elements.pHat[2] * x + elements.qHat[2] * y,
+  ]
+  const m = mag(direction)
+  return m > 0 ? [direction[0] / m, direction[1] / m, direction[2] / m] : [1, 0, 0]
 }
 
 function firstEncounter(

@@ -1,20 +1,33 @@
-export const RCS_ANGULAR_RATE = 0.025
+export const RCS_ANGULAR_RATE = 0.25
+export const REACTION_WHEEL_ANGULAR_RATE = RCS_ANGULAR_RATE
 export const MAIN_THRUST_ACCELERATION = 25
 
 export type Quaternion = [number, number, number, number]
 export type Vec3 = [number, number, number]
 
 export function angularVelocityForRcsKeys(keys: Set<string>): Vec3 {
+  return angularVelocityForReactionWheelKeys(keys)
+}
+
+export function angularVelocityForReactionWheelKeys(keys: Set<string>): Vec3 {
   const has = (key: string) => keys.has(key.toLowerCase())
   return [
-    axisValue(has('w'), has('s')) * RCS_ANGULAR_RATE,
-    axisValue(has('d'), has('a')) * RCS_ANGULAR_RATE,
-    axisValue(has('e'), has('q')) * RCS_ANGULAR_RATE,
+    axisValue(has('w'), has('s')) * REACTION_WHEEL_ANGULAR_RATE,
+    axisValue(has('d'), has('a')) * REACTION_WHEEL_ANGULAR_RATE,
+    axisValue(has('e'), has('q')) * REACTION_WHEEL_ANGULAR_RATE,
   ]
 }
 
 export function shouldStabilizeAngularVelocityForWarp(warpRate: number): boolean {
   return warpRate > 1
+}
+
+export function shouldDisableThrottleForWarp(warpRate: number): boolean {
+  return warpRate > 1
+}
+
+export function toggleThrottle(currentThrottle: number): number {
+  return currentThrottle > 0 ? 0 : 1
 }
 
 export function thrustAccelerationForOrientation(
@@ -25,6 +38,18 @@ export function thrustAccelerationForOrientation(
   const forward = rotateVectorByQuaternion([0, 0, 1], orientation)
   const accel = MAIN_THRUST_ACCELERATION * throttle
   return [forward[0] * accel, forward[1] * accel, forward[2] * accel]
+}
+
+export function thrustAccelerationForElapsedRotation(
+  orientation: Quaternion,
+  angularVelocity: Vec3,
+  elapsedSeconds: number,
+  throttle: number,
+): Vec3 {
+  return thrustAccelerationForOrientation(
+    integrateOrientation(orientation, angularVelocity, elapsedSeconds),
+    throttle,
+  )
 }
 
 export function integrateOrientation(

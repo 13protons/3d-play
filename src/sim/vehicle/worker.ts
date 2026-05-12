@@ -11,8 +11,9 @@ import { advanceTo } from '../integrator/adaptive'
 import { pointMassDerivatives } from '../integrator/derivatives'
 import {
   integrateOrientation,
+  shouldDisableThrottleForWarp,
   shouldStabilizeAngularVelocityForWarp,
-  thrustAccelerationForOrientation,
+  thrustAccelerationForElapsedRotation,
   type Quaternion,
   type Vec3,
 } from './controls'
@@ -89,10 +90,16 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
   }
 
   if (msg.type === 'set-warp') {
+    let changedControls = false
     if (shouldStabilizeAngularVelocityForWarp(msg.rate)) {
       angularVelocity = [0, 0, 0]
-      emitControls()
+      changedControls = true
     }
+    if (shouldDisableThrottleForWarp(msg.rate)) {
+      throttle = 0
+      changedControls = true
+    }
+    if (changedControls) emitControls()
   }
 
   if (msg.type === 'advance') {
@@ -107,9 +114,14 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     const prevState = new Float64Array(stateVec)
 
     const gravityDeriv = pointMassDerivatives(msg.bodyCurves, bodyGMs)
-    const thrust = thrustAccelerationForOrientation(orientation, throttle)
     const deriv = (t: number, y: Float64Array, dydt: Float64Array): void => {
       gravityDeriv(t, y, dydt)
+      const thrust = thrustAccelerationForElapsedRotation(
+        orientation,
+        angularVelocity,
+        t - simTime,
+        throttle,
+      )
       dydt[3] += thrust[0]
       dydt[4] += thrust[1]
       dydt[5] += thrust[2]

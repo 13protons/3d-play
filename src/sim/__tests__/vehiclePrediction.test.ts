@@ -51,8 +51,27 @@ describe('predictVehicleOrbit', () => {
     })
 
     expect(prediction.status).toBe('escape')
-    expect(prediction.points).toEqual([])
+    expect(prediction.points.length).toBeGreaterThan(10)
     expect(prediction.warnings).toContain('hyperbolic-or-parabolic')
+  })
+
+  it('bounds hyperbolic escape arcs near the parent SOI', () => {
+    const radius = earthRadius + 400_000
+    const escapeSpeed = Math.sqrt((2 * earthGm) / radius)
+
+    const prediction = predictVehicleOrbit({
+      vehicle: {
+        position: [radius, 0, 0],
+        velocity: [0, 0, escapeSpeed * 1.01],
+      },
+      parent: earth,
+      bodies: [earth],
+    })
+
+    const maxDistance = Math.max(
+      ...prediction.points.map((point) => Math.hypot(point[0], point[1], point[2])),
+    )
+    expect(maxDistance).toBeLessThanOrEqual(earthSoi * 1.01)
   })
 
   it('classifies closed orbits with apoapsis beyond the parent SOI as escape', () => {

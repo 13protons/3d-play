@@ -7,15 +7,24 @@ import { useTrajectoriesStore } from '../state/trajectories'
 import { useModeStore } from '../state/mode'
 import { stopSim } from '../state/bridge'
 import { nextWarpRate, prevWarpRate } from '../sim/warp'
-import { angularVelocityForRcsKeys } from '../sim/vehicle/controls'
+import { angularVelocityForReactionWheelKeys, toggleThrottle } from '../sim/vehicle/controls'
 
 export function Flight() {
   const activeView = useModeStore((s) => s.activeView)
-  const rcsKeysRef = useRef(new Set<string>())
+  const currentThrottle = useTrajectoriesStore((s) => {
+    const firstVehicle = Object.values(s.vehicles)[0]
+    return firstVehicle ? (s.vehicleControls[firstVehicle.id]?.throttle ?? 0) : 0
+  })
+  const reactionWheelKeysRef = useRef(new Set<string>())
+  const throttleRef = useRef(0)
+
+  useEffect(() => {
+    throttleRef.current = currentThrottle
+  }, [currentThrottle])
 
   useEffect(() => {
     function pushRcsCommand() {
-      const [pitch, yaw, roll] = angularVelocityForRcsKeys(rcsKeysRef.current)
+      const [pitch, yaw, roll] = angularVelocityForReactionWheelKeys(reactionWheelKeysRef.current)
       useInputStore.getState().push({
         type: 'set-attitude',
         pitch,
@@ -41,11 +50,17 @@ export function Flight() {
       if (e.key === 'v' || e.key === 'V') {
         useModeStore.getState().toggleView()
       }
-      if (e.key === 'Shift') {
-        useInputStore.getState().push({ type: 'set-throttle', value: 1, simTime })
+      if (e.key === 'z' || e.key === 'Z') {
+        const nextThrottle = toggleThrottle(throttleRef.current)
+        throttleRef.current = nextThrottle
+        useInputStore.getState().push({
+          type: 'set-throttle',
+          value: nextThrottle,
+          simTime,
+        })
       }
       if (['w', 'a', 's', 'd', 'q', 'e'].includes(e.key.toLowerCase())) {
-        rcsKeysRef.current.add(e.key.toLowerCase())
+        reactionWheelKeysRef.current.add(e.key.toLowerCase())
         pushRcsCommand()
       }
       if (e.key === 'Escape') {
@@ -54,12 +69,8 @@ export function Flight() {
       }
     }
     function handleKeyUp(e: KeyboardEvent) {
-      const simTime = useTrajectoriesStore.getState().simTime
-      if (e.key === 'Shift') {
-        useInputStore.getState().push({ type: 'set-throttle', value: 0, simTime })
-      }
       if (['w', 'a', 's', 'd', 'q', 'e'].includes(e.key.toLowerCase())) {
-        rcsKeysRef.current.delete(e.key.toLowerCase())
+        reactionWheelKeysRef.current.delete(e.key.toLowerCase())
         pushRcsCommand()
       }
     }

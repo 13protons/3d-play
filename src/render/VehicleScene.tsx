@@ -12,11 +12,10 @@ import {
   type SunOccluder,
   type Vec3,
 } from './lighting'
-import { RotationLine } from './RotationLine'
 import { BodyMaterial } from './BodyMaterial'
+import { CraftDebugAxes } from './CraftDebugAxes'
 import {
   bodyRotationAngle,
-  shouldShowRotationAxis,
 } from './rotation'
 
 const SUN_RENDER_DISTANCE = 5e8
@@ -67,7 +66,6 @@ function VehicleBody({
   const meshRef = useRef<Mesh>(null)
   const lightRef = useRef<PointLight>(null)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
-  const showRotationAxes = useModeStore((s) => s.showRotationAxes)
 
   useFrame(() => {
     if (useModeStore.getState().activeView !== 'vehicle') return
@@ -161,9 +159,6 @@ function VehicleBody({
           <sphereGeometry args={[body.radius, 32, 32]} />
           <BodyMaterial body={body} />
         </mesh>
-        {shouldShowRotationAxis(true, showRotationAxes) && (
-          <RotationLine radius={body.radius} />
-        )}
       </group>
       {body.emissive && (
         <pointLight ref={lightRef} intensity={2} distance={0} decay={0} />
@@ -175,12 +170,13 @@ function VehicleBody({
 function VehicleMesh() {
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
   const vehicleControls = useTrajectoriesStore((s) => s.vehicleControls)
+  const showRotationAxes = useModeStore((s) => s.showRotationAxes)
   const firstVehicle = Object.values(vehicles)[0]
   const controls = firstVehicle ? vehicleControls[firstVehicle.id] : undefined
 
   return (
-    <group>
-      <mesh quaternion={controls?.orientation}>
+    <group quaternion={controls?.orientation}>
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[1, 1.5, 4, 8]} />
         <meshStandardMaterial color="#cccccc" />
       </mesh>
@@ -190,6 +186,7 @@ function VehicleMesh() {
           <meshBasicMaterial color="#ff8a18" />
         </mesh>
       )}
+      {showRotationAxes && <CraftDebugAxes length={3} />}
     </group>
   )
 }

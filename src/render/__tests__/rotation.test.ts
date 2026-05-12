@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   bodyRotationAngle,
+  craftDebugAxisSegments,
+  rotatingBodyTransform,
   rotationAxisPoints,
+  shouldShowBodyRotationAxisInView,
   shouldShowRotationAxis,
   shouldShowRotationSurfaceMarker,
   surfaceRotationMarkerPoints,
@@ -13,11 +16,39 @@ describe('bodyRotationAngle', () => {
   })
 })
 
+describe('rotatingBodyTransform', () => {
+  it('keeps world placement on the rotating group so spin does not rotate orbital position', () => {
+    expect(rotatingBodyTransform([100, 200, 300])).toEqual({
+      groupPosition: [100, 200, 300],
+      meshPosition: [0, 0, 0],
+    })
+  })
+})
+
+describe('craftDebugAxisSegments', () => {
+  it('centers all craft-local axes on the origin COM', () => {
+    expect(craftDebugAxisSegments(2)).toEqual({
+      x: [[-2, 0, 0], [2, 0, 0]],
+      y: [[0, -2, 0], [0, 2, 0]],
+      z: [[0, 0, -2], [0, 0, 2]],
+      thrust: [[0, 0, 0], [0, 0, 2.6]],
+      cot: [0, 0, -2.6],
+    })
+  })
+})
+
 describe('shouldShowRotationAxis', () => {
   it('shows only while body mesh is visible and the debug toggle is enabled', () => {
     expect(shouldShowRotationAxis(false, true)).toBe(false)
     expect(shouldShowRotationAxis(true, false)).toBe(false)
     expect(shouldShowRotationAxis(true, true)).toBe(true)
+  })
+})
+
+describe('shouldShowBodyRotationAxisInView', () => {
+  it('hides celestial body axes in vehicle view so the craft overlay is isolated', () => {
+    expect(shouldShowBodyRotationAxisInView('orbital', true)).toBe(true)
+    expect(shouldShowBodyRotationAxisInView('vehicle', true)).toBe(false)
   })
 })
 

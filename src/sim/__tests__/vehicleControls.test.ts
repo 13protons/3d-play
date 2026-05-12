@@ -1,23 +1,30 @@
 import { describe, expect, it } from 'vitest'
 import {
   MAIN_THRUST_ACCELERATION,
-  RCS_ANGULAR_RATE,
-  angularVelocityForRcsKeys,
+  REACTION_WHEEL_ANGULAR_RATE,
+  angularVelocityForReactionWheelKeys,
+  shouldDisableThrottleForWarp,
   shouldStabilizeAngularVelocityForWarp,
+  thrustAccelerationForElapsedRotation,
   thrustAccelerationForOrientation,
+  toggleThrottle,
 } from '../vehicle/controls'
 
-describe('angularVelocityForRcsKeys', () => {
+describe('angularVelocityForReactionWheelKeys', () => {
+  it('uses a responsive rate for visible attitude changes', () => {
+    expect(REACTION_WHEEL_ANGULAR_RATE).toBeGreaterThanOrEqual(0.2)
+  })
+
   it('maps pitch, yaw, and roll keys to predictable angular velocity', () => {
-    expect(angularVelocityForRcsKeys(new Set(['w', 'd', 'q']))).toEqual([
-      RCS_ANGULAR_RATE,
-      RCS_ANGULAR_RATE,
-      -RCS_ANGULAR_RATE,
+    expect(angularVelocityForReactionWheelKeys(new Set(['w', 'd', 'q']))).toEqual([
+      REACTION_WHEEL_ANGULAR_RATE,
+      REACTION_WHEEL_ANGULAR_RATE,
+      -REACTION_WHEEL_ANGULAR_RATE,
     ])
   })
 
   it('cancels opposite keys to zero on each axis', () => {
-    expect(angularVelocityForRcsKeys(new Set(['w', 's', 'a', 'd', 'q', 'e']))).toEqual([0, 0, 0])
+    expect(angularVelocityForReactionWheelKeys(new Set(['w', 's', 'a', 'd', 'q', 'e']))).toEqual([0, 0, 0])
   })
 })
 
@@ -25,6 +32,20 @@ describe('shouldStabilizeAngularVelocityForWarp', () => {
   it('zeros angular velocity above real time warp', () => {
     expect(shouldStabilizeAngularVelocityForWarp(1)).toBe(false)
     expect(shouldStabilizeAngularVelocityForWarp(10)).toBe(true)
+  })
+})
+
+describe('shouldDisableThrottleForWarp', () => {
+  it('shuts off engine thrust above real time warp', () => {
+    expect(shouldDisableThrottleForWarp(1)).toBe(false)
+    expect(shouldDisableThrottleForWarp(10)).toBe(true)
+  })
+})
+
+describe('toggleThrottle', () => {
+  it('toggles main thrust between off and full throttle', () => {
+    expect(toggleThrottle(0)).toBe(1)
+    expect(toggleThrottle(1)).toBe(0)
   })
 })
 
@@ -42,6 +63,31 @@ describe('thrustAccelerationForOrientation', () => {
       0,
       0,
       MAIN_THRUST_ACCELERATION,
+    ])
+  })
+
+  it('rotates thrust with vehicle yaw orientation', () => {
+    const halfAngle = Math.PI / 4
+
+    expect(thrustAccelerationForOrientation([0, Math.sin(halfAngle), 0, Math.cos(halfAngle)], 1)).toEqual([
+      MAIN_THRUST_ACCELERATION,
+      0,
+      expect.closeTo(0, 10),
+    ])
+  })
+
+  it('updates thrust direction during elapsed reaction wheel rotation', () => {
+    const acceleration = thrustAccelerationForElapsedRotation(
+      [0, 0, 0, 1],
+      [0, Math.PI / 2, 0],
+      1,
+      1,
+    )
+
+    expect(acceleration).toEqual([
+      MAIN_THRUST_ACCELERATION,
+      0,
+      expect.closeTo(0, 10),
     ])
   })
 

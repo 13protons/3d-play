@@ -3,6 +3,8 @@ import { useCameraStore } from '../state/camera'
 import { useInputStore } from '../state/input'
 import { useModeStore } from '../state/mode'
 import { WARP_RATES } from '../sim/warp'
+import { evaluateCurve } from '../sim/curves'
+import { computeFlightReadout, formatFlightNumber } from './flightReadout'
 
 function formatTime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
@@ -21,6 +23,7 @@ export function HUD() {
   const warpRate = useTrajectoriesStore((s) => s.warpRate)
   const bodies = useTrajectoriesStore((s) => s.bodies)
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
+  const curves = useTrajectoriesStore((s) => s.curves)
   const vehicleControls = useTrajectoriesStore((s) => s.vehicleControls)
   const followTargetId = useCameraStore((s) => s.followTargetId)
   const setFollowTarget = useCameraStore((s) => s.setFollowTarget)
@@ -31,6 +34,18 @@ export function HUD() {
   const targetName = bodies[followTargetId]?.name ?? vehicles[followTargetId]?.name ?? followTargetId
   const firstVehicle = Object.values(vehicles)[0]
   const throttle = firstVehicle ? (vehicleControls[firstVehicle.id]?.throttle ?? 0) : 0
+  const vehicleCurve = firstVehicle ? curves[firstVehicle.id] : undefined
+  const parent = firstVehicle ? bodies[firstVehicle.parentId] : undefined
+  const parentCurve = firstVehicle ? curves[firstVehicle.parentId] : undefined
+  const flightReadout = firstVehicle && parent && vehicleCurve && parentCurve
+    ? computeFlightReadout({
+        vehiclePosition: evaluateCurve(vehicleCurve, simTime),
+        vehicleVelocity: vehicleCurve.v1,
+        parentPosition: evaluateCurve(parentCurve, simTime),
+        parentVelocity: parentCurve.v1,
+        parentRadius: parent.radius,
+      })
+    : null
 
   function setWarp(rate: number) {
     useInputStore
@@ -75,6 +90,22 @@ export function HUD() {
             <div style={{ opacity: 0.6, fontSize: 11 }}>THRUST</div>
             <div>{throttle > 0 ? 'ON' : 'OFF'}</div>
           </div>
+        )}
+        {flightReadout && (
+          <>
+            <div>
+              <div style={{ opacity: 0.6, fontSize: 11 }}>ALTITUDE</div>
+              <div>{formatFlightNumber(flightReadout.altitude, 'm')}</div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.6, fontSize: 11 }}>VELOCITY</div>
+              <div>{formatFlightNumber(flightReadout.speed, 'm/s')}</div>
+            </div>
+            <div>
+              <div style={{ opacity: 0.6, fontSize: 11 }}>VERTICAL</div>
+              <div>{formatFlightNumber(flightReadout.radialSpeed, 'm/s')}</div>
+            </div>
+          </>
         )}
       </div>
 
@@ -186,7 +217,7 @@ export function HUD() {
       </div>
 
       <div style={{ marginTop: 8, opacity: 0.4, fontSize: 11 }}>
-        [ / ] warp &nbsp; Shift thrust &nbsp; WASD/QE RCS &nbsp; V toggle view
+        [ / ] warp &nbsp; Z toggle thrust &nbsp; WASD/QE reaction wheel &nbsp; V toggle view
         &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
     </div>
