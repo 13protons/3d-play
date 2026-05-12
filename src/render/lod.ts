@@ -28,3 +28,10 @@ export function spriteWorldSize(
 ): number {
   return (desiredSizePx / pixelsPerRadian) * distance
 }
+
+export function sphereSegmentsForVehicleDistance(
+  distanceFromBodyCenter: number,
+  bodyRadius: number,
+): number {
+  return distanceFromBodyCenter < bodyRadius * 2 ? 128 : 32
+}

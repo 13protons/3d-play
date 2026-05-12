@@ -110,6 +110,15 @@ export async function startSim(scenarioId: string): Promise<void> {
         (physics.gm as number | undefined) ?? G * (physics.mass as number),
       ] as [string, number]
   })
+  const bodySurfaces = bodyDefs.map((def: Record<string, unknown>) => {
+    const physics = def.physics as Record<string, unknown>
+    return [
+      def.id as string,
+      physics.radius as number,
+      physics.angularVelocity as number,
+      physics.axialTilt as number,
+    ] as [string, number, number, number]
+  })
 
   // Spawn the orbital worker
   orbitalWorker = new Worker(
@@ -211,15 +220,17 @@ export async function startSim(scenarioId: string): Promise<void> {
           throttle: msg.throttle,
           orientation: msg.orientation,
           angularVelocity: msg.angularVelocity,
+          surfaceState: msg.surfaceState,
         })
       }
     }
 
     vehicleWorker.postMessage({
       type: 'init',
-      vehicle: { id: v.id, position: vehiclePosition, velocity: vehicleVelocity },
+      vehicle: { id: v.id, parentId: v.parentId, position: vehiclePosition, velocity: vehicleVelocity },
       bodyCurves: latestOrbitalCurves,
       bodyGMs,
+      bodySurfaces,
     })
   }
 

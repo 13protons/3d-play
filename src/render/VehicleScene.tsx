@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Stars, OrbitControls } from '@react-three/drei'
 import type { Group, Mesh, MeshBasicMaterial, PointLight } from 'three'
@@ -17,6 +17,7 @@ import { CraftDebugAxes } from './CraftDebugAxes'
 import {
   bodyRotationAngle,
 } from './rotation'
+import { sphereSegmentsForVehicleDistance } from './lod'
 
 const SUN_RENDER_DISTANCE = 5e8
 
@@ -66,6 +67,7 @@ function VehicleBody({
   const meshRef = useRef<Mesh>(null)
   const lightRef = useRef<PointLight>(null)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
+  const [sphereSegments, setSphereSegments] = useState(32)
 
   useFrame(() => {
     if (useModeStore.getState().activeView !== 'vehicle') return
@@ -84,6 +86,13 @@ function VehicleBody({
 
     const bodyPos = evaluateCurve(bodyCurve, t)
     const vehiclePos = evaluateCurve(vehicleCurve, t)
+    const bodyDistance = Math.hypot(
+      bodyPos[0] - vehiclePos[0],
+      bodyPos[1] - vehiclePos[1],
+      bodyPos[2] - vehiclePos[2],
+    )
+    const nextSegments = sphereSegmentsForVehicleDistance(bodyDistance, body.radius)
+    setSphereSegments((current) => current === nextSegments ? current : nextSegments)
 
     const renderBody = body.emissive
       ? projectDistantSphere(
@@ -156,7 +165,7 @@ function VehicleBody({
     <group>
       <group ref={spinGroupRef}>
         <mesh ref={meshRef}>
-          <sphereGeometry args={[body.radius, 32, 32]} />
+          <sphereGeometry args={[body.radius, sphereSegments, sphereSegments]} />
           <BodyMaterial body={body} />
         </mesh>
       </group>

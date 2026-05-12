@@ -51,9 +51,11 @@ describe('flightTelemetryRows', () => {
       },
       throttle: 1,
       angularVelocity: [0.25, -0.5, 0],
+      surfaceState: 'landed',
     })
 
     expect(rows).toEqual([
+      { label: 'STATE', value: 'LANDED' },
       { label: 'ALT', value: '400.0 km' },
       { label: 'VEL', value: '7.7 km/s' },
       { label: 'VERT', value: '-12 m/s' },

@@ -12,6 +12,7 @@ export interface VehicleControlMeta {
   throttle: number
   orientation: [number, number, number, number]
   angularVelocity: [number, number, number]
+  surfaceState: 'flying' | 'landed' | 'crashed'
 }
 
 export interface BodyMeta {

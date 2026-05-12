@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   projectedRadiusPx,
+  sphereSegmentsForVehicleDistance,
   shouldSuppressChildSprite,
   shouldUseBodySprite,
   spriteWorldSize,
@@ -37,5 +38,15 @@ describe('shouldSuppressChildSprite', () => {
 describe('spriteWorldSize', () => {
   it('converts desired pixel size to world size at distance', () => {
     expect(spriteWorldSize(12, 100, 1000)).toBeCloseTo(1.2)
+  })
+})
+
+describe('sphereSegmentsForVehicleDistance', () => {
+  it('uses high-resolution body spheres below two radii from center', () => {
+    expect(sphereSegmentsForVehicleDistance(19, 10)).toBe(128)
+  })
+
+  it('uses normal body spheres at or above two radii from center', () => {
+    expect(sphereSegmentsForVehicleDistance(20, 10)).toBe(32)
   })
 })

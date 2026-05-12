@@ -227,6 +227,7 @@ export function HUD() {
             readout: flightReadout,
             throttle,
             angularVelocity: vehicleControl.angularVelocity,
+            surfaceState: vehicleControl.surfaceState,
           })}
         />
       )}

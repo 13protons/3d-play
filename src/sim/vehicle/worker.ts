@@ -17,14 +17,25 @@ import {
   type Quaternion,
   type Vec3,
 } from './controls'
+import {
+  classifySurfaceContactAlongSegment,
+  rotatingSurfaceState,
+  type SurfaceContact,
+} from './surfaceContact'
 
 let vehicleId = ''
+let parentId = ''
 let stateVec: Float64Array | null = null
 let bodyGMs = new Map<string, number>()
+let bodySurfaces = new Map<string, { radius: number; angularVelocity: number; rotationAxis: Vec3 }>()
 let simTime = 0
 let throttle = 0
 let orientation: Quaternion = [0, 0, 0, 1]
 let angularVelocity: Vec3 = [0, 0, 0]
+let surfaceContact: SurfaceContact = { type: 'flying' }
+let landedAt = 0
+
+const LANDING_SPEED_THRESHOLD = 10
 
 function emitControls(): void {
   postMessage({
@@ -33,6 +44,7 @@ function emitControls(): void {
     throttle,
     orientation,
     angularVelocity,
+    surfaceState: surfaceContact.type,
   })
 }
 
@@ -62,16 +74,23 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
 
   if (msg.type === 'init') {
     vehicleId = msg.vehicle.id
+    parentId = msg.vehicle.parentId
     const absPos = toAbsolute(msg.vehicle.position)
     stateVec = new Float64Array([
       absPos[0], absPos[1], absPos[2],
       msg.vehicle.velocity[0], msg.vehicle.velocity[1], msg.vehicle.velocity[2],
     ])
     bodyGMs = new Map(msg.bodyGMs)
+    bodySurfaces = new Map(msg.bodySurfaces.map(([id, radius, angularVelocity, axialTilt]) => [
+      id,
+      { radius, angularVelocity, rotationAxis: rotationAxisFromAxialTilt(axialTilt) },
+    ]))
     simTime = 0
     throttle = 0
     orientation = [0, 0, 0, 1]
     angularVelocity = [0, 0, 0]
+    surfaceContact = { type: 'flying' }
+    landedAt = 0
 
     // Build derivative from initial body curves and integrate to initial time
     const initState = new Float64Array(stateVec)
@@ -80,12 +99,12 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
   }
 
   if (msg.type === 'set-throttle') {
-    throttle = Math.max(0, Math.min(1, msg.value))
+    throttle = surfaceContact.type === 'crashed' ? 0 : Math.max(0, Math.min(1, msg.value))
     emitControls()
   }
 
   if (msg.type === 'set-attitude') {
-    angularVelocity = [msg.pitch, msg.yaw, msg.roll]
+    angularVelocity = surfaceContact.type === 'crashed' ? [0, 0, 0] : [msg.pitch, msg.yaw, msg.roll]
     emitControls()
   }
 
@@ -113,6 +132,40 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     const prevTime = simTime
     const prevState = new Float64Array(stateVec)
 
+    const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
+    const parentSurface = bodySurfaces.get(parentId)
+
+    if (surfaceContact.type !== 'flying' && parentCurve && parentSurface) {
+      const parentPosition = sampleCurvePosition(parentCurve, targetTime)
+      const parentVelocity = sampleCurveVelocity(parentCurve, targetTime)
+      const landed = rotatingSurfaceState({
+        landedAt,
+        simTime: targetTime,
+        initialSurfaceNormal: surfaceContact.surfaceNormal,
+        parentPosition,
+        parentVelocity,
+        parentRadius: parentSurface.radius,
+        parentAngularVelocity: parentSurface.angularVelocity,
+        parentRotationAxis: parentSurface.rotationAxis,
+      })
+      const currentNormal = normalize([
+        landed.position[0] - parentPosition[0],
+        landed.position[1] - parentPosition[1],
+        landed.position[2] - parentPosition[2],
+      ])
+      const thrust = thrustAccelerationForElapsedRotation(orientation, angularVelocity, 0, throttle)
+      if (surfaceContact.type === 'landed' && dot(thrust, currentNormal) > 0) {
+        surfaceContact = { type: 'flying' }
+      } else {
+        stateVec.set([...landed.position, ...landed.velocity])
+        orientation = integrateOrientation(orientation, angularVelocity, targetTime - simTime)
+        simTime = targetTime
+        emitCurves(prevTime, prevState)
+        emitControls()
+        return
+      }
+    }
+
     const gravityDeriv = pointMassDerivatives(msg.bodyCurves, bodyGMs)
     const deriv = (t: number, y: Float64Array, dydt: Float64Array): void => {
       gravityDeriv(t, y, dydt)
@@ -131,7 +184,102 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     orientation = integrateOrientation(orientation, angularVelocity, targetTime - simTime)
     simTime = targetTime
 
+    if (surfaceContact.type === 'flying' && parentCurve && parentSurface) {
+      const parentPosition = sampleCurvePosition(parentCurve, simTime)
+      const parentVelocity = sampleCurveVelocity(parentCurve, simTime)
+      const previousParentPosition = sampleCurvePosition(parentCurve, prevTime)
+      const relativePosition: Vec3 = [
+        stateVec[0] - parentPosition[0],
+        stateVec[1] - parentPosition[1],
+        stateVec[2] - parentPosition[2],
+      ]
+      const relativeVelocity: Vec3 = [
+        stateVec[3] - parentVelocity[0],
+        stateVec[4] - parentVelocity[1],
+        stateVec[5] - parentVelocity[2],
+      ]
+      const previousRelativePosition: Vec3 = [
+        prevState[0] - previousParentPosition[0],
+        prevState[1] - previousParentPosition[1],
+        prevState[2] - previousParentPosition[2],
+      ]
+      const contact = classifySurfaceContactAlongSegment({
+        previousRelativePosition,
+        currentRelativePosition: relativePosition,
+        relativeVelocity,
+        elapsedSeconds: simTime - prevTime,
+        parentRadius: parentSurface.radius,
+        landingSpeedThreshold: LANDING_SPEED_THRESHOLD,
+      })
+      if (contact.type !== 'flying') {
+        surfaceContact = contact
+        landedAt = prevTime + (contact.segmentT ?? 1) * (simTime - prevTime)
+        const landed = rotatingSurfaceState({
+          landedAt,
+          simTime,
+          initialSurfaceNormal: contact.surfaceNormal,
+          parentPosition,
+          parentVelocity,
+          parentRadius: parentSurface.radius,
+          parentAngularVelocity: parentSurface.angularVelocity,
+          parentRotationAxis: parentSurface.rotationAxis,
+        })
+        stateVec.set([...landed.position, ...landed.velocity])
+        if (contact.type === 'crashed') {
+          throttle = 0
+          angularVelocity = [0, 0, 0]
+        }
+      }
+    }
+
     emitCurves(prevTime, prevState)
     emitControls()
   }
+}
+
+function sampleCurvePosition(curve: TrajectoryCurve, t: number): Vec3 {
+  const dt = curve.t1 - curve.t0
+  if (dt === 0) return curve.p1
+  const s = (t - curve.t0) / dt
+  const s2 = s * s
+  const s3 = s2 * s
+  const h00 = 2 * s3 - 3 * s2 + 1
+  const h10 = s3 - 2 * s2 + s
+  const h01 = -2 * s3 + 3 * s2
+  const h11 = s3 - s2
+  return [
+    h00 * curve.p0[0] + h10 * dt * curve.v0[0] + h01 * curve.p1[0] + h11 * dt * curve.v1[0],
+    h00 * curve.p0[1] + h10 * dt * curve.v0[1] + h01 * curve.p1[1] + h11 * dt * curve.v1[1],
+    h00 * curve.p0[2] + h10 * dt * curve.v0[2] + h01 * curve.p1[2] + h11 * dt * curve.v1[2],
+  ]
+}
+
+function sampleCurveVelocity(curve: TrajectoryCurve, t: number): Vec3 {
+  const dt = curve.t1 - curve.t0
+  if (dt === 0) return curve.v1
+  const s = (t - curve.t0) / dt
+  const s2 = s * s
+  const dh00 = 6 * s2 - 6 * s
+  const dh10 = 3 * s2 - 4 * s + 1
+  const dh01 = -6 * s2 + 6 * s
+  const dh11 = 3 * s2 - 2 * s
+  return [
+    (dh00 * curve.p0[0] + dh10 * dt * curve.v0[0] + dh01 * curve.p1[0] + dh11 * dt * curve.v1[0]) / dt,
+    (dh00 * curve.p0[1] + dh10 * dt * curve.v0[1] + dh01 * curve.p1[1] + dh11 * dt * curve.v1[1]) / dt,
+    (dh00 * curve.p0[2] + dh10 * dt * curve.v0[2] + dh01 * curve.p1[2] + dh11 * dt * curve.v1[2]) / dt,
+  ]
+}
+
+function dot(a: Vec3, b: Vec3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+function normalize(v: Vec3): Vec3 {
+  const m = Math.hypot(v[0], v[1], v[2])
+  return m > 0 ? [v[0] / m, v[1] / m, v[2] / m] : [1, 0, 0]
+}
+
+function rotationAxisFromAxialTilt(axialTiltDegrees: number): Vec3 {
+  const tilt = (axialTiltDegrees * Math.PI) / 180
+  return normalize([-Math.sin(tilt), Math.cos(tilt), 0])
 }

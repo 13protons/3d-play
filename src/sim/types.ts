@@ -60,11 +60,13 @@ export type VehicleWorkerInbound =
       type: 'init'
       vehicle: {
         id: string
+        parentId: string
         position: SectorPosition
         velocity: [number, number, number]
       }
       bodyCurves: TrajectoryCurve[]
       bodyGMs: [string, number][]  // [id, G*M] pairs (Map not transferable)
+      bodySurfaces: [id: string, radius: number, angularVelocity: number, axialTilt: number][]
     }
   | {
       type: 'advance'
@@ -93,6 +95,7 @@ export type VehicleWorkerOutbound =
       throttle: number
       orientation: [number, number, number, number]
       angularVelocity: [number, number, number]
+      surfaceState: 'flying' | 'landed' | 'crashed'
     }
 
 // ---------------------------------------------------------------------------

@@ -53,12 +53,15 @@ export function flightTelemetryRows({
   readout,
   throttle,
   angularVelocity,
+  surfaceState,
 }: {
   readout: FlightReadout
   throttle: number
   angularVelocity: Vec3
+  surfaceState: 'flying' | 'landed' | 'crashed'
 }): FlightTelemetryRow[] {
   return [
+    { label: 'STATE', value: surfaceState.toUpperCase() },
     { label: 'ALT', value: formatFlightNumber(readout.altitude, 'm') },
     { label: 'VEL', value: formatFlightNumber(readout.speed, 'm/s') },
     { label: 'VERT', value: formatFlightNumber(readout.radialSpeed, 'm/s') },
