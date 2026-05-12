@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { evaluateCurve, isCurveValid } from '../curves'
+import { evaluateCurve, evaluateCurveVelocity, isCurveValid } from '../curves'
 import type { TrajectoryCurve } from '../types'
 
 function makeCurve(overrides: Partial<TrajectoryCurve> = {}): TrajectoryCurve {
@@ -69,6 +69,31 @@ describe('evaluateCurve', () => {
     const result = evaluateCurve(curve, 1.1)
     expect(Number.isFinite(result[0])).toBe(true)
     expect(result[0]).toBeGreaterThan(10) // continues forward
+  })
+})
+
+describe('evaluateCurveVelocity', () => {
+  it('returns the Hermite derivative at the requested time', () => {
+    const curve = makeCurve({
+      p0: [0, 0, 0],
+      v0: [0, 0, 0],
+      p1: [10, 0, 0],
+      v1: [0, 0, 0],
+      t0: 0,
+      t1: 10,
+    })
+
+    expect(evaluateCurveVelocity(curve, 5)).toEqual([1.5, 0, 0])
+  })
+
+  it('returns endpoint velocity for zero-duration curves', () => {
+    const curve = makeCurve({
+      v1: [7, 8, 9],
+      t0: 0,
+      t1: 0,
+    })
+
+    expect(evaluateCurveVelocity(curve, 0)).toEqual([7, 8, 9])
   })
 })
 

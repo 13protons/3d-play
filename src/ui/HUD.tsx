@@ -3,8 +3,9 @@ import { useCameraStore } from '../state/camera'
 import { useInputStore } from '../state/input'
 import { useModeStore } from '../state/mode'
 import { WARP_RATES } from '../sim/warp'
-import { evaluateCurve } from '../sim/curves'
-import { computeFlightReadout, formatFlightNumber } from './flightReadout'
+import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
+import { computeFlightReadout, flightTelemetryRows } from './flightReadout'
+import { NavballCluster } from './Navball'
 
 function formatTime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
@@ -37,12 +38,31 @@ export function HUD() {
   const vehicleCurve = firstVehicle ? curves[firstVehicle.id] : undefined
   const parent = firstVehicle ? bodies[firstVehicle.parentId] : undefined
   const parentCurve = firstVehicle ? curves[firstVehicle.parentId] : undefined
+  const vehiclePosition = vehicleCurve ? evaluateCurve(vehicleCurve, simTime) : null
+  const parentPosition = parentCurve ? evaluateCurve(parentCurve, simTime) : null
+  const vehicleVelocity = vehicleCurve ? evaluateCurveVelocity(vehicleCurve, simTime) : null
+  const parentVelocity = parentCurve ? evaluateCurveVelocity(parentCurve, simTime) : null
+  const relativePosition = vehiclePosition && parentPosition
+    ? [
+        vehiclePosition[0] - parentPosition[0],
+        vehiclePosition[1] - parentPosition[1],
+        vehiclePosition[2] - parentPosition[2],
+      ] as [number, number, number]
+    : null
+  const relativeVelocity = vehicleVelocity && parentVelocity
+    ? [
+        vehicleVelocity[0] - parentVelocity[0],
+        vehicleVelocity[1] - parentVelocity[1],
+        vehicleVelocity[2] - parentVelocity[2],
+      ] as [number, number, number]
+    : null
+  const vehicleControl = firstVehicle ? vehicleControls[firstVehicle.id] : undefined
   const flightReadout = firstVehicle && parent && vehicleCurve && parentCurve
     ? computeFlightReadout({
-        vehiclePosition: evaluateCurve(vehicleCurve, simTime),
-        vehicleVelocity: vehicleCurve.v1,
-        parentPosition: evaluateCurve(parentCurve, simTime),
-        parentVelocity: parentCurve.v1,
+        vehiclePosition: vehiclePosition ?? evaluateCurve(vehicleCurve, simTime),
+        vehicleVelocity: vehicleVelocity ?? vehicleCurve.v1,
+        parentPosition: parentPosition ?? evaluateCurve(parentCurve, simTime),
+        parentVelocity: parentVelocity ?? parentCurve.v1,
         parentRadius: parent.radius,
       })
     : null
@@ -85,28 +105,6 @@ export function HUD() {
           <div style={{ opacity: 0.6, fontSize: 11 }}>VIEW</div>
           <div>{activeView.toUpperCase()}</div>
         </div>
-        {firstVehicle && (
-          <div>
-            <div style={{ opacity: 0.6, fontSize: 11 }}>THRUST</div>
-            <div>{throttle > 0 ? 'ON' : 'OFF'}</div>
-          </div>
-        )}
-        {flightReadout && (
-          <>
-            <div>
-              <div style={{ opacity: 0.6, fontSize: 11 }}>ALTITUDE</div>
-              <div>{formatFlightNumber(flightReadout.altitude, 'm')}</div>
-            </div>
-            <div>
-              <div style={{ opacity: 0.6, fontSize: 11 }}>VELOCITY</div>
-              <div>{formatFlightNumber(flightReadout.speed, 'm/s')}</div>
-            </div>
-            <div>
-              <div style={{ opacity: 0.6, fontSize: 11 }}>VERTICAL</div>
-              <div>{formatFlightNumber(flightReadout.radialSpeed, 'm/s')}</div>
-            </div>
-          </>
-        )}
       </div>
 
       <div
@@ -220,6 +218,18 @@ export function HUD() {
         [ / ] warp &nbsp; Z toggle thrust &nbsp; WASD/QE reaction wheel &nbsp; V toggle view
         &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
+      {vehicleControl && relativePosition && relativeVelocity && flightReadout && (
+        <NavballCluster
+          orientation={vehicleControl.orientation}
+          relativePosition={relativePosition}
+          relativeVelocity={relativeVelocity}
+          rows={flightTelemetryRows({
+            readout: flightReadout,
+            throttle,
+            angularVelocity: vehicleControl.angularVelocity,
+          })}
+        />
+      )}
     </div>
   )
 }

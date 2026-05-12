@@ -14,6 +14,11 @@ export interface FlightReadout {
   radialSpeed: number
 }
 
+export interface FlightTelemetryRow {
+  label: string
+  value: string
+}
+
 export function computeFlightReadout({
   vehiclePosition,
   vehicleVelocity,
@@ -42,6 +47,27 @@ export function formatFlightNumber(value: number, unit: 'm' | 'm/s'): string {
 
   if (abs >= 1_000) return `${(value / 1000).toFixed(1)} km/s`
   return `${value.toFixed(0)} m/s`
+}
+
+export function flightTelemetryRows({
+  readout,
+  throttle,
+  angularVelocity,
+}: {
+  readout: FlightReadout
+  throttle: number
+  angularVelocity: Vec3
+}): FlightTelemetryRow[] {
+  return [
+    { label: 'ALT', value: formatFlightNumber(readout.altitude, 'm') },
+    { label: 'VEL', value: formatFlightNumber(readout.speed, 'm/s') },
+    { label: 'VERT', value: formatFlightNumber(readout.radialSpeed, 'm/s') },
+    { label: 'THR', value: throttle > 0 ? 'ON' : 'OFF' },
+    {
+      label: 'RATE',
+      value: `P ${angularVelocity[0].toFixed(2)} Y ${angularVelocity[1].toFixed(2)} R ${angularVelocity[2].toFixed(2)}`,
+    },
+  ]
 }
 
 function subtract(a: Vec3, b: Vec3): Vec3 {

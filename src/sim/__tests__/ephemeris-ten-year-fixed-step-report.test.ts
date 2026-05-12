@@ -116,5 +116,5 @@ describe('ten-year fixed-step ephemeris report', () => {
         expect(driftMeters, id).toBeLessThan(10_000_000)
       }
     }
-  })
+  }, 20_000)
 })

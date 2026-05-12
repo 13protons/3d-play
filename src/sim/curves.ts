@@ -9,6 +9,7 @@ export function evaluateCurve(
   t: number,
 ): [number, number, number] {
   const dt = curve.t1 - curve.t0
+  if (dt === 0) return curve.p1
   const s = (t - curve.t0) / dt
   const s2 = s * s
   const s3 = s2 * s
@@ -23,6 +24,28 @@ export function evaluateCurve(
     h00 * curve.p0[0] + h10 * dt * curve.v0[0] + h01 * curve.p1[0] + h11 * dt * curve.v1[0],
     h00 * curve.p0[1] + h10 * dt * curve.v0[1] + h01 * curve.p1[1] + h11 * dt * curve.v1[1],
     h00 * curve.p0[2] + h10 * dt * curve.v0[2] + h01 * curve.p1[2] + h11 * dt * curve.v1[2],
+  ]
+}
+
+/** Evaluate the derivative of a cubic Hermite spline at time t. */
+export function evaluateCurveVelocity(
+  curve: TrajectoryCurve,
+  t: number,
+): [number, number, number] {
+  const dt = curve.t1 - curve.t0
+  if (dt === 0) return curve.v1
+  const s = (t - curve.t0) / dt
+  const s2 = s * s
+
+  const dh00 = 6 * s2 - 6 * s
+  const dh10 = 3 * s2 - 4 * s + 1
+  const dh01 = -6 * s2 + 6 * s
+  const dh11 = 3 * s2 - 2 * s
+
+  return [
+    (dh00 * curve.p0[0] + dh10 * dt * curve.v0[0] + dh01 * curve.p1[0] + dh11 * dt * curve.v1[0]) / dt,
+    (dh00 * curve.p0[1] + dh10 * dt * curve.v0[1] + dh01 * curve.p1[1] + dh11 * dt * curve.v1[1]) / dt,
+    (dh00 * curve.p0[2] + dh10 * dt * curve.v0[2] + dh01 * curve.p1[2] + dh11 * dt * curve.v1[2]) / dt,
   ]
 }
 
