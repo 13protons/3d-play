@@ -3,6 +3,7 @@ import {
   MAIN_THRUST_ACCELERATION,
   REACTION_WHEEL_ANGULAR_RATE,
   angularVelocityForReactionWheelKeys,
+  shouldEmitAeroForce,
   shouldDisableThrottleForWarp,
   shouldStabilizeAngularVelocityForWarp,
   thrustAccelerationForElapsedRotation,
@@ -39,6 +40,14 @@ describe('shouldDisableThrottleForWarp', () => {
   it('shuts off engine thrust above real time warp', () => {
     expect(shouldDisableThrottleForWarp(1)).toBe(false)
     expect(shouldDisableThrottleForWarp(10)).toBe(true)
+  })
+})
+
+describe('shouldEmitAeroForce', () => {
+  it('emits only finite nonzero aero force vectors', () => {
+    expect(shouldEmitAeroForce([0, 0, 0])).toBe(false)
+    expect(shouldEmitAeroForce([1, 0, 0])).toBe(true)
+    expect(shouldEmitAeroForce([Number.NaN, 0, 0])).toBe(false)
   })
 })
 

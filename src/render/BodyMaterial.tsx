@@ -32,8 +32,9 @@ function TexturedBodyMaterial({
   ) : (
     <meshStandardMaterial
       color="#ffffff"
-      emissive={body.color}
+      emissive="#ffffff"
       emissiveIntensity={body.minimumLight}
+      emissiveMap={map}
       map={map}
     />
   )

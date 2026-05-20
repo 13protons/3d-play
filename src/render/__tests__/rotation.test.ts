@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { Euler, Quaternion, Vector3 } from 'three'
 import {
+  bodyOrientationEuler,
   bodyRotationAngle,
+  craftDebugAeroForceSegment,
   craftDebugAxisSegments,
   rotatingBodyTransform,
+  vehicleBodyTransform,
   rotationAxisPoints,
   shouldShowBodyRotationAxisInView,
   shouldShowRotationAxis,
@@ -16,10 +20,40 @@ describe('bodyRotationAngle', () => {
   })
 })
 
+describe('bodyOrientationEuler', () => {
+  it('keeps the tilted spin axis fixed while the body spins', () => {
+    const tilt = 23.44
+    const expectedAxis = new Vector3(
+      -Math.sin((tilt * Math.PI) / 180),
+      Math.cos((tilt * Math.PI) / 180),
+      0,
+    )
+
+    for (const spin of [0, 1, 2]) {
+      const axis = new Vector3(0, 1, 0).applyEuler(
+        new Euler(...bodyOrientationEuler(spin, tilt)),
+      )
+
+      expect(axis.x).toBeCloseTo(expectedAxis.x)
+      expect(axis.y).toBeCloseTo(expectedAxis.y)
+      expect(axis.z).toBeCloseTo(expectedAxis.z)
+    }
+  })
+})
+
 describe('rotatingBodyTransform', () => {
   it('keeps world placement on the rotating group so spin does not rotate orbital position', () => {
     expect(rotatingBodyTransform([100, 200, 300])).toEqual({
       groupPosition: [100, 200, 300],
+      meshPosition: [0, 0, 0],
+    })
+  })
+})
+
+describe('vehicleBodyTransform', () => {
+  it('places vehicle-view body position on the rotating group so spin only rotates texture', () => {
+    expect(vehicleBodyTransform([10, 20, 30])).toEqual({
+      groupPosition: [10, 20, 30],
       meshPosition: [0, 0, 0],
     })
   })
@@ -34,6 +68,52 @@ describe('craftDebugAxisSegments', () => {
       thrust: [[0, 0, 0], [0, 0, 2.6]],
       cot: [0, 0, -2.6],
     })
+  })
+})
+
+describe('craftDebugAeroForceSegment', () => {
+  it('returns null for zero force', () => {
+    expect(craftDebugAeroForceSegment([0, 0, 0])).toBeNull()
+  })
+
+  it('hides tiny aero forces that would only add visual noise', () => {
+    expect(craftDebugAeroForceSegment([0, 0, -0.5])).toBeNull()
+  })
+
+  it('scales force direction into a clamped debug line', () => {
+    expect(craftDebugAeroForceSegment([0, 0, -1000])).toEqual([
+      [0, 0, 0],
+      [0, 0, expect.closeTo(-1.08761548, 5)],
+    ])
+  })
+
+  it('saturates very large forces without changing direction', () => {
+    expect(craftDebugAeroForceSegment([1e9, 0, 0])).toEqual([
+      [0, 0, 0],
+      [6, 0, 0],
+    ])
+    expect(craftDebugAeroForceSegment([1e6, 0, 0])).toEqual([
+      [0, 0, 0],
+      [6, 0, 0],
+    ])
+  })
+
+  it('converts world force into craft-local coordinates before drawing inside the craft group', () => {
+    const orientation = new Quaternion().setFromAxisAngle(
+      new Vector3(0, 1, 0),
+      Math.PI / 2,
+    )
+    const segment = craftDebugAeroForceSegment(
+      [0, 0, -1000],
+      [orientation.x, orientation.y, orientation.z, orientation.w],
+    )
+
+    expect(segment).not.toBeNull()
+    const renderedWorldEndpoint = new Vector3(...segment![1]).applyQuaternion(orientation)
+
+    expect(renderedWorldEndpoint.x).toBeCloseTo(0)
+    expect(renderedWorldEndpoint.y).toBeCloseTo(0)
+    expect(renderedWorldEndpoint.z).toBeCloseTo(-1.08761548)
   })
 })
 

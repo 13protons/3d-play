@@ -10,6 +10,7 @@ import { OrbitalMarker } from './OrbitalMarker'
 import { RotationLine } from './RotationLine'
 import { BodyMaterial } from './BodyMaterial'
 import {
+  bodyOrientationEuler,
   bodyRotationAngle,
   rotatingBodyTransform,
   shouldShowBodyRotationAxisInView,
@@ -121,9 +122,10 @@ export function Body({ bodyId }: BodyProps) {
     if (spinGroup) {
       spinGroup.visible = mesh.visible
       spinGroup.rotation.set(
-        0,
-        bodyRotationAngle(body.rotationPhase, body.angularVelocity, t),
-        (body.axialTilt * Math.PI) / 180,
+        ...bodyOrientationEuler(
+          bodyRotationAngle(body.rotationPhase, body.angularVelocity, t),
+          body.axialTilt,
+        ),
       )
     }
     const spriteSize = spriteWorldSize(

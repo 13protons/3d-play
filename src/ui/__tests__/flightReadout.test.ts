@@ -27,6 +27,20 @@ describe('computeFlightReadout', () => {
 
     expect(readout.speed).toBe(7_500)
   })
+
+  it('uses reference velocity when provided for surface-relative speed', () => {
+    const readout = computeFlightReadout({
+      vehiclePosition: [7_000_000, 0, 0],
+      vehicleVelocity: [0, 0, 37_500],
+      parentPosition: [0, 0, 0],
+      parentVelocity: [0, 0, 30_000],
+      parentRadius: 6_371_000,
+      referenceVelocity: [100, 0, 425],
+    })
+
+    expect(readout.speed).toBeCloseTo(436.6, 1)
+    expect(readout.radialSpeed).toBeCloseTo(100)
+  })
 })
 
 describe('formatFlightNumber', () => {
@@ -38,6 +52,11 @@ describe('formatFlightNumber', () => {
   it('formats speed units compactly', () => {
     expect(formatFlightNumber(123.4, 'm/s')).toBe('123 m/s')
     expect(formatFlightNumber(7_543, 'm/s')).toBe('7.5 km/s')
+  })
+
+  it('clamps tiny signed values to zero', () => {
+    expect(formatFlightNumber(-0.0001, 'm/s')).toBe('0 m/s')
+    expect(formatFlightNumber(-0.0001, 'm')).toBe('0 m')
   })
 })
 

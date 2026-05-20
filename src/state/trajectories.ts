@@ -13,6 +13,7 @@ export interface VehicleControlMeta {
   orientation: [number, number, number, number]
   angularVelocity: [number, number, number]
   surfaceState: 'flying' | 'landed' | 'crashed'
+  aeroForceWorld?: [number, number, number]
 }
 
 export interface BodyMeta {

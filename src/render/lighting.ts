@@ -62,3 +62,29 @@ export function projectDistantSphere(
     radius: bodyRadius * scale,
   }
 }
+
+export function directionalLightPosition(
+  observerPosition: Vec3,
+  lightPosition: Vec3,
+  distance: number,
+): Vec3 {
+  const dx = lightPosition[0] - observerPosition[0]
+  const dy = lightPosition[1] - observerPosition[1]
+  const dz = lightPosition[2] - observerPosition[2]
+  const magnitude = Math.hypot(dx, dy, dz)
+  if (magnitude === 0) return [0, 0, 0]
+  const scale = distance / magnitude
+  return [dx * scale, dy * scale, dz * scale]
+}
+
+export function vehicleSceneSunLightPosition(
+  observerPosition: Vec3,
+  sunPosition: Vec3,
+  distance: number,
+): Vec3 {
+  return directionalLightPosition(observerPosition, sunPosition, distance)
+}
+
+export function vehicleSceneSunLightIntensity(_sunProxyOccluded: boolean): number {
+  return 2
+}

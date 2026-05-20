@@ -6,11 +6,13 @@ import {
   type Vec3,
 } from './navballMath'
 import type { FlightTelemetryRow } from './flightReadout'
+import type { FlightReferenceMode } from '../sim/vehicle/referenceFrame'
 
 interface NavballProps {
   orientation: Quaternion
   relativePosition: Vec3
   relativeVelocity: Vec3
+  mode: FlightReferenceMode
 }
 
 interface NavballClusterProps extends NavballProps {
@@ -30,7 +32,7 @@ const markerStyles = {
   antiNormal: { label: 'AN', color: '#b8b8ff' },
 } as const
 
-export function Navball({ orientation, relativePosition, relativeVelocity }: NavballProps) {
+export function Navball({ orientation, relativePosition, relativeVelocity, mode }: NavballProps) {
   const state = computeNavballState({
     orientation,
     relativePosition,
@@ -95,7 +97,7 @@ export function Navball({ orientation, relativePosition, relativeVelocity }: Nav
           <line x1={CENTER} y1={CENTER + 4} x2={CENTER} y2={CENTER + 14} />
         </g>
         <text x={CENTER} y={SIZE - 8} textAnchor="middle" fontFamily="monospace" fontSize="10" fill="rgba(255,255,255,0.65)">
-          ORBIT NAV
+          {mode === 'surface' ? 'SURF NAV' : 'ORBIT NAV'}
         </text>
       </svg>
     </div>
@@ -107,6 +109,7 @@ export function NavballCluster({
   relativePosition,
   relativeVelocity,
   rows,
+  mode,
 }: NavballClusterProps) {
   return (
     <div
@@ -122,7 +125,24 @@ export function NavballCluster({
       }}
     >
       <TelemetryPanel rows={rows.slice(0, 3)} align="right" />
-      <Navball orientation={orientation} relativePosition={relativePosition} relativeVelocity={relativeVelocity} />
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <div
+          style={{
+            marginBottom: 4,
+            padding: '2px 8px',
+            border: '1px solid rgba(210,225,255,0.28)',
+            borderRadius: 999,
+            background: mode === 'surface' ? 'rgba(255,170,80,0.2)' : 'rgba(100,180,255,0.16)',
+            color: 'rgba(255,255,255,0.75)',
+            fontFamily: 'monospace',
+            fontSize: 10,
+            letterSpacing: 0.8,
+          }}
+        >
+          {mode === 'surface' ? 'SURFACE MODE' : 'ORBITAL MODE'}
+        </div>
+        <Navball orientation={orientation} relativePosition={relativePosition} relativeVelocity={relativeVelocity} mode={mode} />
+      </div>
       <TelemetryPanel rows={rows.slice(3)} align="left" />
     </div>
   )

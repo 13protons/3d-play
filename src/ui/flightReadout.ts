@@ -6,6 +6,7 @@ export interface FlightReadoutInput {
   parentPosition: Vec3
   parentVelocity: Vec3
   parentRadius: number
+  referenceVelocity?: Vec3
 }
 
 export interface FlightReadout {
@@ -25,9 +26,10 @@ export function computeFlightReadout({
   parentPosition,
   parentVelocity,
   parentRadius,
+  referenceVelocity,
 }: FlightReadoutInput): FlightReadout {
   const relPos = subtract(vehiclePosition, parentPosition)
-  const relVel = subtract(vehicleVelocity, parentVelocity)
+  const relVel = referenceVelocity ?? subtract(vehicleVelocity, parentVelocity)
   const distance = mag(relPos)
   const radialUnit = distance > 0 ? scale(relPos, 1 / distance) : [1, 0, 0] as Vec3
 
@@ -39,14 +41,15 @@ export function computeFlightReadout({
 }
 
 export function formatFlightNumber(value: number, unit: 'm' | 'm/s'): string {
-  const abs = Math.abs(value)
+  const displayValue = Math.abs(value) < 0.5 ? 0 : value
+  const abs = Math.abs(displayValue)
   if (unit === 'm') {
-    if (abs >= 10_000) return `${(value / 1000).toFixed(1)} km`
-    return `${value.toFixed(0)} m`
+    if (abs >= 10_000) return `${(displayValue / 1000).toFixed(1)} km`
+    return `${displayValue.toFixed(0)} m`
   }
 
-  if (abs >= 1_000) return `${(value / 1000).toFixed(1)} km/s`
-  return `${value.toFixed(0)} m/s`
+  if (abs >= 1_000) return `${(displayValue / 1000).toFixed(1)} km/s`
+  return `${displayValue.toFixed(0)} m/s`
 }
 
 export function flightTelemetryRows({

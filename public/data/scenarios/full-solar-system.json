@@ -265,9 +265,20 @@
       "velocity": [
         -29776.50610770464,
         -5395.9626605721005,
-        7670.175383619884
+        -7669.824616380115
       ],
-      "mesh": "cylinder"
+      "mesh": "cylinder",
+      "resources": {
+        "dryMass": 1000,
+        "fuelMass": 0
+      },
+      "aero": {
+        "model": "simple-drag",
+        "dragCoefficient": 2.2,
+        "referenceArea": 10,
+        "referenceLength": 2,
+        "centerOfPressureBody": [0, 0, 0]
+      }
     }
   ]
 }

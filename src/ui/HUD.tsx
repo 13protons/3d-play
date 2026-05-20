@@ -6,6 +6,10 @@ import { WARP_RATES } from '../sim/warp'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
 import { computeFlightReadout, flightTelemetryRows } from './flightReadout'
 import { NavballCluster } from './Navball'
+import {
+  computeFlightReferenceFrame,
+  rotationAxisFromAxialTilt,
+} from '../sim/vehicle/referenceFrame'
 
 function formatTime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
@@ -49,22 +53,36 @@ export function HUD() {
         vehiclePosition[2] - parentPosition[2],
       ] as [number, number, number]
     : null
-  const relativeVelocity = vehicleVelocity && parentVelocity
-    ? [
-        vehicleVelocity[0] - parentVelocity[0],
-        vehicleVelocity[1] - parentVelocity[1],
-        vehicleVelocity[2] - parentVelocity[2],
-      ] as [number, number, number]
-    : null
   const vehicleControl = firstVehicle ? vehicleControls[firstVehicle.id] : undefined
   const flightReadout = firstVehicle && parent && vehicleCurve && parentCurve
-    ? computeFlightReadout({
-        vehiclePosition: vehiclePosition ?? evaluateCurve(vehicleCurve, simTime),
-        vehicleVelocity: vehicleVelocity ?? vehicleCurve.v1,
-        parentPosition: parentPosition ?? evaluateCurve(parentCurve, simTime),
-        parentVelocity: parentVelocity ?? parentCurve.v1,
-        parentRadius: parent.radius,
-      })
+    ? (() => {
+        const vPos = vehiclePosition ?? evaluateCurve(vehicleCurve, simTime)
+        const vVel = vehicleVelocity ?? vehicleCurve.v1
+        const pPos = parentPosition ?? evaluateCurve(parentCurve, simTime)
+        const pVel = parentVelocity ?? parentCurve.v1
+        const relPos = [vPos[0] - pPos[0], vPos[1] - pPos[1], vPos[2] - pPos[2]] as [number, number, number]
+        const relVel = [vVel[0] - pVel[0], vVel[1] - pVel[1], vVel[2] - pVel[2]] as [number, number, number]
+        const frame = computeFlightReferenceFrame({
+          relativePosition: relPos,
+          relativeVelocity: relVel,
+          parentRadius: parent.radius,
+          parentGm: parent.gm,
+          parentAngularVelocity: parent.angularVelocity,
+          parentRotationAxis: rotationAxisFromAxialTilt(parent.axialTilt),
+          surfaceState: vehicleControl?.surfaceState ?? 'flying',
+        })
+        return {
+          readout: computeFlightReadout({
+            vehiclePosition: vPos,
+            vehicleVelocity: vVel,
+            parentPosition: pPos,
+            parentVelocity: pVel,
+            parentRadius: parent.radius,
+            referenceVelocity: frame.navVelocity,
+          }),
+          frame,
+        }
+      })()
     : null
 
   function setWarp(rate: number) {
@@ -218,13 +236,14 @@ export function HUD() {
         [ / ] warp &nbsp; Z toggle thrust &nbsp; WASD/QE reaction wheel &nbsp; V toggle view
         &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
-      {vehicleControl && relativePosition && relativeVelocity && flightReadout && (
+      {vehicleControl && relativePosition && flightReadout && (
         <NavballCluster
           orientation={vehicleControl.orientation}
           relativePosition={relativePosition}
-          relativeVelocity={relativeVelocity}
+          relativeVelocity={flightReadout.frame.navVelocity}
+          mode={flightReadout.frame.mode}
           rows={flightTelemetryRows({
-            readout: flightReadout,
+            readout: flightReadout.readout,
             throttle,
             angularVelocity: vehicleControl.angularVelocity,
             surfaceState: vehicleControl.surfaceState,

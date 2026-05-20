@@ -5,7 +5,9 @@
 
 import { useTrajectoriesStore } from './trajectories'
 import { useInputStore } from './input'
+import { useVehicleStore } from './vehicle'
 import type { BodyMeta } from './trajectories'
+import type { VehicleAero, VehicleResources } from '../sim/types'
 import type { TrajectoryCurve } from '../sim/types'
 import { G } from '../sim/constants'
 import {
@@ -62,6 +64,7 @@ function addVector(
 }
 
 export async function startSim(scenarioId: string): Promise<void> {
+  useVehicleStore.getState().reset()
   const scenarioResp = await fetch(`/data/scenarios/${scenarioId}.json`)
   if (!scenarioResp.ok) {
     throw new Error(`Failed to load scenario: ${scenarioId} (${scenarioResp.status})`)
@@ -117,7 +120,8 @@ export async function startSim(scenarioId: string): Promise<void> {
       physics.radius as number,
       physics.angularVelocity as number,
       physics.axialTilt as number,
-    ] as [string, number, number, number]
+      def.atmosphere as VehicleWorkerAtmosphere | undefined,
+    ] as [string, number, number, number, VehicleWorkerAtmosphere | undefined]
   })
 
   // Spawn the orbital worker
@@ -185,6 +189,19 @@ export async function startSim(scenarioId: string): Promise<void> {
       id: v.id, name: v.name, parentId: v.parentId, mesh: v.mesh,
     }))
     useTrajectoriesStore.getState().setVehicles(vehicleMetas)
+    for (const v of vehicles as Record<string, unknown>[]) {
+      if (v.resources) {
+        const resourcesInput = v.resources as { dryMass: number; fuelMass: number }
+        const resources: VehicleResources = {
+          ...resourcesInput,
+          mass: resourcesInput.dryMass + resourcesInput.fuelMass,
+        }
+        useVehicleStore.getState().setVehicleModel(v.id as string, {
+          resources,
+          aero: v.aero as VehicleAero | undefined,
+        })
+      }
+    }
 
     await orbitalReady
 
@@ -221,6 +238,7 @@ export async function startSim(scenarioId: string): Promise<void> {
           orientation: msg.orientation,
           angularVelocity: msg.angularVelocity,
           surfaceState: msg.surfaceState,
+          aeroForceWorld: msg.aeroForceWorld,
         })
       }
     }
@@ -231,6 +249,8 @@ export async function startSim(scenarioId: string): Promise<void> {
       bodyCurves: latestOrbitalCurves,
       bodyGMs,
       bodySurfaces,
+      resources: useVehicleStore.getState().models[v.id as string]?.resources,
+      aero: useVehicleStore.getState().models[v.id as string]?.aero,
     })
   }
 
@@ -317,4 +337,13 @@ export function stopSim(): void {
   pendingTargetTime = null
   latestOrbitalCurves = []
   useTrajectoriesStore.getState().reset()
+  useVehicleStore.getState().reset()
+}
+
+type VehicleWorkerAtmosphere = {
+  loadRadiusMultiplier: number
+  model: 'exponential'
+  surfaceDensity: number
+  scaleHeight: number
+  maxAltitude: number
 }

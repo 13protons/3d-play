@@ -26,6 +26,10 @@ export function shouldDisableThrottleForWarp(warpRate: number): boolean {
   return warpRate > 1
 }
 
+export function shouldEmitAeroForce(force: Vec3): boolean {
+  return force.every(Number.isFinite) && Math.hypot(force[0], force[1], force[2]) > 0
+}
+
 export function toggleThrottle(currentThrottle: number): number {
   return currentThrottle > 0 ? 0 : 1
 }

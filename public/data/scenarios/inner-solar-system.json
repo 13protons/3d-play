@@ -50,8 +50,19 @@
       "name": "Earth Orbiter",
       "parentId": "earth",
       "position": { "sector": [149600, 0, 0], "local": [6771000, 0, 0] },
-      "velocity": [0, 0, 37453],
-      "mesh": "cylinder"
+      "velocity": [0, 0, 22113],
+      "mesh": "cylinder",
+      "resources": {
+        "dryMass": 1000,
+        "fuelMass": 0
+      },
+      "aero": {
+        "model": "simple-drag",
+        "dragCoefficient": 2.2,
+        "referenceArea": 10,
+        "referenceLength": 2,
+        "centerOfPressureBody": [0, 0, 0]
+      }
     }
   ]
 }

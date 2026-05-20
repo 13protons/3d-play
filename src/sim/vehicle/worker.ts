@@ -12,11 +12,13 @@ import { pointMassDerivatives } from '../integrator/derivatives'
 import {
   integrateOrientation,
   shouldDisableThrottleForWarp,
+  shouldEmitAeroForce,
   shouldStabilizeAngularVelocityForWarp,
   thrustAccelerationForElapsedRotation,
   type Quaternion,
   type Vec3,
 } from './controls'
+import { vehicleDerivatives, type VehicleAero, type VehicleResources } from './dynamics'
 import {
   classifySurfaceContactAlongSegment,
   rotatingSurfaceState,
@@ -27,13 +29,27 @@ let vehicleId = ''
 let parentId = ''
 let stateVec: Float64Array | null = null
 let bodyGMs = new Map<string, number>()
-let bodySurfaces = new Map<string, { radius: number; angularVelocity: number; rotationAxis: Vec3 }>()
+let bodySurfaces = new Map<string, {
+  radius: number
+  angularVelocity: number
+  rotationAxis: Vec3
+  atmosphere?: {
+    loadRadiusMultiplier: number
+    model: 'exponential'
+    surfaceDensity: number
+    scaleHeight: number
+    maxAltitude: number
+  }
+}>()
+let resources: VehicleResources | undefined
+let aero: VehicleAero | undefined
 let simTime = 0
 let throttle = 0
 let orientation: Quaternion = [0, 0, 0, 1]
 let angularVelocity: Vec3 = [0, 0, 0]
 let surfaceContact: SurfaceContact = { type: 'flying' }
 let landedAt = 0
+let aeroForceWorld: Vec3 = [0, 0, 0]
 
 const LANDING_SPEED_THRESHOLD = 10
 
@@ -45,6 +61,7 @@ function emitControls(): void {
     orientation,
     angularVelocity,
     surfaceState: surfaceContact.type,
+    aeroForceWorld: shouldEmitAeroForce(aeroForceWorld) ? aeroForceWorld : undefined,
   })
 }
 
@@ -81,16 +98,19 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       msg.vehicle.velocity[0], msg.vehicle.velocity[1], msg.vehicle.velocity[2],
     ])
     bodyGMs = new Map(msg.bodyGMs)
-    bodySurfaces = new Map(msg.bodySurfaces.map(([id, radius, angularVelocity, axialTilt]) => [
+    bodySurfaces = new Map(msg.bodySurfaces.map(([id, radius, angularVelocity, axialTilt, atmosphere]) => [
       id,
-      { radius, angularVelocity, rotationAxis: rotationAxisFromAxialTilt(axialTilt) },
+      { radius, angularVelocity, rotationAxis: rotationAxisFromAxialTilt(axialTilt), atmosphere },
     ]))
+    resources = msg.resources
+    aero = msg.aero
     simTime = 0
     throttle = 0
     orientation = [0, 0, 0, 1]
     angularVelocity = [0, 0, 0]
     surfaceContact = { type: 'flying' }
     landedAt = 0
+    aeroForceWorld = [0, 0, 0]
 
     // Build derivative from initial body curves and integrate to initial time
     const initState = new Float64Array(stateVec)
@@ -131,6 +151,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
 
     const prevTime = simTime
     const prevState = new Float64Array(stateVec)
+    aeroForceWorld = [0, 0, 0]
 
     const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
     const parentSurface = bodySurfaces.get(parentId)
@@ -166,19 +187,21 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       }
     }
 
-    const gravityDeriv = pointMassDerivatives(msg.bodyCurves, bodyGMs)
-    const deriv = (t: number, y: Float64Array, dydt: Float64Array): void => {
-      gravityDeriv(t, y, dydt)
-      const thrust = thrustAccelerationForElapsedRotation(
-        orientation,
-        angularVelocity,
-        t - simTime,
-        throttle,
-      )
-      dydt[3] += thrust[0]
-      dydt[4] += thrust[1]
-      dydt[5] += thrust[2]
-    }
+    const deriv = vehicleDerivatives({
+      gravity: pointMassDerivatives(msg.bodyCurves, bodyGMs),
+      parentId,
+      bodyCurves: msg.bodyCurves,
+      bodySurfaces,
+      resources,
+      aero,
+      orientation,
+      angularVelocity,
+      throttle,
+      simTime,
+      onAeroForce: (force) => {
+        aeroForceWorld = force
+      },
+    })
 
     advanceTo(stateVec, simTime, targetTime, deriv, 1e-10)
     orientation = integrateOrientation(orientation, angularVelocity, targetTime - simTime)

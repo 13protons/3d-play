@@ -1,21 +1,31 @@
 import { useRef, useState } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Stars, OrbitControls } from '@react-three/drei'
-import type { Group, Mesh, MeshBasicMaterial, PointLight } from 'three'
+import type { DirectionalLight, Group, Mesh, MeshBasicMaterial } from 'three'
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { useModeStore } from '../state/mode'
 import { useTrajectoriesStore } from '../state/trajectories'
 import type { BodyMeta } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
+import { evaluateCurveVelocity } from '../sim/curves'
+import {
+  computeFlightReferenceFrame,
+  rotationAxisFromAxialTilt,
+} from '../sim/vehicle/referenceFrame'
 import {
   isSunOccluded,
   projectDistantSphere,
   type SunOccluder,
   type Vec3,
+  vehicleSceneSunLightIntensity,
+  vehicleSceneSunLightPosition,
 } from './lighting'
 import { BodyMaterial } from './BodyMaterial'
 import { CraftDebugAxes } from './CraftDebugAxes'
 import {
+  bodyOrientationEuler,
   bodyRotationAngle,
+  vehicleBodyTransform,
 } from './rotation'
 import { sphereSegmentsForVehicleDistance } from './lod'
 
@@ -65,7 +75,6 @@ function VehicleBody({
 }) {
   const spinGroupRef = useRef<Group>(null)
   const meshRef = useRef<Mesh>(null)
-  const lightRef = useRef<PointLight>(null)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
   const [sphereSegments, setSphereSegments] = useState(32)
 
@@ -103,13 +112,14 @@ function VehicleBody({
         )
       : null
 
-    // Floating origin centered on vehicle. Stars use a projected proxy so the
-    // vehicle camera can keep practical clipping while still showing the Sun.
-    mesh.position.set(
-      renderBody ? renderBody.position[0] : bodyPos[0] - vehiclePos[0],
-      renderBody ? renderBody.position[1] : bodyPos[1] - vehiclePos[1],
-      renderBody ? renderBody.position[2] : bodyPos[2] - vehiclePos[2],
-    )
+    // Floating origin centered on vehicle. Keep placement on the rotating group
+    // so spin/tilt changes texture orientation without rotating body position.
+    const scenePosition: [number, number, number] = renderBody
+      ? renderBody.position
+      : [bodyPos[0] - vehiclePos[0], bodyPos[1] - vehiclePos[1], bodyPos[2] - vehiclePos[2]]
+    const transform = vehicleBodyTransform(scenePosition)
+    if (spinGroup) spinGroup.position.set(...transform.groupPosition)
+    mesh.position.set(...transform.meshPosition)
 
     if (renderBody) {
       mesh.scale.setScalar(renderBody.radius / body.radius)
@@ -119,9 +129,10 @@ function VehicleBody({
 
     if (spinGroup) {
       spinGroup.rotation.set(
-        0,
-        bodyRotationAngle(body.rotationPhase, body.angularVelocity, t),
-        (body.axialTilt * Math.PI) / 180,
+        ...bodyOrientationEuler(
+          bodyRotationAngle(body.rotationPhase, body.angularVelocity, t),
+          body.axialTilt,
+        ),
       )
     }
 
@@ -147,11 +158,6 @@ function VehicleBody({
 
     mesh.visible = !sunOccluded
 
-    if (lightRef.current) {
-      lightRef.current.position.copy(mesh.position)
-      lightRef.current.intensity = sunOccluded ? 0 : 2
-    }
-
     if (body.emissive && mesh.material && 'opacity' in mesh.material) {
       const material = mesh.material as MeshBasicMaterial
       material.opacity = sunOccluded ? 0 : 1
@@ -169,11 +175,62 @@ function VehicleBody({
           <BodyMaterial body={body} />
         </mesh>
       </group>
-      {body.emissive && (
-        <pointLight ref={lightRef} intensity={2} distance={0} decay={0} />
-      )}
     </group>
   )
+}
+
+function VehicleSunLight({
+  vehicleId,
+  visibleBodyIds,
+}: {
+  vehicleId: string
+  visibleBodyIds: string[]
+}) {
+  const lightRef = useRef<DirectionalLight>(null)
+
+  useFrame(() => {
+    if (useModeStore.getState().activeView !== 'vehicle') return
+
+    const light = lightRef.current
+    if (!light) return
+
+    const store = useTrajectoriesStore.getState()
+    const { curves, bodies } = store
+    const t = store.getSimTime()
+    const sun = Object.values(bodies).find((body) => body.emissive)
+    const sunCurve = sun ? curves[sun.id] : undefined
+    const vehicleCurve = curves[vehicleId]
+    if (!sun || !sunCurve || !vehicleCurve) return
+
+    const sunPos = evaluateCurve(sunCurve, t) as Vec3
+    const vehiclePos = evaluateCurve(vehicleCurve, t) as Vec3
+    const sunOccluded = isSunOccluded(
+      vehiclePos,
+      sunPos,
+      visibleBodyIds
+        .filter((id) => id !== sun.id)
+        .map((id): SunOccluder | null => {
+          const occluder = bodies[id]
+          const occluderCurve = curves[id]
+          if (!occluder || !occluderCurve) return null
+          return {
+            id,
+            position: evaluateCurve(occluderCurve, t) as Vec3,
+            radius: occluder.radius,
+          }
+        })
+        .filter((occluder): occluder is SunOccluder => occluder !== null),
+    )
+    const lightPosition = vehicleSceneSunLightPosition(
+      vehiclePos,
+      sunPos,
+      SUN_RENDER_DISTANCE,
+    )
+    light.position.set(...lightPosition)
+    light.intensity = vehicleSceneSunLightIntensity(sunOccluded)
+  })
+
+  return <directionalLight ref={lightRef} intensity={2} />
 }
 
 function VehicleMesh() {
@@ -195,7 +252,13 @@ function VehicleMesh() {
           <meshBasicMaterial color="#ff8a18" />
         </mesh>
       )}
-      {showRotationAxes && <CraftDebugAxes length={3} />}
+      {showRotationAxes && (
+        <CraftDebugAxes
+          length={3}
+          aeroForceWorld={controls?.aeroForceWorld}
+          orientation={controls?.orientation}
+        />
+      )}
     </group>
   )
 }
@@ -217,8 +280,14 @@ function VehicleSceneContent() {
     <>
       <ambientLight intensity={0.04} />
       <Stars radius={1e8} depth={1e8} count={3000} factor={1e6} fade />
-      <OrbitControls minDistance={5} maxDistance={1e9} />
+      <VehicleViewControls />
       <VehicleMesh />
+      {firstVehicle && (
+        <VehicleSunLight
+          vehicleId={firstVehicle.id}
+          visibleBodyIds={visibleBodyIds}
+        />
+      )}
       {firstVehicle &&
         visibleBodyIds.map((id) => (
           <VehicleBody
@@ -230,6 +299,56 @@ function VehicleSceneContent() {
         ))}
     </>
   )
+}
+
+function VehicleViewControls() {
+  const controlsRef = useRef<OrbitControlsImpl>(null)
+  const camera = useThree((s) => s.camera)
+
+  useFrame(() => {
+    const store = useTrajectoriesStore.getState()
+    const vehicle = Object.values(store.vehicles)[0]
+    if (!vehicle) return
+    const parent = store.bodies[vehicle.parentId]
+    const vehicleCurve = store.curves[vehicle.id]
+    const parentCurve = store.curves[vehicle.parentId]
+    if (!parent || !vehicleCurve || !parentCurve) return
+
+    const t = store.getSimTime()
+    const vehiclePosition = evaluateCurve(vehicleCurve, t) as Vec3
+    const parentPosition = evaluateCurve(parentCurve, t) as Vec3
+    const vehicleVelocity = evaluateCurveVelocity(vehicleCurve, t) as Vec3
+    const parentVelocity = evaluateCurveVelocity(parentCurve, t) as Vec3
+    const controls = store.vehicleControls[vehicle.id]
+    const relativePosition: Vec3 = [
+      vehiclePosition[0] - parentPosition[0],
+      vehiclePosition[1] - parentPosition[1],
+      vehiclePosition[2] - parentPosition[2],
+    ]
+    const relativeVelocity: Vec3 = [
+      vehicleVelocity[0] - parentVelocity[0],
+      vehicleVelocity[1] - parentVelocity[1],
+      vehicleVelocity[2] - parentVelocity[2],
+    ]
+    const frame = computeFlightReferenceFrame({
+      relativePosition,
+      relativeVelocity,
+      parentRadius: parent.radius,
+      parentGm: parent.gm,
+      parentAngularVelocity: parent.angularVelocity,
+      parentRotationAxis: rotationAxisFromAxialTilt(parent.axialTilt),
+      surfaceState: controls?.surfaceState ?? 'flying',
+    })
+
+    if (frame.mode === 'surface') {
+      camera.up.set(frame.radialOut[0], frame.radialOut[1], frame.radialOut[2])
+    } else {
+      camera.up.set(0, 1, 0)
+    }
+    controlsRef.current?.update()
+  })
+
+  return <OrbitControls ref={controlsRef} minDistance={5} maxDistance={1e9} />
 }
 
 export function VehicleScene() {

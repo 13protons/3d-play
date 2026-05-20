@@ -50,6 +50,28 @@ export interface GravitySource {
   velocity: [number, number, number] // absolute velocity for prediction
 }
 
+export interface InlineAtmosphere {
+  loadRadiusMultiplier: number
+  model: 'exponential'
+  surfaceDensity: number
+  scaleHeight: number
+  maxAltitude: number
+}
+
+export interface VehicleResources {
+  dryMass: number
+  fuelMass: number
+  mass: number
+}
+
+export interface VehicleAero {
+  model: 'simple-drag'
+  dragCoefficient: number
+  referenceArea: number
+  referenceLength?: number
+  centerOfPressureBody?: [number, number, number]
+}
+
 // ---------------------------------------------------------------------------
 // Vehicle Worker Messages
 // ---------------------------------------------------------------------------
@@ -66,7 +88,9 @@ export type VehicleWorkerInbound =
       }
       bodyCurves: TrajectoryCurve[]
       bodyGMs: [string, number][]  // [id, G*M] pairs (Map not transferable)
-      bodySurfaces: [id: string, radius: number, angularVelocity: number, axialTilt: number][]
+      bodySurfaces: [id: string, radius: number, angularVelocity: number, axialTilt: number, atmosphere?: InlineAtmosphere][]
+      resources?: VehicleResources
+      aero?: VehicleAero
     }
   | {
       type: 'advance'
@@ -96,6 +120,7 @@ export type VehicleWorkerOutbound =
       orientation: [number, number, number, number]
       angularVelocity: [number, number, number]
       surfaceState: 'flying' | 'landed' | 'crashed'
+      aeroForceWorld?: [number, number, number]
     }
 
 // ---------------------------------------------------------------------------

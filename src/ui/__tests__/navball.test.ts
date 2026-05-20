@@ -89,4 +89,15 @@ describe('computeNavballState', () => {
     expect(state.markers.radialOut.y).toBe(-50)
     expect(state.markers.radialIn.y).toBe(50)
   })
+
+  it('uses the provided nav velocity for prograde markers', () => {
+    const state = computeNavballState({
+      orientation: [0, 0, 0, 1],
+      relativePosition: [1, 0, 0],
+      relativeVelocity: [0, 0, 1],
+      radius: 50,
+    })
+
+    expect(state.markers.prograde).toMatchObject({ x: 0, y: 0, visible: true })
+  })
 })
