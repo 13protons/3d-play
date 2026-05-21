@@ -180,12 +180,12 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
   }
 
   if (msg.type === 'set-throttle') {
-    throttle = surfaceContact.type === 'crashed' ? 0 : Math.max(0, Math.min(1, msg.value))
+    throttle = Math.max(0, Math.min(1, msg.value))
     emitControls()
   }
 
   if (msg.type === 'set-attitude') {
-    manualTorque = surfaceContact.type === 'crashed' ? [0, 0, 0] : [msg.pitch, msg.yaw, msg.roll]
+    manualTorque = [msg.pitch, msg.yaw, msg.roll]
     emitControls()
   }
 
@@ -325,7 +325,6 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         })
         stateVec.set([...landed.position, ...landed.velocity])
         if (contact.type === 'crashed') {
-          throttle = 0
           angularVelocity = [0, 0, 0]
           manualTorque = [0, 0, 0]
         }

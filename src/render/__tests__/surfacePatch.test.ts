@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   clampCameraAboveLocalSurface,
+  SURFACE_CAMERA_MIN_HEIGHT,
   shouldHideBodySphereForLocalSurface,
+  shouldClampCameraAboveLocalSurface,
   shouldShowLocalSurfacePatch,
   surfacePatchSizeForCameraDistance,
   surfacePatchFrame,
@@ -91,11 +93,31 @@ describe('shouldShowLocalSurfacePatch', () => {
 })
 
 describe('clampCameraAboveLocalSurface', () => {
+  it('keeps the camera above the rendered terrain surface', () => {
+    expect(SURFACE_CAMERA_MIN_HEIGHT).toBeGreaterThan(1)
+  })
+
   it('pushes cameras below the local tangent surface back above it', () => {
     expect(clampCameraAboveLocalSurface([0, -2, 5], [0, 1, 0], 1)).toEqual([0, 1, 5])
   })
 
   it('does not move cameras already above the local surface', () => {
     expect(clampCameraAboveLocalSurface([0, 3, 5], [0, 1, 0], 1)).toEqual([0, 3, 5])
+  })
+})
+
+describe('shouldClampCameraAboveLocalSurface', () => {
+  it('does not clamp while the vehicle is flying in surface reference mode', () => {
+    expect(shouldClampCameraAboveLocalSurface({
+      surfaceState: 'flying',
+      referenceMode: 'surface',
+    })).toBe(false)
+  })
+
+  it('clamps while the vehicle is actually contacting the surface', () => {
+    expect(shouldClampCameraAboveLocalSurface({
+      surfaceState: 'landed',
+      referenceMode: 'surface',
+    })).toBe(true)
   })
 })

@@ -1,5 +1,12 @@
 export type Vec3 = [number, number, number]
 export type FlightReferenceMode = 'orbital' | 'surface'
+export type OrbitKind = 'closed' | 'open' | 'impacting'
+
+export interface OrbitSummary {
+  kind: OrbitKind
+  periapsisAltitude: number
+  apoapsisAltitude: number | null
+}
 
 export interface FlightReferenceFrameInput {
   relativePosition: Vec3
@@ -9,11 +16,11 @@ export interface FlightReferenceFrameInput {
   parentAngularVelocity: number
   parentRotationAxis: Vec3
   surfaceState: 'flying' | 'landed' | 'crashed'
-  activationRadiusMultiplier?: number
 }
 
 export interface FlightReferenceFrame {
   mode: FlightReferenceMode
+  orbit: OrbitSummary
   altitude: number
   orbitalVelocity: Vec3
   surfaceVelocity: Vec3
@@ -29,7 +36,6 @@ export function computeFlightReferenceFrame({
   parentAngularVelocity,
   parentRotationAxis,
   surfaceState,
-  activationRadiusMultiplier = 1.1,
 }: FlightReferenceFrameInput): FlightReferenceFrame {
   const distance = magnitude(relativePosition)
   const radialOut = distance > 0 ? scale(relativePosition, 1 / distance) : [1, 0, 0] as Vec3
@@ -38,18 +44,19 @@ export function computeFlightReferenceFrame({
     cross(scale(parentRotationAxis, parentAngularVelocity), relativePosition),
   )
   const altitude = distance - parentRadius
-  const closeToSurface = distance <= parentRadius * activationRadiusMultiplier
-  const mode = surfaceState !== 'flying' || (closeToSurface && periapsisIntersectsBody({
+  const orbit = computeOrbitSummary({
     relativePosition,
     relativeVelocity,
     parentGm,
     parentRadius,
-  }))
+  })
+  const mode = surfaceState !== 'flying' || orbit.kind === 'impacting'
     ? 'surface'
     : 'orbital'
 
   return {
     mode,
+    orbit,
     altitude,
     orbitalVelocity: relativeVelocity,
     surfaceVelocity,
@@ -70,7 +77,7 @@ export function rotationAxisFromAxialTilt(axialTiltDegrees: number): Vec3 {
   return normalize([-Math.sin(tilt), Math.cos(tilt), 0], [0, 1, 0])
 }
 
-function periapsisIntersectsBody({
+function computeOrbitSummary({
   relativePosition,
   relativeVelocity,
   parentGm,
@@ -80,20 +87,29 @@ function periapsisIntersectsBody({
   relativeVelocity: Vec3
   parentGm: number
   parentRadius: number
-}): boolean {
+}): OrbitSummary {
   const r = magnitude(relativePosition)
-  const v2 = dot(relativeVelocity, relativeVelocity)
-  if (r <= 0 || parentGm <= 0) return false
-  const specificEnergy = v2 / 2 - parentGm / r
-  if (specificEnergy >= 0) return false
+  if (r <= 0 || parentGm <= 0) {
+    return { kind: 'open', periapsisAltitude: Infinity, apoapsisAltitude: null }
+  }
 
+  const v2 = dot(relativeVelocity, relativeVelocity)
+  const specificEnergy = v2 / 2 - parentGm / r
   const h = cross(relativePosition, relativeVelocity)
   const h2 = dot(h, h)
   const eccentricitySquared = Math.max(0, 1 + (2 * specificEnergy * h2) / (parentGm * parentGm))
   const eccentricity = Math.sqrt(eccentricitySquared)
-  const semiMajorAxis = -parentGm / (2 * specificEnergy)
-  const periapsis = semiMajorAxis * (1 - eccentricity)
-  return periapsis <= parentRadius
+  const periapsisRadius = h2 / (parentGm * (1 + eccentricity))
+  const semiMajorAxis = specificEnergy < 0 ? -parentGm / (2 * specificEnergy) : null
+  const apoapsisRadius = semiMajorAxis === null ? null : 2 * semiMajorAxis - periapsisRadius
+  const periapsisAltitude = periapsisRadius - parentRadius
+  const apoapsisAltitude = apoapsisRadius === null ? null : apoapsisRadius - parentRadius
+
+  return {
+    kind: periapsisRadius <= parentRadius ? 'impacting' : specificEnergy < 0 ? 'closed' : 'open',
+    periapsisAltitude,
+    apoapsisAltitude,
+  }
 }
 
 function subtract(a: Vec3, b: Vec3): Vec3 {

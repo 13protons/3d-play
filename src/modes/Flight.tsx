@@ -17,6 +17,7 @@ import {
 import {
   throttleDirectionForKeyDown,
   throttleDirectionForKeyUp,
+  throttlePresetForKeyDown,
   type ThrottleDirection,
 } from './flightInput'
 
@@ -105,10 +106,13 @@ export function Flight() {
           simTime,
         })
       }
-      if (e.key === 'z' || e.key === 'Z') {
+      const throttlePreset = throttlePresetForKeyDown(e)
+      if (throttlePreset === 'full') {
+        e.preventDefault()
         pushThrottleCommand(throttleFull(), simTime)
       }
-      if (e.key === 'x' || e.key === 'X') {
+      if (throttlePreset === 'cut') {
+        e.preventDefault()
         pushThrottleCommand(throttleCut(), simTime)
       }
       throttleDirectionRef.current = throttleDirectionForKeyDown(throttleDirectionRef.current, e)

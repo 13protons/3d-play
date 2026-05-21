@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  computeNavballCompassFrame,
   computeNavballFrame,
   computeNavballMarkers,
   computeNavballState,
@@ -7,6 +8,53 @@ import {
   shouldRenderNavballMarker,
   visibleNavballSegments,
 } from '../navballMath'
+
+describe('computeNavballCompassFrame', () => {
+  it('builds cardinal vectors from the projected parent rotation axis at the equator', () => {
+    const compass = computeNavballCompassFrame({
+      relativePosition: [1, 0, 0],
+      parentRotationAxis: [0, 1, 0],
+    })
+
+    expect(compass?.north).toEqual([0, 1, 0])
+    expect(compass?.south).toEqual([0, -1, 0])
+    expect(compass?.east).toEqual([0, 0, -1])
+    expect(compass?.west).toEqual([0, 0, 1])
+  })
+
+  it('omits compass vectors for polar or invalid inputs', () => {
+    expect(
+      computeNavballCompassFrame({
+        relativePosition: [0, 1, 0],
+        parentRotationAxis: [0, 1, 0],
+      })
+    ).toBeNull()
+    expect(
+      computeNavballCompassFrame({
+        relativePosition: [0, 0, 0],
+        parentRotationAxis: [0, 1, 0],
+      })
+    ).toBeNull()
+    expect(
+      computeNavballCompassFrame({
+        relativePosition: [1, 0, 0],
+        parentRotationAxis: [0, 0, 0],
+      })
+    ).toBeNull()
+    expect(
+      computeNavballCompassFrame({
+        relativePosition: [Number.POSITIVE_INFINITY, 0, 0],
+        parentRotationAxis: [0, 1, 0],
+      })
+    ).toBeNull()
+    expect(
+      computeNavballCompassFrame({
+        relativePosition: [1, 0, 0],
+        parentRotationAxis: [0, Number.NaN, 0],
+      })
+    ).toBeNull()
+  })
+})
 
 describe('computeNavballFrame', () => {
   it('builds orbital direction vectors from parent-relative state', () => {
@@ -99,5 +147,32 @@ describe('computeNavballState', () => {
     })
 
     expect(state.markers.prograde).toMatchObject({ x: 0, y: 0, visible: true })
+  })
+
+  it('projects compass markers through craft-local navball space', () => {
+    const state = computeNavballState({
+      orientation: [0, 0, 0, 1],
+      relativePosition: [1, 0, 0],
+      relativeVelocity: [0, 0, 1],
+      parentRotationAxis: [0, 1, 0],
+      radius: 50,
+    })
+
+    expect(state.compass?.north).toMatchObject({ x: 0, y: -50, visible: true })
+    expect(state.compass?.south).toMatchObject({ x: 0, y: 50, visible: true })
+    expect(state.compass?.east.visible).toBe(false)
+    expect(state.compass?.west).toMatchObject({ x: 0, y: 0, visible: true })
+  })
+
+  it('omits compass markers at the pole', () => {
+    const state = computeNavballState({
+      orientation: [0, 0, 0, 1],
+      relativePosition: [0, 1, 0],
+      relativeVelocity: [0, 0, 1],
+      parentRotationAxis: [0, 1, 0],
+      radius: 50,
+    })
+
+    expect(state.compass).toBeNull()
   })
 })

@@ -63,13 +63,14 @@ export function HUD() {
         const pVel = parentVelocity ?? parentCurve.v1
         const relPos = [vPos[0] - pPos[0], vPos[1] - pPos[1], vPos[2] - pPos[2]] as [number, number, number]
         const relVel = [vVel[0] - pVel[0], vVel[1] - pVel[1], vVel[2] - pVel[2]] as [number, number, number]
+        const parentRotationAxis = rotationAxisFromAxialTilt(parent.axialTilt)
         const frame = computeFlightReferenceFrame({
           relativePosition: relPos,
           relativeVelocity: relVel,
           parentRadius: parent.radius,
           parentGm: parent.gm,
           parentAngularVelocity: parent.angularVelocity,
-          parentRotationAxis: rotationAxisFromAxialTilt(parent.axialTilt),
+          parentRotationAxis,
           surfaceState: vehicleControl?.surfaceState ?? 'flying',
         })
         return {
@@ -82,6 +83,7 @@ export function HUD() {
             referenceVelocity: frame.navVelocity,
           }),
           frame,
+          parentRotationAxis,
         }
       })()
     : null
@@ -276,7 +278,7 @@ export function HUD() {
       </div>
 
       <div style={{ marginTop: 8, opacity: 0.4, fontSize: 11 }}>
-        [ / ] warp &nbsp; Shift/Ctrl throttle &nbsp; Z full &nbsp; X cut &nbsp; T SAS &nbsp; M map
+        [ / ] warp &nbsp; Z/X throttle &nbsp; Ctrl+Z full &nbsp; Ctrl+X cut &nbsp; T SAS &nbsp; M map
         &nbsp; WASD/QE reaction wheel
         &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
@@ -285,6 +287,7 @@ export function HUD() {
           orientation={vehicleControl.orientation}
           relativePosition={relativePosition}
           relativeVelocity={flightReadout.frame.navVelocity}
+          parentRotationAxis={flightReadout.parentRotationAxis}
           mode={flightReadout.frame.mode}
           rows={flightTelemetryRows({
             readout: flightReadout.readout,
@@ -294,6 +297,7 @@ export function HUD() {
             attitudeMode: vehicleControl.attitudeMode,
             mass: vehicleControl.mass,
             maxThrust: vehicleControl.currentThrust ?? vehicleControl.maxThrust,
+            orbit: flightReadout.frame.orbit,
           })}
         />
       )}

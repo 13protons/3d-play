@@ -10,6 +10,13 @@ export interface NavballFrame {
   antiNormal: Vec3
 }
 
+export interface NavballCompassFrame {
+  north: Vec3
+  east: Vec3
+  south: Vec3
+  west: Vec3
+}
+
 export interface ProjectedNavballPoint {
   x: number
   y: number
@@ -17,9 +24,11 @@ export interface ProjectedNavballPoint {
 }
 
 export type NavballMarkers = Record<keyof NavballFrame, ProjectedNavballPoint>
+export type NavballCompassMarkers = Record<keyof NavballCompassFrame, ProjectedNavballPoint>
 
 export interface NavballState {
   markers: NavballMarkers
+  compass: NavballCompassMarkers | null
   horizon: ProjectedNavballPoint[]
 }
 
@@ -41,6 +50,31 @@ export function computeNavballFrame({
     radialIn: scale(radialOut, -1),
     normal,
     antiNormal: scale(normal, -1),
+  }
+}
+
+export function computeNavballCompassFrame({
+  relativePosition,
+  parentRotationAxis,
+}: {
+  relativePosition: Vec3
+  parentRotationAxis: Vec3
+}): NavballCompassFrame | null {
+  const up = normalizeStrict(relativePosition)
+  const axis = normalizeStrict(parentRotationAxis)
+  if (!up || !axis) return null
+
+  const north = normalizeStrict(subtract(axis, scale(up, dot(axis, up))))
+  if (!north) return null
+
+  const east = normalizeStrict(cross(north, up))
+  if (!east) return null
+
+  return {
+    north,
+    east,
+    south: scale(north, -1),
+    west: scale(east, -1),
   }
 }
 
@@ -70,15 +104,29 @@ export function computeNavballState({
   orientation,
   relativePosition,
   relativeVelocity,
+  parentRotationAxis,
   radius,
 }: {
   orientation: Quaternion
   relativePosition: Vec3
   relativeVelocity: Vec3
+  parentRotationAxis?: Vec3
   radius: number
 }): NavballState {
+  const compassFrame = parentRotationAxis
+    ? computeNavballCompassFrame({ relativePosition, parentRotationAxis })
+    : null
+
   return {
     markers: computeNavballMarkers({ orientation, relativePosition, relativeVelocity, radius }),
+    compass: compassFrame
+      ? {
+          north: projectNavballVector(worldToCraft(compassFrame.north, orientation), radius),
+          east: projectNavballVector(worldToCraft(compassFrame.east, orientation), radius),
+          south: projectNavballVector(worldToCraft(compassFrame.south, orientation), radius),
+          west: projectNavballVector(worldToCraft(compassFrame.west, orientation), radius),
+        }
+      : null,
     horizon: computeHorizon({ orientation, radialOut: normalize(relativePosition, [0, 1, 0]), radius }),
   }
 }
@@ -169,8 +217,22 @@ function normalize(vector: Vec3, fallback: Vec3): Vec3 {
   ]
 }
 
+function normalizeStrict(vector: Vec3): Vec3 | null {
+  const magnitude = Math.hypot(vector[0], vector[1], vector[2])
+  if (magnitude <= 0 || !Number.isFinite(magnitude)) return null
+  return [
+    cleanNumber(vector[0] / magnitude),
+    cleanNumber(vector[1] / magnitude),
+    cleanNumber(vector[2] / magnitude),
+  ]
+}
+
 function add(a: Vec3, b: Vec3): Vec3 {
   return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+function subtract(a: Vec3, b: Vec3): Vec3 {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
 function scale(vector: Vec3, scalar: number): Vec3 {
@@ -187,6 +249,10 @@ function cross(a: Vec3, b: Vec3): Vec3 {
     a[2] * b[0] - a[0] * b[2],
     a[0] * b[1] - a[1] * b[0],
   ]
+}
+
+function dot(a: Vec3, b: Vec3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
 function cleanNumber(value: number): number {

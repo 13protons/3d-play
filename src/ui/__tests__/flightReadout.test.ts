@@ -61,6 +61,17 @@ describe('formatFlightNumber', () => {
 })
 
 describe('flightTelemetryRows', () => {
+  const baseRowsInput = {
+    readout: {
+      altitude: 400_000,
+      speed: 7_650,
+      radialSpeed: -12,
+    },
+    throttle: 1,
+    angularVelocity: [0.25, -0.5, 0] as [number, number, number],
+    surfaceState: 'flying' as const,
+  }
+
   it('formats vehicle telemetry for the navball panel without acceleration', () => {
     const rows = flightTelemetryRows({
       readout: {
@@ -88,5 +99,56 @@ describe('flightTelemetryRows', () => {
       { label: 'RATE', value: 'P 0.25 Y -0.50 R 0.00' },
     ])
     expect(rows.map((row) => row.label)).not.toContain('ACC')
+  })
+
+  it('formats closed orbit summary rows', () => {
+    const rows = flightTelemetryRows({
+      ...baseRowsInput,
+      orbit: {
+        kind: 'closed',
+        periapsisAltitude: 100_000,
+        apoapsisAltitude: 250_000,
+      },
+    })
+
+    expect(rows.slice(-3)).toEqual([
+      { label: 'ORB', value: 'CLOSED' },
+      { label: 'PE', value: '100.0 km' },
+      { label: 'AP', value: '250.0 km' },
+    ])
+  })
+
+  it('formats open orbit summary rows with unavailable apoapsis', () => {
+    const rows = flightTelemetryRows({
+      ...baseRowsInput,
+      orbit: {
+        kind: 'open',
+        periapsisAltitude: 125_000,
+        apoapsisAltitude: null,
+      },
+    })
+
+    expect(rows.slice(-3)).toEqual([
+      { label: 'ORB', value: 'OPEN' },
+      { label: 'PE', value: '125.0 km' },
+      { label: 'AP', value: '--' },
+    ])
+  })
+
+  it('formats impacting orbit summary as impact', () => {
+    const rows = flightTelemetryRows({
+      ...baseRowsInput,
+      orbit: {
+        kind: 'impacting',
+        periapsisAltitude: -5_000,
+        apoapsisAltitude: 250_000,
+      },
+    })
+
+    expect(rows.slice(-3)).toEqual([
+      { label: 'ORB', value: 'IMPACT' },
+      { label: 'PE', value: '-5000 m' },
+      { label: 'AP', value: '250.0 km' },
+    ])
   })
 })

@@ -12,6 +12,7 @@ interface NavballProps {
   orientation: Quaternion
   relativePosition: Vec3
   relativeVelocity: Vec3
+  parentRotationAxis: Vec3
   mode: FlightReferenceMode
 }
 
@@ -32,11 +33,12 @@ const markerStyles = {
   antiNormal: { label: 'AN', color: '#b8b8ff' },
 } as const
 
-export function Navball({ orientation, relativePosition, relativeVelocity, mode }: NavballProps) {
+export function Navball({ orientation, relativePosition, relativeVelocity, parentRotationAxis, mode }: NavballProps) {
   const state = computeNavballState({
     orientation,
     relativePosition,
     relativeVelocity,
+    parentRotationAxis,
     radius: RADIUS,
   })
   const horizonPaths = visibleNavballSegments(state.horizon)
@@ -73,6 +75,38 @@ export function Navball({ orientation, relativePosition, relativeVelocity, mode 
           ))}
           <line x1={CENTER - RADIUS} y1={CENTER} x2={CENTER + RADIUS} y2={CENTER} stroke="rgba(255,255,255,0.14)" />
           <line x1={CENTER} y1={CENTER - RADIUS} x2={CENTER} y2={CENTER + RADIUS} stroke="rgba(255,255,255,0.14)" />
+          {state.compass && Object.entries(state.compass).map(([key, point]) => {
+            if (!point.visible) return null
+            const label = key[0].toUpperCase()
+            const length = 8
+            const magnitude = Math.hypot(point.x, point.y) || 1
+            const ux = point.x / magnitude
+            const uy = point.y / magnitude
+
+            return (
+              <g key={key} opacity="0.72">
+                <line
+                  x1={CENTER + point.x - ux * length}
+                  y1={CENTER + point.y - uy * length}
+                  x2={CENTER + point.x}
+                  y2={CENTER + point.y}
+                  stroke="rgba(220,235,255,0.65)"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+                <text
+                  x={CENTER + point.x - ux * (length + 7)}
+                  y={CENTER + point.y - uy * (length + 7) + 3}
+                  textAnchor="middle"
+                  fontFamily="monospace"
+                  fontSize="7"
+                  fill="rgba(220,235,255,0.72)"
+                >
+                  {label}
+                </text>
+              </g>
+            )
+          })}
           {Object.entries(state.markers).map(([key, point]) => {
             const style = markerStyles[key as keyof typeof markerStyles]
             if (!shouldRenderNavballMarker(point)) return null
@@ -108,6 +142,7 @@ export function NavballCluster({
   orientation,
   relativePosition,
   relativeVelocity,
+  parentRotationAxis,
   rows,
   mode,
 }: NavballClusterProps) {
@@ -141,7 +176,13 @@ export function NavballCluster({
         >
           {mode === 'surface' ? 'SURFACE MODE' : 'ORBITAL MODE'}
         </div>
-        <Navball orientation={orientation} relativePosition={relativePosition} relativeVelocity={relativeVelocity} mode={mode} />
+        <Navball
+          orientation={orientation}
+          relativePosition={relativePosition}
+          relativeVelocity={relativeVelocity}
+          parentRotationAxis={parentRotationAxis}
+          mode={mode}
+        />
       </div>
       <TelemetryPanel rows={rows.slice(3)} align="left" />
     </div>

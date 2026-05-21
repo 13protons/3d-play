@@ -1,6 +1,8 @@
 type Vec3 = [number, number, number]
 type SurfaceState = 'flying' | 'landed' | 'crashed'
+type ReferenceMode = 'orbital' | 'surface'
 const LOCAL_SURFACE_MAX_CAMERA_DISTANCE = 2_000
+export const SURFACE_CAMERA_MIN_HEIGHT = 5
 
 export interface SurfacePatchFrame {
   position: Vec3
@@ -32,6 +34,16 @@ export function shouldShowLocalSurfacePatch({
   cameraDistance: number
 }): boolean {
   return surfaceState !== 'flying' && cameraDistance <= LOCAL_SURFACE_MAX_CAMERA_DISTANCE
+}
+
+export function shouldClampCameraAboveLocalSurface({
+  surfaceState,
+  referenceMode,
+}: {
+  surfaceState: SurfaceState
+  referenceMode: ReferenceMode
+}): boolean {
+  return referenceMode === 'surface' && surfaceState !== 'flying'
 }
 
 export function surfacePatchSizeForCameraDistance(cameraDistance: number): number {

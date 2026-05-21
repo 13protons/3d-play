@@ -1,3 +1,5 @@
+import type { OrbitSummary } from '../sim/vehicle/referenceFrame'
+
 type Vec3 = [number, number, number]
 export type AttitudeMode = 'manual' | 'hold-current' | 'retrograde'
 
@@ -61,6 +63,7 @@ export function flightTelemetryRows({
   attitudeMode,
   mass,
   maxThrust,
+  orbit,
 }: {
   readout: FlightReadout
   throttle: number
@@ -69,6 +72,7 @@ export function flightTelemetryRows({
   attitudeMode?: AttitudeMode
   mass?: number
   maxThrust?: number
+  orbit?: OrbitSummary
 }): FlightTelemetryRow[] {
   const rows: FlightTelemetryRow[] = [
     { label: 'STATE', value: surfaceState.toUpperCase() },
@@ -86,6 +90,17 @@ export function flightTelemetryRows({
       value: `P ${angularVelocity[0].toFixed(2)} Y ${angularVelocity[1].toFixed(2)} R ${angularVelocity[2].toFixed(2)}`,
     },
   )
+  if (orbit) {
+    const orbitLabel = orbit.kind === 'impacting' ? 'IMPACT' : orbit.kind.toUpperCase()
+    rows.push(
+      { label: 'ORB', value: orbitLabel },
+      { label: 'PE', value: formatFlightNumber(orbit.periapsisAltitude, 'm') },
+      {
+        label: 'AP',
+        value: orbit.apoapsisAltitude === null ? '--' : formatFlightNumber(orbit.apoapsisAltitude, 'm'),
+      },
+    )
+  }
   return rows
 }
 

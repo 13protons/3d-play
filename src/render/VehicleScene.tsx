@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Stars, OrbitControls } from '@react-three/drei'
-import { DoubleSide, Quaternion, Vector3 } from 'three'
+import { BufferAttribute, BufferGeometry, Vector3 } from 'three'
 import type { AmbientLight, DirectionalLight, Group, Mesh, MeshBasicMaterial, Object3D } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { useModeStore } from '../state/mode'
@@ -26,6 +26,8 @@ import { CraftDebugAxes } from './CraftDebugAxes'
 import { cameraUpLerpAlpha, surfaceCameraPosition } from './cameraSmoothing'
 import {
   clampCameraAboveLocalSurface,
+  SURFACE_CAMERA_MIN_HEIGHT,
+  shouldClampCameraAboveLocalSurface,
   shouldHideBodySphereForLocalSurface,
   shouldShowLocalSurfacePatch,
   surfacePatchFrame,
@@ -38,6 +40,10 @@ import {
 } from './rotation'
 import { sphereSegmentsForVehicleDistance } from './lod'
 import { RENDER_LAYERS, TERRAIN_RENDER_PASSES } from './renderLayers'
+import {
+  createSphericalCapOverlayGeometryData,
+  TERRAIN_OVERLAY_VISUAL_BIAS,
+} from './surfaceOverlayGeometry'
 
 const SUN_RENDER_DISTANCE = 5e8
 
@@ -304,7 +310,12 @@ function VehicleMesh() {
 
 function VehicleSurfacePatch() {
   const meshRef = useRef<Mesh>(null)
+  const geometryKeyRef = useRef('')
   const camera = useThree((s) => s.camera)
+  const vehicles = useTrajectoriesStore((s) => s.vehicles)
+  const bodies = useTrajectoriesStore((s) => s.bodies)
+  const vehicle = Object.values(vehicles)[0]
+  const parent = vehicle ? bodies[vehicle.parentId] : undefined
 
   useFrame(() => {
     const mesh = meshRef.current
@@ -314,6 +325,8 @@ function VehicleSurfacePatch() {
     const store = useTrajectoriesStore.getState()
     const vehicle = Object.values(store.vehicles)[0]
     if (!vehicle) return
+    const parent = store.bodies[vehicle.parentId]
+    if (!parent) return
     const controls = store.vehicleControls[vehicle.id]
     const cameraDistance = camera.position.length()
     if (!controls || !shouldShowLocalSurfacePatch({
@@ -332,19 +345,31 @@ function VehicleSurfacePatch() {
 
     const frame = surfacePatchFrame(radialOut)
     const patchSize = surfacePatchSizeForCameraDistance(cameraDistance)
+    const geometryKey = `${frame.normal.map((value) => value.toFixed(6)).join(',')}:${parent.radius}:${patchSize.toFixed(0)}`
+    if (geometryKeyRef.current !== geometryKey) {
+      const geometryData = createSphericalCapOverlayGeometryData({
+        centerDirection: frame.normal,
+        radius: parent.radius,
+        size: patchSize,
+        segments: 32,
+        visualBias: TERRAIN_OVERLAY_VISUAL_BIAS,
+      })
+      mesh.geometry.dispose()
+      mesh.geometry = bufferGeometryFromData(geometryData)
+      geometryKeyRef.current = geometryKey
+    }
     mesh.visible = true
-    mesh.scale.setScalar(patchSize / 200)
+    mesh.scale.setScalar(1)
     mesh.position.set(...frame.position)
-    mesh.quaternion.copy(new Quaternion().setFromUnitVectors(
-      new Vector3(0, 0, 1),
-      new Vector3(...frame.normal).normalize(),
-    ))
+    mesh.quaternion.identity()
   })
+
+  if (!parent) return null
 
   return (
     <mesh ref={meshRef} visible={false}>
-      <planeGeometry args={[200, 200, 16, 16]} />
-      <meshStandardMaterial color="#88aa52" side={DoubleSide} polygonOffset polygonOffsetFactor={-1} />
+      <bufferGeometry />
+      <BodyMaterial body={parent} />
     </mesh>
   )
 }
@@ -458,11 +483,14 @@ function VehicleViewControls() {
       camera.position.set(...surfaceCameraPosition(frame.radialOut, 30, 10))
       surfaceCameraInitializedRef.current = true
     }
-    if (frame.mode === 'surface') {
+    if (shouldClampCameraAboveLocalSurface({
+      surfaceState: controls?.surfaceState ?? 'flying',
+      referenceMode: frame.mode,
+    })) {
       camera.position.set(...clampCameraAboveLocalSurface(
         [camera.position.x, camera.position.y, camera.position.z],
         frame.radialOut,
-        1,
+        SURFACE_CAMERA_MIN_HEIGHT,
       ))
     }
     if (frame.mode !== 'surface') {
@@ -471,7 +499,7 @@ function VehicleViewControls() {
     controlsRef.current?.update()
   })
 
-  return <OrbitControls ref={controlsRef} minDistance={5} maxDistance={1e9} />
+  return <OrbitControls ref={controlsRef} minDistance={SURFACE_CAMERA_MIN_HEIGHT * 2} maxDistance={1e9} />
 }
 
 function vehicleRadialOut(vehicleId: string, parentId: string): Vec3 | undefined {
@@ -527,4 +555,18 @@ function enableRenderableLayers(layers: { enable: (layer: number) => void }) {
 function setLayerRecursively(object: Object3D, layer: number) {
   object.layers.set(layer)
   for (const child of object.children) setLayerRecursively(child, layer)
+}
+
+function bufferGeometryFromData({
+  positions,
+  normals,
+  uvs,
+  indices,
+}: ReturnType<typeof createSphericalCapOverlayGeometryData>): BufferGeometry {
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new BufferAttribute(positions, 3))
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3))
+  geometry.setAttribute('uv', new BufferAttribute(uvs, 2))
+  geometry.setIndex(new BufferAttribute(indices, 1))
+  return geometry
 }
