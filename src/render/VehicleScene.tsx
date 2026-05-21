@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Stars, OrbitControls } from '@react-three/drei'
+import { Vector3 } from 'three'
 import type { DirectionalLight, Group, Mesh, MeshBasicMaterial } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { useModeStore } from '../state/mode'
@@ -22,6 +23,7 @@ import {
 } from './lighting'
 import { BodyMaterial } from './BodyMaterial'
 import { CraftDebugAxes } from './CraftDebugAxes'
+import { cameraUpLerpAlpha } from './cameraSmoothing'
 import {
   bodyOrientationEuler,
   bodyRotationAngle,
@@ -303,9 +305,10 @@ function VehicleSceneContent() {
 
 function VehicleViewControls() {
   const controlsRef = useRef<OrbitControlsImpl>(null)
+  const targetUpRef = useRef(new Vector3(0, 1, 0))
   const camera = useThree((s) => s.camera)
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     const store = useTrajectoriesStore.getState()
     const vehicle = Object.values(store.vehicles)[0]
     if (!vehicle) return
@@ -340,11 +343,11 @@ function VehicleViewControls() {
       surfaceState: controls?.surfaceState ?? 'flying',
     })
 
-    if (frame.mode === 'surface') {
-      camera.up.set(frame.radialOut[0], frame.radialOut[1], frame.radialOut[2])
-    } else {
-      camera.up.set(0, 1, 0)
-    }
+    const targetUp = frame.mode === 'surface'
+      ? [frame.radialOut[0], frame.radialOut[1], frame.radialOut[2]] as const
+      : [0, 1, 0] as const
+    targetUpRef.current.set(targetUp[0], targetUp[1], targetUp[2])
+    camera.up.lerp(targetUpRef.current, cameraUpLerpAlpha(delta)).normalize()
     controlsRef.current?.update()
   })
 
