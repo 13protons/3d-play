@@ -1,6 +1,5 @@
 type Vec3 = [number, number, number]
 type SurfaceState = 'flying' | 'landed' | 'crashed'
-const LOCAL_SURFACE_REPLACES_BODY_MAX_CAMERA_DISTANCE = 1_000
 const LOCAL_SURFACE_MAX_CAMERA_DISTANCE = 2_000
 
 export interface SurfacePatchFrame {
@@ -15,20 +14,14 @@ export function surfacePatchFrame(radialOut: Vec3): SurfacePatchFrame {
   }
 }
 
-export function shouldHideBodySphereForLocalSurface({
-  bodyId,
-  vehicleParentId,
-  surfaceState,
-  cameraDistance,
-}: {
+export function shouldHideBodySphereForLocalSurface(input: {
   bodyId: string
   vehicleParentId: string
   surfaceState: SurfaceState
   cameraDistance: number
 }): boolean {
-  return bodyId === vehicleParentId
-    && surfaceState !== 'flying'
-    && cameraDistance <= LOCAL_SURFACE_REPLACES_BODY_MAX_CAMERA_DISTANCE
+  void input
+  return false
 }
 
 export function shouldShowLocalSurfacePatch({

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Stars, OrbitControls } from '@react-three/drei'
 import { DoubleSide, Quaternion, Vector3 } from 'three'
-import type { DirectionalLight, Group, Mesh, MeshBasicMaterial } from 'three'
+import type { AmbientLight, DirectionalLight, Group, Mesh, MeshBasicMaterial, Object3D } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { useModeStore } from '../state/mode'
 import { useTrajectoriesStore } from '../state/trajectories'
@@ -37,6 +37,7 @@ import {
   vehicleBodyTransform,
 } from './rotation'
 import { sphereSegmentsForVehicleDistance } from './lod'
+import { RENDER_LAYERS, TERRAIN_RENDER_PASSES } from './renderLayers'
 
 const SUN_RENDER_DISTANCE = 5e8
 
@@ -93,6 +94,7 @@ function VehicleBody({
 
     const mesh = meshRef.current
     if (!mesh) return
+    mesh.layers.set(RENDER_LAYERS.baseBody)
     const spinGroup = spinGroupRef.current
 
     const store = useTrajectoriesStore.getState()
@@ -213,6 +215,7 @@ function VehicleSunLight({
 
     const light = lightRef.current
     if (!light) return
+    enableRenderableLayers(light.layers)
 
     const store = useTrajectoriesStore.getState()
     const { curves, bodies } = store
@@ -253,15 +256,31 @@ function VehicleSunLight({
   return <directionalLight ref={lightRef} intensity={2} />
 }
 
+function VehicleAmbientLight() {
+  const lightRef = useRef<AmbientLight>(null)
+
+  useFrame(() => {
+    const light = lightRef.current
+    if (light) enableRenderableLayers(light.layers)
+  })
+
+  return <ambientLight ref={lightRef} intensity={0.04} />
+}
+
 function VehicleMesh() {
+  const groupRef = useRef<Group>(null)
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
   const vehicleControls = useTrajectoriesStore((s) => s.vehicleControls)
   const showRotationAxes = useModeStore((s) => s.showRotationAxes)
   const firstVehicle = Object.values(vehicles)[0]
   const controls = firstVehicle ? vehicleControls[firstVehicle.id] : undefined
 
+  useFrame(() => {
+    if (groupRef.current) setLayerRecursively(groupRef.current, RENDER_LAYERS.vehicle)
+  })
+
   return (
-    <group quaternion={controls?.orientation}>
+    <group ref={groupRef} quaternion={controls?.orientation}>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[1, 1.5, 4, 8]} />
         <meshStandardMaterial color="#cccccc" />
@@ -290,6 +309,7 @@ function VehicleSurfacePatch() {
   useFrame(() => {
     const mesh = meshRef.current
     if (!mesh) return
+    mesh.layers.set(RENDER_LAYERS.terrainOverlay)
 
     const store = useTrajectoriesStore.getState()
     const vehicle = Object.values(store.vehicles)[0]
@@ -329,6 +349,25 @@ function VehicleSurfacePatch() {
   )
 }
 
+function VehicleSceneRenderPasses() {
+  const gl = useThree((s) => s.gl)
+  const scene = useThree((s) => s.scene)
+  const camera = useThree((s) => s.camera)
+
+  useFrame(() => {
+    if (useModeStore.getState().activeView !== 'vehicle') return
+
+    gl.clear()
+    for (const pass of TERRAIN_RENDER_PASSES) {
+      if (pass.clearDepthBefore) gl.clearDepth()
+      camera.layers.set(pass.layer)
+      gl.render(scene, camera)
+    }
+  }, 1)
+
+  return null
+}
+
 function VehicleSceneContent() {
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
   const bodies = useTrajectoriesStore((s) => s.bodies)
@@ -344,9 +383,10 @@ function VehicleSceneContent() {
 
   return (
     <>
-      <ambientLight intensity={0.04} />
+      <VehicleAmbientLight />
       <Stars radius={1e8} depth={1e8} count={3000} factor={1e6} fade />
       <VehicleViewControls />
+      <VehicleSceneRenderPasses />
       <VehicleMesh />
       <VehicleSurfacePatch />
       {firstVehicle && (
@@ -469,10 +509,22 @@ export function VehicleScene() {
     >
       <Canvas
         camera={{ position: [0, 10, 30], near: 0.1, far: 1e9, fov: 60 }}
+        gl={{ autoClear: false }}
         style={{ width: '100%', height: '100%' }}
       >
         <VehicleSceneContent />
       </Canvas>
     </div>
   )
+}
+
+function enableRenderableLayers(layers: { enable: (layer: number) => void }) {
+  layers.enable(RENDER_LAYERS.baseBody)
+  layers.enable(RENDER_LAYERS.terrainOverlay)
+  layers.enable(RENDER_LAYERS.vehicle)
+}
+
+function setLayerRecursively(object: Object3D, layer: number) {
+  object.layers.set(layer)
+  for (const child of object.children) setLayerRecursively(child, layer)
 }

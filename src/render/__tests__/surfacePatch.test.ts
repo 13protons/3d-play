@@ -18,13 +18,13 @@ describe('surfacePatchFrame', () => {
 })
 
 describe('shouldHideBodySphereForLocalSurface', () => {
-  it('hides the parent body sphere when a local landed surface patch is active', () => {
+  it('keeps the parent body sphere visible while a local landed terrain overlay is active', () => {
     expect(shouldHideBodySphereForLocalSurface({
       bodyId: 'earth',
       vehicleParentId: 'earth',
       surfaceState: 'landed',
       cameraDistance: 100,
-    })).toBe(true)
+    })).toBe(false)
   })
 
   it('keeps other body spheres visible', () => {
