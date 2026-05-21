@@ -24,7 +24,13 @@ import {
 import { BodyMaterial } from './BodyMaterial'
 import { CraftDebugAxes } from './CraftDebugAxes'
 import { cameraUpLerpAlpha, surfaceCameraPosition } from './cameraSmoothing'
-import { clampCameraAboveLocalSurface, shouldHideBodySphereForLocalSurface, surfacePatchFrame } from './surfacePatch'
+import {
+  clampCameraAboveLocalSurface,
+  shouldHideBodySphereForLocalSurface,
+  shouldShowLocalSurfacePatch,
+  surfacePatchFrame,
+  surfacePatchSizeForCameraDistance,
+} from './surfacePatch'
 import {
   bodyOrientationEuler,
   bodyRotationAngle,
@@ -78,6 +84,7 @@ function VehicleBody({
 }) {
   const spinGroupRef = useRef<Group>(null)
   const meshRef = useRef<Mesh>(null)
+  const camera = useThree((s) => s.camera)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
   const [sphereSegments, setSphereSegments] = useState(32)
 
@@ -98,11 +105,12 @@ function VehicleBody({
     const vehicle = store.vehicles[vehicleId]
     const controls = store.vehicleControls[vehicleId]
     const hideForLocalSurface = vehicle
-      ? shouldHideBodySphereForLocalSurface(
+      ? shouldHideBodySphereForLocalSurface({
           bodyId,
-          vehicle.parentId,
-          controls?.surfaceState ?? 'flying',
-        )
+          vehicleParentId: vehicle.parentId,
+          surfaceState: controls?.surfaceState ?? 'flying',
+          cameraDistance: camera.position.length(),
+        })
       : false
 
     const bodyPos = evaluateCurve(bodyCurve, t)
@@ -277,6 +285,7 @@ function VehicleMesh() {
 
 function VehicleSurfacePatch() {
   const meshRef = useRef<Mesh>(null)
+  const camera = useThree((s) => s.camera)
 
   useFrame(() => {
     const mesh = meshRef.current
@@ -286,7 +295,11 @@ function VehicleSurfacePatch() {
     const vehicle = Object.values(store.vehicles)[0]
     if (!vehicle) return
     const controls = store.vehicleControls[vehicle.id]
-    if (!controls || controls.surfaceState === 'flying') {
+    const cameraDistance = camera.position.length()
+    if (!controls || !shouldShowLocalSurfacePatch({
+      surfaceState: controls.surfaceState,
+      cameraDistance,
+    })) {
       mesh.visible = false
       return
     }
@@ -298,7 +311,9 @@ function VehicleSurfacePatch() {
     }
 
     const frame = surfacePatchFrame(radialOut)
+    const patchSize = surfacePatchSizeForCameraDistance(cameraDistance)
     mesh.visible = true
+    mesh.scale.setScalar(patchSize / 200)
     mesh.position.set(...frame.position)
     mesh.quaternion.copy(new Quaternion().setFromUnitVectors(
       new Vector3(0, 0, 1),

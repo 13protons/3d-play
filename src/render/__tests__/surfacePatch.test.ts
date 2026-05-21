@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   clampCameraAboveLocalSurface,
   shouldHideBodySphereForLocalSurface,
+  shouldShowLocalSurfacePatch,
+  surfacePatchSizeForCameraDistance,
   surfacePatchFrame,
 } from '../surfacePatch'
 
@@ -17,15 +19,74 @@ describe('surfacePatchFrame', () => {
 
 describe('shouldHideBodySphereForLocalSurface', () => {
   it('hides the parent body sphere when a local landed surface patch is active', () => {
-    expect(shouldHideBodySphereForLocalSurface('earth', 'earth', 'landed')).toBe(true)
+    expect(shouldHideBodySphereForLocalSurface({
+      bodyId: 'earth',
+      vehicleParentId: 'earth',
+      surfaceState: 'landed',
+      cameraDistance: 100,
+    })).toBe(true)
   })
 
   it('keeps other body spheres visible', () => {
-    expect(shouldHideBodySphereForLocalSurface('moon', 'earth', 'landed')).toBe(false)
+    expect(shouldHideBodySphereForLocalSurface({
+      bodyId: 'moon',
+      vehicleParentId: 'earth',
+      surfaceState: 'landed',
+      cameraDistance: 100,
+    })).toBe(false)
   })
 
   it('keeps the parent body sphere visible while flying', () => {
-    expect(shouldHideBodySphereForLocalSurface('earth', 'earth', 'flying')).toBe(false)
+    expect(shouldHideBodySphereForLocalSurface({
+      bodyId: 'earth',
+      vehicleParentId: 'earth',
+      surfaceState: 'flying',
+      cameraDistance: 100,
+    })).toBe(false)
+  })
+
+  it('keeps the parent body sphere visible after zooming beyond local surface range', () => {
+    expect(shouldHideBodySphereForLocalSurface({
+      bodyId: 'earth',
+      vehicleParentId: 'earth',
+      surfaceState: 'landed',
+      cameraDistance: 2_500,
+    })).toBe(false)
+  })
+
+  it('keeps the parent body sphere visible through the local-to-orbital transition band', () => {
+    expect(shouldHideBodySphereForLocalSurface({
+      bodyId: 'earth',
+      vehicleParentId: 'earth',
+      surfaceState: 'landed',
+      cameraDistance: 1_500,
+    })).toBe(false)
+  })
+})
+
+describe('surfacePatchSizeForCameraDistance', () => {
+  it('serves a larger local patch as the camera backs away', () => {
+    expect(surfacePatchSizeForCameraDistance(100)).toBeGreaterThan(200)
+  })
+
+  it('caps the patch before orbital-scale views', () => {
+    expect(surfacePatchSizeForCameraDistance(10_000)).toBe(2_000)
+  })
+})
+
+describe('shouldShowLocalSurfacePatch', () => {
+  it('keeps the local tangent patch visible through the transition band', () => {
+    expect(shouldShowLocalSurfacePatch({
+      surfaceState: 'landed',
+      cameraDistance: 1_500,
+    })).toBe(true)
+  })
+
+  it('hides the local tangent patch after zooming beyond local surface range', () => {
+    expect(shouldShowLocalSurfacePatch({
+      surfaceState: 'landed',
+      cameraDistance: 2_500,
+    })).toBe(false)
   })
 })
 

@@ -1,5 +1,7 @@
 type Vec3 = [number, number, number]
 type SurfaceState = 'flying' | 'landed' | 'crashed'
+const LOCAL_SURFACE_REPLACES_BODY_MAX_CAMERA_DISTANCE = 1_000
+const LOCAL_SURFACE_MAX_CAMERA_DISTANCE = 2_000
 
 export interface SurfacePatchFrame {
   position: Vec3
@@ -13,12 +15,34 @@ export function surfacePatchFrame(radialOut: Vec3): SurfacePatchFrame {
   }
 }
 
-export function shouldHideBodySphereForLocalSurface(
-  bodyId: string,
-  vehicleParentId: string,
-  surfaceState: SurfaceState,
-): boolean {
-  return bodyId === vehicleParentId && surfaceState !== 'flying'
+export function shouldHideBodySphereForLocalSurface({
+  bodyId,
+  vehicleParentId,
+  surfaceState,
+  cameraDistance,
+}: {
+  bodyId: string
+  vehicleParentId: string
+  surfaceState: SurfaceState
+  cameraDistance: number
+}): boolean {
+  return bodyId === vehicleParentId
+    && surfaceState !== 'flying'
+    && cameraDistance <= LOCAL_SURFACE_REPLACES_BODY_MAX_CAMERA_DISTANCE
+}
+
+export function shouldShowLocalSurfacePatch({
+  surfaceState,
+  cameraDistance,
+}: {
+  surfaceState: SurfaceState
+  cameraDistance: number
+}): boolean {
+  return surfaceState !== 'flying' && cameraDistance <= LOCAL_SURFACE_MAX_CAMERA_DISTANCE
+}
+
+export function surfacePatchSizeForCameraDistance(cameraDistance: number): number {
+  return Math.min(2_000, Math.max(200, cameraDistance * 4))
 }
 
 export function clampCameraAboveLocalSurface(
