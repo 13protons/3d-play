@@ -13,6 +13,8 @@ describe('validateScenarioAssets', () => {
     expect(result.invalidBodyDefinitions).toEqual([])
     expect(result.invalidVehicles).toEqual([])
     expect(result.vehicleIdsWithAero).toEqual(['vehicle-1'])
+    expect(result.vehicleIdsWithEngine).toEqual(['vehicle-1'])
+    expect(result.vehicleIdsWithAttitude).toEqual(['vehicle-1'])
     expect(result.bodyIds).toEqual([
       'sun',
       'mercury',
@@ -32,6 +34,8 @@ describe('validateScenarioAssets', () => {
     expect(result.invalidBodyDefinitions).toEqual([])
     expect(result.invalidVehicles).toEqual([])
     expect(result.vehicleIdsWithAero).toEqual(['vehicle-1'])
+    expect(result.vehicleIdsWithEngine).toEqual(['vehicle-1'])
+    expect(result.vehicleIdsWithAttitude).toEqual(['vehicle-1'])
     expect(result.bodyIds).toEqual([
       'sun',
       'mercury',
@@ -78,6 +82,11 @@ describe('validateScenarioAssets', () => {
     expect(() => validateVehicleDefinition({
       id: 'vehicle-1',
       resources: { dryMass: 1000, fuelMass: 0 },
+      engine: { maxThrust: 300_000 },
+      attitude: {
+        momentOfInertia: [12_000, 12_000, 8_000],
+        reactionWheelTorque: [400_000, 400_000, 250_000],
+      },
       aero: {
         model: 'simple-drag',
         dragCoefficient: 2.2,
@@ -100,5 +109,26 @@ describe('validateScenarioAssets', () => {
       resources: { dryMass: 1000, fuelMass: 0 },
       aero: { model: 'unknown', dragCoefficient: 2.2, referenceArea: 10 },
     })).toThrow('aero.model')
+
+    expect(() => validateVehicleDefinition({
+      id: 'vehicle-1',
+      engine: { maxThrust: 0 },
+    })).toThrow('engine.maxThrust')
+
+    expect(() => validateVehicleDefinition({
+      id: 'vehicle-1',
+      attitude: {
+        momentOfInertia: [12_000, 0, 8_000],
+        reactionWheelTorque: [400_000, 400_000, 250_000],
+      },
+    })).toThrow('attitude.momentOfInertia')
+
+    expect(() => validateVehicleDefinition({
+      id: 'vehicle-1',
+      attitude: {
+        momentOfInertia: [12_000, 12_000, 8_000],
+        reactionWheelTorque: [400_000, -1, 250_000],
+      },
+    })).toThrow('attitude.reactionWheelTorque')
   })
 })

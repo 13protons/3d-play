@@ -71,6 +71,9 @@ describe('flightTelemetryRows', () => {
       throttle: 1,
       angularVelocity: [0.25, -0.5, 0],
       surfaceState: 'landed',
+      attitudeMode: 'hold-current',
+      mass: 9000,
+      maxThrust: 300000,
     })
 
     expect(rows).toEqual([
@@ -78,7 +81,10 @@ describe('flightTelemetryRows', () => {
       { label: 'ALT', value: '400.0 km' },
       { label: 'VEL', value: '7.7 km/s' },
       { label: 'VERT', value: '-12 m/s' },
-      { label: 'THR', value: 'ON' },
+      { label: 'THR', value: '100%' },
+      { label: 'MASS', value: '9000 kg' },
+      { label: 'FORCE', value: '300 kN' },
+      { label: 'MODE', value: 'HOLD-CURRENT' },
       { label: 'RATE', value: 'P 0.25 Y -0.50 R 0.00' },
     ])
     expect(rows.map((row) => row.label)).not.toContain('ACC')

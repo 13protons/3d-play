@@ -24,13 +24,26 @@ export interface VehicleAero {
   centerOfPressureBody?: [number, number, number]
 }
 
+export interface VehicleEngine {
+  maxThrust: number
+}
+
+export interface VehicleAttitude {
+  momentOfInertia: [number, number, number]
+  reactionWheelTorque: [number, number, number]
+}
+
 export interface VehicleModelInput {
   resources: VehicleResourcesInput
+  engine?: VehicleEngine
+  attitude?: VehicleAttitude
   aero?: VehicleAero
 }
 
 export interface VehicleModel {
   resources: VehicleResources
+  engine?: VehicleEngine
+  attitude?: VehicleAttitude
   aero?: VehicleAero
 }
 
@@ -51,6 +64,8 @@ export const useVehicleStore = create<VehicleState>((set) => ({
           ...model.resources,
           mass: model.resources.dryMass + model.resources.fuelMass,
         },
+        engine: model.engine,
+        attitude: model.attitude,
         aero: model.aero,
       },
     },

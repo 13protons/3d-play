@@ -5,20 +5,29 @@
  * Driven by the bridge via 'advance' messages. No self-scheduling.
  */
 
-import type { TrajectoryCurve, VehicleWorkerInbound } from '../types'
+import type { TrajectoryCurve, VehicleAttitudeMode, VehicleWorkerInbound } from '../types'
 import { toAbsolute } from '../coordinates'
 import { advanceTo } from '../integrator/adaptive'
 import { pointMassDerivatives } from '../integrator/derivatives'
+import { referenceFrameRetrogradeDirection } from './referenceFrame'
 import {
+  angularVelocityAfterTorque,
+  angularVelocityDampingTorque,
+  attitudeHoldTorque,
+  forwardDirectionHoldTorque,
   integrateOrientation,
+  manualReactionWheelTorque,
   shouldDisableThrottleForWarp,
   shouldEmitAeroForce,
   shouldStabilizeAngularVelocityForWarp,
+  sumAndClampTorque,
   thrustAccelerationForElapsedRotation,
+  toggledAttitudeMode,
   type Quaternion,
   type Vec3,
 } from './controls'
-import { vehicleDerivatives, type VehicleAero, type VehicleResources } from './dynamics'
+import { vehicleDerivatives, type VehicleAero, type VehicleEngine, type VehicleResources } from './dynamics'
+import type { VehicleAttitude } from '../types'
 import {
   classifySurfaceContactAlongSegment,
   rotatingSurfaceState,
@@ -29,7 +38,7 @@ let vehicleId = ''
 let parentId = ''
 let stateVec: Float64Array | null = null
 let bodyGMs = new Map<string, number>()
-let bodySurfaces = new Map<string, {
+type BodySurface = {
   radius: number
   angularVelocity: number
   rotationAxis: Vec3
@@ -40,13 +49,19 @@ let bodySurfaces = new Map<string, {
     scaleHeight: number
     maxAltitude: number
   }
-}>()
+}
+
+let bodySurfaces = new Map<string, BodySurface>()
 let resources: VehicleResources | undefined
+let engine: VehicleEngine | undefined
+let attitude: VehicleAttitude | undefined
 let aero: VehicleAero | undefined
 let simTime = 0
 let throttle = 0
 let orientation: Quaternion = [0, 0, 0, 1]
 let angularVelocity: Vec3 = [0, 0, 0]
+let manualTorque: Vec3 = [0, 0, 0]
+let attitudeMode: VehicleAttitudeMode = 'manual'
 let surfaceContact: SurfaceContact = { type: 'flying' }
 let landedAt = 0
 let aeroForceWorld: Vec3 = [0, 0, 0]
@@ -60,7 +75,12 @@ function emitControls(): void {
     throttle,
     orientation,
     angularVelocity,
+    attitudeMode,
     surfaceState: surfaceContact.type,
+    reactionWheelTorque: attitude?.reactionWheelTorque,
+    mass: resources?.mass,
+    maxThrust: engine?.maxThrust,
+    currentThrust: engine ? engine.maxThrust * throttle : undefined,
     aeroForceWorld: shouldEmitAeroForce(aeroForceWorld) ? aeroForceWorld : undefined,
   })
 }
@@ -103,11 +123,15 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       { radius, angularVelocity, rotationAxis: rotationAxisFromAxialTilt(axialTilt), atmosphere },
     ]))
     resources = msg.resources
+    engine = msg.engine
+    attitude = msg.attitude
     aero = msg.aero
     simTime = 0
     throttle = 0
     orientation = [0, 0, 0, 1]
     angularVelocity = [0, 0, 0]
+    manualTorque = [0, 0, 0]
+    attitudeMode = 'manual'
     surfaceContact = { type: 'flying' }
     landedAt = 0
     aeroForceWorld = [0, 0, 0]
@@ -124,7 +148,12 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
   }
 
   if (msg.type === 'set-attitude') {
-    angularVelocity = surfaceContact.type === 'crashed' ? [0, 0, 0] : [msg.pitch, msg.yaw, msg.roll]
+    manualTorque = surfaceContact.type === 'crashed' ? [0, 0, 0] : [msg.pitch, msg.yaw, msg.roll]
+    emitControls()
+  }
+
+  if (msg.type === 'set-attitude-mode') {
+    attitudeMode = toggledAttitudeMode(attitudeMode, msg.mode)
     emitControls()
   }
 
@@ -132,6 +161,8 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     let changedControls = false
     if (shouldStabilizeAngularVelocityForWarp(msg.rate)) {
       angularVelocity = [0, 0, 0]
+      manualTorque = [0, 0, 0]
+      attitudeMode = 'manual'
       changedControls = true
     }
     if (shouldDisableThrottleForWarp(msg.rate)) {
@@ -151,6 +182,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
 
     const prevTime = simTime
     const prevState = new Float64Array(stateVec)
+    const elapsedSeconds = targetTime - simTime
     aeroForceWorld = [0, 0, 0]
 
     const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
@@ -174,12 +206,18 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         landed.position[1] - parentPosition[1],
         landed.position[2] - parentPosition[2],
       ])
-      const thrust = thrustAccelerationForElapsedRotation(orientation, angularVelocity, 0, throttle)
+      const thrust = thrustAccelerationForElapsedRotation(
+        orientation,
+        angularVelocity,
+        0,
+        throttle,
+        resources && engine ? { maxThrust: engine.maxThrust, mass: resources.mass } : undefined,
+      )
       if (surfaceContact.type === 'landed' && dot(thrust, currentNormal) > 0) {
         surfaceContact = { type: 'flying' }
       } else {
         stateVec.set([...landed.position, ...landed.velocity])
-        orientation = integrateOrientation(orientation, angularVelocity, targetTime - simTime)
+        updateAngularState(elapsedSeconds, currentAttitudeTorque(parentCurve, parentSurface, targetTime))
         simTime = targetTime
         emitCurves(prevTime, prevState)
         emitControls()
@@ -193,6 +231,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       bodyCurves: msg.bodyCurves,
       bodySurfaces,
       resources,
+      engine,
       aero,
       orientation,
       angularVelocity,
@@ -204,7 +243,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     })
 
     advanceTo(stateVec, simTime, targetTime, deriv, 1e-10)
-    orientation = integrateOrientation(orientation, angularVelocity, targetTime - simTime)
+    updateAngularState(elapsedSeconds, currentAttitudeTorque(parentCurve, parentSurface, targetTime))
     simTime = targetTime
 
     if (surfaceContact.type === 'flying' && parentCurve && parentSurface) {
@@ -251,6 +290,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         if (contact.type === 'crashed') {
           throttle = 0
           angularVelocity = [0, 0, 0]
+          manualTorque = [0, 0, 0]
         }
       }
     }
@@ -258,6 +298,86 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     emitCurves(prevTime, prevState)
     emitControls()
   }
+}
+
+function updateAngularState(elapsedSeconds: number, torque: Vec3): void {
+  if (elapsedSeconds <= 0) return
+  angularVelocity = attitude
+    ? angularVelocityAfterTorque(
+        angularVelocity,
+        torque,
+        attitude.momentOfInertia,
+        elapsedSeconds,
+      )
+    : torque
+  orientation = integrateOrientation(orientation, angularVelocity, elapsedSeconds)
+}
+
+function currentAttitudeTorque(
+  parentCurve: TrajectoryCurve | undefined,
+  parentSurface: BodySurface | undefined,
+  targetTime: number,
+): Vec3 {
+  if (!attitude) return manualTorque
+  if (attitudeMode === 'manual') {
+    return manualReactionWheelTorque({
+      commandTorque: manualTorque,
+      angularVelocity,
+    })
+  }
+  if (attitudeMode === 'hold-current') {
+    const dampingTorque = angularVelocityDampingTorque({
+      angularVelocity,
+      maxTorque: attitude.reactionWheelTorque,
+      momentOfInertia: attitude.momentOfInertia,
+    })
+    return sumAndClampTorque(dampingTorque, manualTorque, attitude.reactionWheelTorque)
+  }
+  const holdTorque = attitudeMode === 'retrograde'
+    ? forwardDirectionHoldTorque({
+        currentOrientation: orientation,
+        targetForward: retrogradeDirection(parentCurve, parentSurface, targetTime),
+        angularVelocity,
+        maxTorque: attitude.reactionWheelTorque,
+        momentOfInertia: attitude.momentOfInertia,
+      })
+    : attitudeHoldTorque({
+        currentOrientation: orientation,
+        targetOrientation: orientation,
+        angularVelocity,
+        maxTorque: attitude.reactionWheelTorque,
+        momentOfInertia: attitude.momentOfInertia,
+      })
+  return sumAndClampTorque(holdTorque, manualTorque, attitude.reactionWheelTorque)
+}
+
+function retrogradeDirection(
+  parentCurve: TrajectoryCurve | undefined,
+  parentSurface: BodySurface | undefined,
+  targetTime: number,
+): Vec3 {
+  if (!stateVec || !parentCurve || !parentSurface) return [0, 0, -1]
+  const parentPosition = sampleCurvePosition(parentCurve, targetTime)
+  const parentVelocity = sampleCurveVelocity(parentCurve, targetTime)
+  const relativePosition: Vec3 = [
+    stateVec[0] - parentPosition[0],
+    stateVec[1] - parentPosition[1],
+    stateVec[2] - parentPosition[2],
+  ]
+  const relativeVelocity: Vec3 = [
+    stateVec[3] - parentVelocity[0],
+    stateVec[4] - parentVelocity[1],
+    stateVec[5] - parentVelocity[2],
+  ]
+  return referenceFrameRetrogradeDirection({
+    relativePosition,
+    relativeVelocity,
+    parentRadius: parentSurface.radius,
+    parentGm: bodyGMs.get(parentId) ?? 0,
+    parentAngularVelocity: parentSurface.angularVelocity,
+    parentRotationAxis: parentSurface.rotationAxis,
+    surfaceState: surfaceContact.type,
+  })
 }
 
 function sampleCurvePosition(curve: TrajectoryCurve, t: number): Vec3 {

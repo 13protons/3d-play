@@ -32,6 +32,7 @@ export interface TrajectoryCurve {
 export type VehicleCommand =
   | { type: 'set-throttle'; value: number; simTime: number }
   | { type: 'set-attitude'; pitch: number; yaw: number; roll: number; simTime: number }
+  | { type: 'set-attitude-mode'; mode: VehicleAttitudeMode; simTime: number }
   | { type: 'stage'; simTime: number }
 
 /** Commands routed to the orbital worker */
@@ -39,6 +40,8 @@ export type SimCommand =
   | { type: 'set-warp'; rate: number; simTime: number }
 
 export type Command = VehicleCommand | SimCommand
+
+export type VehicleAttitudeMode = 'manual' | 'hold-current' | 'retrograde'
 
 // ---------------------------------------------------------------------------
 // Gravity Sources (sent from bridge to vehicle worker)
@@ -72,6 +75,15 @@ export interface VehicleAero {
   centerOfPressureBody?: [number, number, number]
 }
 
+export interface VehicleEngine {
+  maxThrust: number
+}
+
+export interface VehicleAttitude {
+  momentOfInertia: [number, number, number]
+  reactionWheelTorque: [number, number, number]
+}
+
 // ---------------------------------------------------------------------------
 // Vehicle Worker Messages
 // ---------------------------------------------------------------------------
@@ -90,6 +102,8 @@ export type VehicleWorkerInbound =
       bodyGMs: [string, number][]  // [id, G*M] pairs (Map not transferable)
       bodySurfaces: [id: string, radius: number, angularVelocity: number, axialTilt: number, atmosphere?: InlineAtmosphere][]
       resources?: VehicleResources
+      engine?: VehicleEngine
+      attitude?: VehicleAttitude
       aero?: VehicleAero
     }
   | {
@@ -100,6 +114,7 @@ export type VehicleWorkerInbound =
   | { type: 'set-warp'; rate: number }
   | { type: 'set-throttle'; value: number }
   | { type: 'set-attitude'; pitch: number; yaw: number; roll: number }
+  | { type: 'set-attitude-mode'; mode: VehicleAttitudeMode }
 
 /** Outbound messages from the vehicle worker */
 export type VehicleWorkerOutbound =
@@ -119,7 +134,12 @@ export type VehicleWorkerOutbound =
       throttle: number
       orientation: [number, number, number, number]
       angularVelocity: [number, number, number]
+      attitudeMode: VehicleAttitudeMode
       surfaceState: 'flying' | 'landed' | 'crashed'
+      reactionWheelTorque?: [number, number, number]
+      mass?: number
+      maxThrust?: number
+      currentThrust?: number
       aeroForceWorld?: [number, number, number]
     }
 

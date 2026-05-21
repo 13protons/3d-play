@@ -7,7 +7,7 @@ import { useTrajectoriesStore } from './trajectories'
 import { useInputStore } from './input'
 import { useVehicleStore } from './vehicle'
 import type { BodyMeta } from './trajectories'
-import type { VehicleAero, VehicleResources } from '../sim/types'
+import type { VehicleAero, VehicleAttitude, VehicleEngine, VehicleResources } from '../sim/types'
 import type { TrajectoryCurve } from '../sim/types'
 import { G } from '../sim/constants'
 import {
@@ -198,6 +198,8 @@ export async function startSim(scenarioId: string): Promise<void> {
         }
         useVehicleStore.getState().setVehicleModel(v.id as string, {
           resources,
+          engine: v.engine as VehicleEngine | undefined,
+          attitude: v.attitude as VehicleAttitude | undefined,
           aero: v.aero as VehicleAero | undefined,
         })
       }
@@ -237,7 +239,12 @@ export async function startSim(scenarioId: string): Promise<void> {
           throttle: msg.throttle,
           orientation: msg.orientation,
           angularVelocity: msg.angularVelocity,
+          attitudeMode: msg.attitudeMode,
           surfaceState: msg.surfaceState,
+          reactionWheelTorque: msg.reactionWheelTorque,
+          mass: msg.mass,
+          maxThrust: msg.maxThrust,
+          currentThrust: msg.currentThrust,
           aeroForceWorld: msg.aeroForceWorld,
         })
       }
@@ -250,6 +257,8 @@ export async function startSim(scenarioId: string): Promise<void> {
       bodyGMs,
       bodySurfaces,
       resources: useVehicleStore.getState().models[v.id as string]?.resources,
+      engine: useVehicleStore.getState().models[v.id as string]?.engine,
+      attitude: useVehicleStore.getState().models[v.id as string]?.attitude,
       aero: useVehicleStore.getState().models[v.id as string]?.aero,
     })
   }
@@ -313,6 +322,9 @@ function flushCommands(): void {
         yaw: cmd.yaw,
         roll: cmd.roll,
       })
+    }
+    if (cmd.type === 'set-attitude-mode' && vehicleWorker) {
+      vehicleWorker.postMessage({ type: 'set-attitude-mode', mode: cmd.mode })
     }
   }
 }

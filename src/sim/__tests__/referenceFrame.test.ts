@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeFlightReferenceFrame } from '../vehicle/referenceFrame'
+import { computeFlightReferenceFrame, referenceFrameRetrogradeDirection } from '../vehicle/referenceFrame'
 
 const earthRadius = 6_371_000
 const earthGm = 3.98600435436e14
@@ -91,5 +91,21 @@ describe('computeFlightReferenceFrame', () => {
 
     expect(result.surfaceVelocity[2]).toBeCloseTo(earthRadius)
     expect(result.navVelocity).toEqual(result.surfaceVelocity)
+  })
+
+  it('uses surface-relative nav velocity for retrograde direction in surface mode', () => {
+    const retrograde = referenceFrameRetrogradeDirection({
+      relativePosition: [earthRadius, 0, 0],
+      relativeVelocity: [1000, 0, 0],
+      parentRadius: earthRadius,
+      parentGm: earthGm,
+      parentAngularVelocity: 1,
+      parentRotationAxis: [0, 1, 0],
+      surfaceState: 'landed',
+    })
+
+    expect(retrograde[0]).toBeCloseTo(-1000 / Math.hypot(1000, earthRadius))
+    expect(retrograde[1]).toBeCloseTo(0)
+    expect(retrograde[2]).toBeCloseTo(-earthRadius / Math.hypot(1000, earthRadius))
   })
 })

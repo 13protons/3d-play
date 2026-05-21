@@ -58,6 +58,13 @@ export function computeFlightReferenceFrame({
   }
 }
 
+export function referenceFrameRetrogradeDirection(
+  input: FlightReferenceFrameInput,
+): Vec3 {
+  const frame = computeFlightReferenceFrame(input)
+  return normalize(scale(frame.navVelocity, -1), [0, 0, -1])
+}
+
 export function rotationAxisFromAxialTilt(axialTiltDegrees: number): Vec3 {
   const tilt = (axialTiltDegrees * Math.PI) / 180
   return normalize([-Math.sin(tilt), Math.cos(tilt), 0], [0, 1, 0])

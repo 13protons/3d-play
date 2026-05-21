@@ -1,4 +1,5 @@
 type Vec3 = [number, number, number]
+export type AttitudeMode = 'manual' | 'hold-current' | 'retrograde'
 
 export interface FlightReadoutInput {
   vehiclePosition: Vec3
@@ -57,23 +58,35 @@ export function flightTelemetryRows({
   throttle,
   angularVelocity,
   surfaceState,
+  attitudeMode,
+  mass,
+  maxThrust,
 }: {
   readout: FlightReadout
   throttle: number
   angularVelocity: Vec3
   surfaceState: 'flying' | 'landed' | 'crashed'
+  attitudeMode?: AttitudeMode
+  mass?: number
+  maxThrust?: number
 }): FlightTelemetryRow[] {
-  return [
+  const rows: FlightTelemetryRow[] = [
     { label: 'STATE', value: surfaceState.toUpperCase() },
     { label: 'ALT', value: formatFlightNumber(readout.altitude, 'm') },
     { label: 'VEL', value: formatFlightNumber(readout.speed, 'm/s') },
     { label: 'VERT', value: formatFlightNumber(readout.radialSpeed, 'm/s') },
-    { label: 'THR', value: throttle > 0 ? 'ON' : 'OFF' },
+    { label: 'THR', value: `${Math.round(throttle * 100)}%` },
+  ]
+  if (mass !== undefined) rows.push({ label: 'MASS', value: `${mass.toFixed(0)} kg` })
+  if (maxThrust !== undefined) rows.push({ label: 'FORCE', value: `${(maxThrust / 1000).toFixed(0)} kN` })
+  if (attitudeMode) rows.push({ label: 'MODE', value: attitudeMode.toUpperCase() })
+  rows.push(
     {
       label: 'RATE',
       value: `P ${angularVelocity[0].toFixed(2)} Y ${angularVelocity[1].toFixed(2)} R ${angularVelocity[2].toFixed(2)}`,
     },
-  ]
+  )
+  return rows
 }
 
 function subtract(a: Vec3, b: Vec3): Vec3 {

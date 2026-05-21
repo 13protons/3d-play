@@ -10,6 +10,7 @@ import {
   computeFlightReferenceFrame,
   rotationAxisFromAxialTilt,
 } from '../sim/vehicle/referenceFrame'
+import { toggledAttitudeMode } from '../sim/vehicle/controls'
 
 function formatTime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
@@ -89,6 +90,16 @@ export function HUD() {
     useInputStore
       .getState()
       .push({ type: 'set-warp', rate, simTime })
+  }
+
+  function setAttitudeMode(mode: 'manual' | 'hold-current' | 'retrograde') {
+    useInputStore
+      .getState()
+      .push({
+        type: 'set-attitude-mode',
+        mode: toggledAttitudeMode(vehicleControl?.attitudeMode ?? 'manual', mode),
+        simTime,
+      })
   }
 
   return (
@@ -199,6 +210,38 @@ export function HUD() {
         >
           Rotation Axis: {showRotationAxes ? 'On' : 'Off'}
         </button>
+        {vehicleControl && (
+          <>
+            <button
+              onClick={() => setAttitudeMode('hold-current')}
+              style={{
+                background: vehicleControl.attitudeMode === 'hold-current' ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
+                color: '#ccc',
+                border: '1px solid #333',
+                padding: '4px 8px',
+                cursor: 'pointer',
+                fontFamily: 'monospace',
+                fontSize: 12,
+              }}
+            >
+              Hold
+            </button>
+            <button
+              onClick={() => setAttitudeMode('retrograde')}
+              style={{
+                background: vehicleControl.attitudeMode === 'retrograde' ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
+                color: '#ccc',
+                border: '1px solid #333',
+                padding: '4px 8px',
+                cursor: 'pointer',
+                fontFamily: 'monospace',
+                fontSize: 12,
+              }}
+            >
+              Retrograde
+            </button>
+          </>
+        )}
       </div>
 
       <div
@@ -233,7 +276,8 @@ export function HUD() {
       </div>
 
       <div style={{ marginTop: 8, opacity: 0.4, fontSize: 11 }}>
-        [ / ] warp &nbsp; Z toggle thrust &nbsp; WASD/QE reaction wheel &nbsp; V toggle view
+        [ / ] warp &nbsp; Shift/Ctrl throttle &nbsp; Z full &nbsp; X cut &nbsp; T SAS &nbsp; M map
+        &nbsp; WASD/QE reaction wheel
         &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
       {vehicleControl && relativePosition && flightReadout && (
@@ -247,6 +291,9 @@ export function HUD() {
             throttle,
             angularVelocity: vehicleControl.angularVelocity,
             surfaceState: vehicleControl.surfaceState,
+            attitudeMode: vehicleControl.attitudeMode,
+            mass: vehicleControl.mass,
+            maxThrust: vehicleControl.currentThrust ?? vehicleControl.maxThrust,
           })}
         />
       )}

@@ -24,12 +24,23 @@ export interface VehicleAero {
   centerOfPressureBody?: [number, number, number]
 }
 
+export interface VehicleEngine {
+  maxThrust: number
+}
+
+export interface VehicleAttitude {
+  momentOfInertia: [number, number, number]
+  reactionWheelTorque: [number, number, number]
+}
+
 export interface ScenarioAssetValidation {
   bodyIds: string[]
   missingBodyDefinitions: string[]
   invalidBodyDefinitions: string[]
   invalidVehicles: string[]
   vehicleIdsWithAero: string[]
+  vehicleIdsWithEngine: string[]
+  vehicleIdsWithAttitude: string[]
 }
 
 const scenarioModules = import.meta.glob<ScenarioAsset>(
@@ -78,6 +89,8 @@ export function validateScenarioAssets(
       return def.resources !== undefined && def.aero !== undefined
     })
     .map((vehicle) => String((vehicle as Record<string, unknown>).id))
+  const vehicleIdsWithEngine = vehicleIdsWith(scenario, 'engine')
+  const vehicleIdsWithAttitude = vehicleIdsWith(scenario, 'attitude')
 
   return {
     bodyIds,
@@ -85,7 +98,15 @@ export function validateScenarioAssets(
     invalidBodyDefinitions,
     invalidVehicles,
     vehicleIdsWithAero,
+    vehicleIdsWithEngine,
+    vehicleIdsWithAttitude,
   }
+}
+
+function vehicleIdsWith(scenario: ScenarioAsset, property: string): string[] {
+  return (scenario.vehicles ?? [])
+    .filter((vehicle) => (vehicle as Record<string, unknown>)[property] !== undefined)
+    .map((vehicle) => String((vehicle as Record<string, unknown>).id))
 }
 
 export function validateBodyDefinition(def: Record<string, unknown>): void {
@@ -95,6 +116,8 @@ export function validateBodyDefinition(def: Record<string, unknown>): void {
 
 export function validateVehicleDefinition(def: Record<string, unknown>): void {
   if (def.resources !== undefined) validateResources(def.resources)
+  if (def.engine !== undefined) validateEngine(def.engine)
+  if (def.attitude !== undefined) validateAttitude(def.attitude)
   if (def.aero !== undefined) validateAero(def.aero)
 }
 
@@ -113,6 +136,17 @@ function validateResources(value: unknown): asserts value is VehicleResources {
   const resources = objectValue(value, 'resources')
   numberGreaterThan(resources.dryMass, 0, 'resources.dryMass')
   numberAtLeast(resources.fuelMass, 0, 'resources.fuelMass')
+}
+
+function validateEngine(value: unknown): asserts value is VehicleEngine {
+  const engine = objectValue(value, 'engine')
+  numberGreaterThan(engine.maxThrust, 0, 'engine.maxThrust')
+}
+
+function validateAttitude(value: unknown): asserts value is VehicleAttitude {
+  const attitude = objectValue(value, 'attitude')
+  positiveVector(attitude.momentOfInertia, 'attitude.momentOfInertia')
+  positiveVector(attitude.reactionWheelTorque, 'attitude.reactionWheelTorque')
 }
 
 function validateAero(value: unknown): asserts value is VehicleAero {
@@ -136,6 +170,15 @@ function objectValue(value: unknown, name: string): Record<string, unknown> {
     throw new Error(`${name} must be an object`)
   }
   return value as Record<string, unknown>
+}
+
+function positiveVector(value: unknown, name: string): asserts value is [number, number, number] {
+  if (!Array.isArray(value) || value.length !== 3) {
+    throw new Error(`${name} must be a 3-number vector`)
+  }
+  for (const component of value) {
+    numberGreaterThan(component, 0, name)
+  }
 }
 
 function numberAtLeast(value: unknown, min: number, name: string): void {

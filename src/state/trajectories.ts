@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { TrajectoryCurve } from '../sim/types'
+import type { VehicleAttitudeMode } from '../sim/types'
 
 export interface VehicleMeta {
   id: string
@@ -12,7 +13,12 @@ export interface VehicleControlMeta {
   throttle: number
   orientation: [number, number, number, number]
   angularVelocity: [number, number, number]
+  attitudeMode: VehicleAttitudeMode
   surfaceState: 'flying' | 'landed' | 'crashed'
+  reactionWheelTorque?: [number, number, number]
+  mass?: number
+  maxThrust?: number
+  currentThrust?: number
   aeroForceWorld?: [number, number, number]
 }
 

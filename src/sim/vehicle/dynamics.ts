@@ -4,6 +4,7 @@ import { computeAeroForce, type InlineAtmosphere } from './aero'
 import {
   thrustAccelerationForElapsedRotation,
   type Quaternion,
+  type ThrustModel,
   type Vec3,
 } from './controls'
 
@@ -20,6 +21,10 @@ export interface VehicleResources {
   mass: number
 }
 
+export interface VehicleEngine {
+  maxThrust: number
+}
+
 export interface VehicleAero {
   model: 'simple-drag'
   dragCoefficient: number
@@ -34,6 +39,7 @@ export interface VehicleDerivativeOptions {
   bodyCurves: TrajectoryCurve[]
   bodySurfaces: Map<string, VehicleSurfaceEnvironment>
   resources?: VehicleResources
+  engine?: VehicleEngine
   aero?: VehicleAero
   orientation: Quaternion
   angularVelocity: Vec3
@@ -46,11 +52,15 @@ export function vehicleDerivatives(options: VehicleDerivativeOptions): DerivFn {
   return (t: number, y: Float64Array, dydt: Float64Array): void => {
     options.gravity(t, y, dydt)
 
+    const thrustModel: ThrustModel | undefined = options.resources && options.engine
+      ? { maxThrust: options.engine.maxThrust, mass: options.resources.mass }
+      : undefined
     const thrust = thrustAccelerationForElapsedRotation(
       options.orientation,
       options.angularVelocity,
       t - options.simTime,
       options.throttle,
+      thrustModel,
     )
     dydt[3] += thrust[0]
     dydt[4] += thrust[1]

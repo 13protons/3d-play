@@ -28,8 +28,15 @@
       "velocity": [0, 0, 22113],
       "mesh": "cylinder",
       "resources": {
-        "dryMass": 1000,
+        "dryMass": 9000,
         "fuelMass": 0
+      },
+      "engine": {
+        "maxThrust": 300000
+      },
+      "attitude": {
+        "momentOfInertia": [12000, 12000, 8000],
+        "reactionWheelTorque": [400000, 400000, 250000]
       },
       "aero": {
         "model": "simple-drag",
