@@ -4,8 +4,35 @@ import {
   validateScenarioAssets,
   validateVehicleDefinition,
 } from '../scenarioValidation'
+import sunEarthMoon from '../../../public/data/scenarios/sun-earth-moon.json'
+import innerSolarSystem from '../../../public/data/scenarios/inner-solar-system.json'
+import earth from '../../../public/data/bodies/earth.json'
 
 describe('validateScenarioAssets', () => {
+  it.each([
+    ['sun-earth-moon', sunEarthMoon],
+    ['inner-solar-system', innerSolarSystem],
+  ])('starts %s vehicle landed on Earth daylight side', (_scenarioId, scenario) => {
+    const vehicle = scenario.vehicles[0]
+    const earthScenario = scenario.bodies.earth
+    const sunScenario = scenario.bodies.sun
+    const vehicleLocal = vehicle.position.local
+    const earthToSun = [
+      sunScenario.position.sector[0] - earthScenario.position.sector[0],
+      sunScenario.position.sector[1] - earthScenario.position.sector[1],
+      sunScenario.position.sector[2] - earthScenario.position.sector[2],
+    ]
+    const daylightFacing = vehicleLocal[0] * earthToSun[0]
+      + vehicleLocal[1] * earthToSun[1]
+      + vehicleLocal[2] * earthToSun[2]
+
+    expect(vehicle.parentId).toBe('earth')
+    expect(vehicle.position.sector).toEqual(earthScenario.position.sector)
+    expect(Math.hypot(...vehicleLocal)).toBe(earth.physics.radius)
+    expect(daylightFacing).toBeGreaterThan(0)
+    expect(vehicle.velocity).toEqual(earthScenario.velocity)
+  })
+
   it('accepts the inner solar system scenario and body definitions', () => {
     const result = validateScenarioAssets('inner-solar-system')
 

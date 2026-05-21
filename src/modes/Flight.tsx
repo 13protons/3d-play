@@ -14,6 +14,11 @@ import {
   throttleFull,
   toggledAttitudeMode,
 } from '../sim/vehicle/controls'
+import {
+  throttleDirectionForKeyDown,
+  throttleDirectionForKeyUp,
+  type ThrottleDirection,
+} from './flightInput'
 
 export function Flight() {
   const activeView = useModeStore((s) => s.activeView)
@@ -23,7 +28,7 @@ export function Flight() {
   })
   const reactionWheelKeysRef = useRef(new Set<string>())
   const throttleRef = useRef(0)
-  const throttleDirectionRef = useRef<-1 | 0 | 1>(0)
+  const throttleDirectionRef = useRef<ThrottleDirection>(0)
   const reactionWheelTorqueRef = useRef<[number, number, number]>([0.25, 0.25, 0.25])
 
   useEffect(() => {
@@ -106,12 +111,7 @@ export function Flight() {
       if (e.key === 'x' || e.key === 'X') {
         pushThrottleCommand(throttleCut(), simTime)
       }
-      if (e.key === 'Shift') {
-        throttleDirectionRef.current = 1
-      }
-      if (e.key === 'Control') {
-        throttleDirectionRef.current = -1
-      }
+      throttleDirectionRef.current = throttleDirectionForKeyDown(throttleDirectionRef.current, e)
       if (['w', 'a', 's', 'd', 'q', 'e'].includes(e.key.toLowerCase())) {
         reactionWheelKeysRef.current.add(e.key.toLowerCase())
         pushRcsCommand()
@@ -122,22 +122,24 @@ export function Flight() {
       }
     }
     function handleKeyUp(e: KeyboardEvent) {
-      if (e.key === 'Shift' && throttleDirectionRef.current === 1) {
-        throttleDirectionRef.current = 0
-      }
-      if (e.key === 'Control' && throttleDirectionRef.current === -1) {
-        throttleDirectionRef.current = 0
-      }
+      throttleDirectionRef.current = throttleDirectionForKeyUp(throttleDirectionRef.current, e)
       if (['w', 'a', 's', 'd', 'q', 'e'].includes(e.key.toLowerCase())) {
         reactionWheelKeysRef.current.delete(e.key.toLowerCase())
         pushRcsCommand()
       }
     }
+    function releaseHeldControls() {
+      throttleDirectionRef.current = 0
+      reactionWheelKeysRef.current.clear()
+      pushRcsCommand()
+    }
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('blur', releaseHeldControls)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('blur', releaseHeldControls)
       if (animationFrame !== null) cancelAnimationFrame(animationFrame)
     }
   }, [])

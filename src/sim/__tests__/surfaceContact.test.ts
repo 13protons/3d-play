@@ -25,6 +25,15 @@ describe('classifySurfaceContact', () => {
     })).toEqual({ type: 'landed', surfaceNormal: [1, 0, 0] })
   })
 
+  it('lands when initialized exactly on the surface without radial speed', () => {
+    expect(classifySurfaceContact({
+      relativePosition: [-10, 0, 0],
+      relativeVelocity: [0, 0, 0],
+      parentRadius: 10,
+      landingSpeedThreshold: 10,
+    })).toEqual({ type: 'landed', surfaceNormal: [-1, 0, 0] })
+  })
+
   it('crashes at high inward radial speed', () => {
     expect(classifySurfaceContact({
       relativePosition: [9, 0, 0],

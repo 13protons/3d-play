@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Stars, OrbitControls } from '@react-three/drei'
-import { Vector3 } from 'three'
+import { DoubleSide, Quaternion, Vector3 } from 'three'
 import type { DirectionalLight, Group, Mesh, MeshBasicMaterial } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { useModeStore } from '../state/mode'
@@ -23,7 +23,8 @@ import {
 } from './lighting'
 import { BodyMaterial } from './BodyMaterial'
 import { CraftDebugAxes } from './CraftDebugAxes'
-import { cameraUpLerpAlpha } from './cameraSmoothing'
+import { cameraUpLerpAlpha, surfaceCameraPosition } from './cameraSmoothing'
+import { clampCameraAboveLocalSurface, shouldHideBodySphereForLocalSurface, surfacePatchFrame } from './surfacePatch'
 import {
   bodyOrientationEuler,
   bodyRotationAngle,
@@ -94,6 +95,15 @@ function VehicleBody({
     const bodyCurve = curves[bodyId]
     const vehicleCurve = curves[vehicleId]
     if (!bodyCurve || !vehicleCurve) return
+    const vehicle = store.vehicles[vehicleId]
+    const controls = store.vehicleControls[vehicleId]
+    const hideForLocalSurface = vehicle
+      ? shouldHideBodySphereForLocalSurface(
+          bodyId,
+          vehicle.parentId,
+          controls?.surfaceState ?? 'flying',
+        )
+      : false
 
     const bodyPos = evaluateCurve(bodyCurve, t)
     const vehiclePos = evaluateCurve(vehicleCurve, t)
@@ -158,7 +168,7 @@ function VehicleBody({
         )
       : false
 
-    mesh.visible = !sunOccluded
+    mesh.visible = !sunOccluded && !hideForLocalSurface
 
     if (body.emissive && mesh.material && 'opacity' in mesh.material) {
       const material = mesh.material as MeshBasicMaterial
@@ -265,6 +275,45 @@ function VehicleMesh() {
   )
 }
 
+function VehicleSurfacePatch() {
+  const meshRef = useRef<Mesh>(null)
+
+  useFrame(() => {
+    const mesh = meshRef.current
+    if (!mesh) return
+
+    const store = useTrajectoriesStore.getState()
+    const vehicle = Object.values(store.vehicles)[0]
+    if (!vehicle) return
+    const controls = store.vehicleControls[vehicle.id]
+    if (!controls || controls.surfaceState === 'flying') {
+      mesh.visible = false
+      return
+    }
+
+    const radialOut = vehicleRadialOut(vehicle.id, vehicle.parentId)
+    if (!radialOut) {
+      mesh.visible = false
+      return
+    }
+
+    const frame = surfacePatchFrame(radialOut)
+    mesh.visible = true
+    mesh.position.set(...frame.position)
+    mesh.quaternion.copy(new Quaternion().setFromUnitVectors(
+      new Vector3(0, 0, 1),
+      new Vector3(...frame.normal).normalize(),
+    ))
+  })
+
+  return (
+    <mesh ref={meshRef} visible={false}>
+      <planeGeometry args={[200, 200, 16, 16]} />
+      <meshStandardMaterial color="#88aa52" side={DoubleSide} polygonOffset polygonOffsetFactor={-1} />
+    </mesh>
+  )
+}
+
 function VehicleSceneContent() {
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
   const bodies = useTrajectoriesStore((s) => s.bodies)
@@ -284,6 +333,7 @@ function VehicleSceneContent() {
       <Stars radius={1e8} depth={1e8} count={3000} factor={1e6} fade />
       <VehicleViewControls />
       <VehicleMesh />
+      <VehicleSurfacePatch />
       {firstVehicle && (
         <VehicleSunLight
           vehicleId={firstVehicle.id}
@@ -306,6 +356,7 @@ function VehicleSceneContent() {
 function VehicleViewControls() {
   const controlsRef = useRef<OrbitControlsImpl>(null)
   const targetUpRef = useRef(new Vector3(0, 1, 0))
+  const surfaceCameraInitializedRef = useRef(false)
   const camera = useThree((s) => s.camera)
 
   useFrame((_, delta) => {
@@ -348,10 +399,43 @@ function VehicleViewControls() {
       : [0, 1, 0] as const
     targetUpRef.current.set(targetUp[0], targetUp[1], targetUp[2])
     camera.up.lerp(targetUpRef.current, cameraUpLerpAlpha(delta)).normalize()
+    if (frame.mode === 'surface' && !surfaceCameraInitializedRef.current) {
+      camera.position.set(...surfaceCameraPosition(frame.radialOut, 30, 10))
+      surfaceCameraInitializedRef.current = true
+    }
+    if (frame.mode === 'surface') {
+      camera.position.set(...clampCameraAboveLocalSurface(
+        [camera.position.x, camera.position.y, camera.position.z],
+        frame.radialOut,
+        1,
+      ))
+    }
+    if (frame.mode !== 'surface') {
+      surfaceCameraInitializedRef.current = false
+    }
     controlsRef.current?.update()
   })
 
   return <OrbitControls ref={controlsRef} minDistance={5} maxDistance={1e9} />
+}
+
+function vehicleRadialOut(vehicleId: string, parentId: string): Vec3 | undefined {
+  const store = useTrajectoriesStore.getState()
+  const vehicleCurve = store.curves[vehicleId]
+  const parentCurve = store.curves[parentId]
+  if (!vehicleCurve || !parentCurve) return undefined
+
+  const t = store.getSimTime()
+  const vehiclePosition = evaluateCurve(vehicleCurve, t)
+  const parentPosition = evaluateCurve(parentCurve, t)
+  const radialOut = new Vector3(
+    vehiclePosition[0] - parentPosition[0],
+    vehiclePosition[1] - parentPosition[1],
+    vehiclePosition[2] - parentPosition[2],
+  )
+  if (radialOut.lengthSq() === 0) return undefined
+  radialOut.normalize()
+  return [radialOut.x, radialOut.y, radialOut.z]
 }
 
 export function VehicleScene() {

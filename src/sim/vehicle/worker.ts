@@ -29,6 +29,7 @@ import {
 import { vehicleDerivatives, type VehicleAero, type VehicleEngine, type VehicleResources } from './dynamics'
 import type { VehicleAttitude } from '../types'
 import {
+  classifySurfaceContact,
   classifySurfaceContactAlongSegment,
   rotatingSurfaceState,
   type SurfaceContact,
@@ -135,6 +136,42 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     surfaceContact = { type: 'flying' }
     landedAt = 0
     aeroForceWorld = [0, 0, 0]
+
+    const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
+    const parentSurface = bodySurfaces.get(parentId)
+    if (parentCurve && parentSurface) {
+      const parentPosition = sampleCurvePosition(parentCurve, simTime)
+      const parentVelocity = sampleCurveVelocity(parentCurve, simTime)
+      const relativePosition: Vec3 = [
+        stateVec[0] - parentPosition[0],
+        stateVec[1] - parentPosition[1],
+        stateVec[2] - parentPosition[2],
+      ]
+      const relativeVelocity: Vec3 = [
+        stateVec[3] - parentVelocity[0],
+        stateVec[4] - parentVelocity[1],
+        stateVec[5] - parentVelocity[2],
+      ]
+      surfaceContact = classifySurfaceContact({
+        relativePosition,
+        relativeVelocity,
+        parentRadius: parentSurface.radius,
+        landingSpeedThreshold: LANDING_SPEED_THRESHOLD,
+      })
+      if (surfaceContact.type !== 'flying') {
+        const landed = rotatingSurfaceState({
+          landedAt,
+          simTime,
+          initialSurfaceNormal: surfaceContact.surfaceNormal,
+          parentPosition,
+          parentVelocity,
+          parentRadius: parentSurface.radius,
+          parentAngularVelocity: parentSurface.angularVelocity,
+          parentRotationAxis: parentSurface.rotationAxis,
+        })
+        stateVec.set([...landed.position, ...landed.velocity])
+      }
+    }
 
     // Build derivative from initial body curves and integrate to initial time
     const initState = new Float64Array(stateVec)

@@ -49,8 +49,8 @@
       "id": "vehicle-1",
       "name": "Earth Orbiter",
       "parentId": "earth",
-      "position": { "sector": [149600, 0, 0], "local": [6771000, 0, 0] },
-      "velocity": [0, 0, 22113],
+      "position": { "sector": [149600, 0, 0], "local": [-6371000, 0, 0] },
+      "velocity": [0, 0, 29783],
       "mesh": "cylinder",
       "resources": {
         "dryMass": 9000,

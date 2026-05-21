@@ -42,6 +42,14 @@ describe('spriteWorldSize', () => {
 })
 
 describe('sphereSegmentsForVehicleDistance', () => {
+  it('uses very high-resolution body spheres at touchdown altitude', () => {
+    expect(sphereSegmentsForVehicleDistance(10, 10)).toBe(512)
+  })
+
+  it('keeps high-resolution body spheres for low flight near the surface', () => {
+    expect(sphereSegmentsForVehicleDistance(10.05, 10)).toBe(512)
+  })
+
   it('uses high-resolution body spheres below two radii from center', () => {
     expect(sphereSegmentsForVehicleDistance(19, 10)).toBe(128)
   })
