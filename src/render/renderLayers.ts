@@ -6,6 +6,6 @@ export const RENDER_LAYERS = {
 
 export const TERRAIN_RENDER_PASSES = [
   { name: 'base-body', layer: RENDER_LAYERS.baseBody, clearDepthBefore: false },
-  { name: 'terrain-overlay', layer: RENDER_LAYERS.terrainOverlay, clearDepthBefore: true },
+  { name: 'terrain-overlay', layer: RENDER_LAYERS.terrainOverlay, clearDepthBefore: false },
   { name: 'vehicle', layer: RENDER_LAYERS.vehicle, clearDepthBefore: true },
 ] as const

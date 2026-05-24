@@ -13,6 +13,12 @@ import {
 } from '../sim/orbital/vehiclePrediction'
 import type { TrajectoryCurve } from '../sim/types'
 import {
+  computeFlightReferenceFrame,
+  rotationAxisFromAxialTilt,
+} from '../sim/vehicle/referenceFrame'
+import {
+  predictionStateForReferenceFrame,
+  shouldPredictVehicleOrbit,
   shouldRecomputeVehicleOrbitPrediction,
   shouldRenderVehicleOrbitPrediction,
   vehicleOrbitLineStyle,
@@ -65,6 +71,7 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
     )
 
     const vehicleVelocity = hermiteVelocity(vehicleCurve, t)
+    const vehiclePos = evaluateCurve(vehicleCurve, t) as [number, number, number]
     const accelerating = isAccelerating(lastVelocityRef.current, vehicleVelocity)
     lastVelocityRef.current = vehicleVelocity
     if (!shouldRecomputeVehicleOrbitPrediction(
@@ -77,8 +84,47 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
     }
     lastComputedSimTimeRef.current = t
 
-    const vehiclePos = evaluateCurve(vehicleCurve, t)
     const parentVelocity = hermiteVelocity(parentCurve, t)
+    const relativePosition: [number, number, number] = [
+      vehiclePos[0] - parentPos[0],
+      vehiclePos[1] - parentPos[1],
+      vehiclePos[2] - parentPos[2],
+    ]
+    const relativeVelocity: [number, number, number] = [
+      vehicleVelocity[0] - parentVelocity[0],
+      vehicleVelocity[1] - parentVelocity[1],
+      vehicleVelocity[2] - parentVelocity[2],
+    ]
+    const parentRotationAxis = rotationAxisFromAxialTilt(parentBody.axialTilt)
+    const referenceFrame = computeFlightReferenceFrame({
+      relativePosition,
+      relativeVelocity,
+      parentRadius: parentBody.radius,
+      parentGm: parentBody.gm,
+      parentAngularVelocity: parentBody.angularVelocity,
+      parentRotationAxis,
+      surfaceState: store.vehicleControls[vehicleId]?.surfaceState ?? 'flying',
+    })
+    const predictionState = predictionStateForReferenceFrame({
+      mode: referenceFrame.mode,
+      vehiclePosition: vehiclePos,
+      vehicleVelocity,
+      parentPosition: parentPos as [number, number, number],
+      parentVelocity,
+      parentAngularVelocity: parentBody.angularVelocity,
+      parentRotationAxis,
+    })
+    if (!shouldPredictVehicleOrbit({
+      mode: referenceFrame.mode,
+      relativeVelocity: [
+        predictionState.vehicle.velocity[0] - parentVelocity[0],
+        predictionState.vehicle.velocity[1] - parentVelocity[1],
+        predictionState.vehicle.velocity[2] - parentVelocity[2],
+      ],
+    })) {
+      setPrediction(null)
+      return
+    }
     const bodyStates = Object.values(bodies).flatMap((body): PredictionBodyState[] => {
       const curve = curves[body.id]
       if (!curve) return []
@@ -93,7 +139,7 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
     })
 
     setPrediction(predictVehicleOrbit({
-      vehicle: { position: vehiclePos, velocity: vehicleVelocity },
+      vehicle: predictionState.vehicle,
       parent: {
         id: parentBody.id,
         gm: parentBody.gm,

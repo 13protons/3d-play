@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  predictionStateForReferenceFrame,
+  shouldPredictVehicleOrbit,
   shouldRenderVehicleOrbitPrediction,
   shouldRecomputeVehicleOrbitPrediction,
   vehicleOrbitLineStyle,
@@ -31,5 +33,47 @@ describe('vehicleOrbitLineStyle', () => {
     expect(vehicleOrbitLineStyle('escape').color).toBe('#f0b028')
     expect(vehicleOrbitLineStyle('encounter').color).toBe('#ff5a4f')
     expect(vehicleOrbitLineStyle('strong-perturbation').color).toBe('#d6a64a')
+  })
+})
+
+describe('predictionStateForReferenceFrame', () => {
+  it('removes parent surface rotation from the vehicle velocity in surface mode', () => {
+    const state = predictionStateForReferenceFrame({
+      mode: 'surface',
+      vehiclePosition: [10, 0, 0],
+      vehicleVelocity: [0, 0, -2],
+      parentPosition: [0, 0, 0],
+      parentVelocity: [0, 0, 0],
+      parentAngularVelocity: 0.2,
+      parentRotationAxis: [0, 1, 0],
+    })
+
+    expect(state.vehicle.velocity).toEqual([0, 0, 0])
+  })
+
+  it('keeps inertial velocity in orbital mode so handoff uses the real orbit state', () => {
+    const state = predictionStateForReferenceFrame({
+      mode: 'orbital',
+      vehiclePosition: [10, 0, 0],
+      vehicleVelocity: [0, 0, -2],
+      parentPosition: [0, 0, 0],
+      parentVelocity: [0, 0, 0],
+      parentAngularVelocity: 0.2,
+      parentRotationAxis: [0, 1, 0],
+    })
+
+    expect(state.vehicle.velocity).toEqual([0, 0, -2])
+  })
+})
+
+describe('shouldPredictVehicleOrbit', () => {
+  it('suppresses surface-mode predictions until there is meaningful surface-relative motion', () => {
+    expect(shouldPredictVehicleOrbit({ mode: 'surface', relativeVelocity: [0, 0, 0] })).toBe(false)
+    expect(shouldPredictVehicleOrbit({ mode: 'surface', relativeVelocity: [0.2, 0, 0] })).toBe(false)
+    expect(shouldPredictVehicleOrbit({ mode: 'surface', relativeVelocity: [2, 0, 0] })).toBe(true)
+  })
+
+  it('keeps orbital-mode predictions enabled for inertial states', () => {
+    expect(shouldPredictVehicleOrbit({ mode: 'orbital', relativeVelocity: [0, 0, 0] })).toBe(true)
   })
 })

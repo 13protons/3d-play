@@ -16,6 +16,20 @@ const earth = {
 }
 
 describe('predictVehicleOrbit', () => {
+  it('does not draw a degenerate prediction for zero relative velocity', () => {
+    const prediction = predictVehicleOrbit({
+      vehicle: {
+        position: [earthRadius, 0, 0],
+        velocity: [0, 0, 0],
+      },
+      parent: earth,
+      bodies: [earth],
+    })
+
+    expect(prediction.status).toBe('invalid')
+    expect(prediction.points).toEqual([])
+  })
+
   it('samples one closed local orbit around the parent body', () => {
     const altitude = 400_000
     const radius = earthRadius + altitude

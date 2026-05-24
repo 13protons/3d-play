@@ -56,6 +56,15 @@ export function predictVehicleOrbit({
   const relPos = subtract(vehicle.position, parent.position)
   const relVel = subtract(vehicle.velocity, parent.velocity)
   const warnings: string[] = []
+  if (mag(relVel) < 1e-6 || mag(cross(relPos, relVel)) < 1e-6) {
+    return {
+      status: 'invalid',
+      parentId: parent.id,
+      points: [],
+      period: null,
+      warnings: ['degenerate-state'],
+    }
+  }
 
   const elements = stateToElements(relPos, relVel, parent.gm)
   if (!Number.isFinite(elements.a) || elements.a <= 0 || elements.e >= 1) {
@@ -352,6 +361,17 @@ function subtract(
   b: [number, number, number],
 ): [number, number, number] {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+function cross(
+  a: [number, number, number],
+  b: [number, number, number],
+): [number, number, number] {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ]
 }
 
 function distance(a: [number, number, number], b: [number, number, number]): number {

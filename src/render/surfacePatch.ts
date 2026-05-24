@@ -37,7 +37,8 @@ export function shouldShowLocalSurfacePatch({
   bodyDistance: number
   bodyRadius: number
 }): boolean {
-  void surfaceState
+  if (surfaceState === 'flying') return false
+
   const altitude = bodyDistance - bodyRadius
   const nearSurface = altitude < bodyRadius
   return nearSurface && cameraDistance <= LOCAL_SURFACE_MAX_CAMERA_DISTANCE
