@@ -57,12 +57,7 @@ export function formatFlightNumber(value: number, unit: 'm' | 'm/s'): string {
 
 export function flightTelemetryRows({
   readout,
-  throttle,
-  angularVelocity,
-  surfaceState,
-  attitudeMode,
   mass,
-  maxThrust,
   orbit,
 }: {
   readout: FlightReadout
@@ -75,21 +70,11 @@ export function flightTelemetryRows({
   orbit?: OrbitSummary
 }): FlightTelemetryRow[] {
   const rows: FlightTelemetryRow[] = [
-    { label: 'STATE', value: surfaceState.toUpperCase() },
     { label: 'ALT', value: formatFlightNumber(readout.altitude, 'm') },
     { label: 'VEL', value: formatFlightNumber(readout.speed, 'm/s') },
     { label: 'VERT', value: formatFlightNumber(readout.radialSpeed, 'm/s') },
-    { label: 'THR', value: `${Math.round(throttle * 100)}%` },
   ]
   if (mass !== undefined) rows.push({ label: 'MASS', value: `${mass.toFixed(0)} kg` })
-  if (maxThrust !== undefined) rows.push({ label: 'FORCE', value: `${(maxThrust / 1000).toFixed(0)} kN` })
-  if (attitudeMode) rows.push({ label: 'MODE', value: attitudeMode.toUpperCase() })
-  rows.push(
-    {
-      label: 'RATE',
-      value: `P ${angularVelocity[0].toFixed(2)} Y ${angularVelocity[1].toFixed(2)} R ${angularVelocity[2].toFixed(2)}`,
-    },
-  )
   if (orbit) {
     const orbitLabel = orbit.kind === 'impacting' ? 'IMPACT' : orbit.kind.toUpperCase()
     rows.push(

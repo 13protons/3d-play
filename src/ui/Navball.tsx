@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import {
   computeNavballState,
   shouldRenderNavballMarker,
@@ -5,7 +6,8 @@ import {
   type Quaternion,
   type Vec3,
 } from './navballMath'
-import type { FlightTelemetryRow } from './flightReadout'
+import { computeArcProgressPath } from './navballInstrumentMath'
+import type { AttitudeMode, FlightTelemetryRow } from './flightReadout'
 import type { FlightReferenceMode } from '../sim/vehicle/referenceFrame'
 
 interface NavballProps {
@@ -18,10 +20,33 @@ interface NavballProps {
 
 interface NavballClusterProps extends NavballProps {
   rows: FlightTelemetryRow[]
+  throttle: number
+  forceRatio: number
+  surfaceState: SurfaceState
+  attitudeMode: AttitudeMode
 }
 
-const RADIUS = 76
-const SIZE = 184
+interface NavballInstrumentProps extends NavballProps {
+  throttle: number
+  forceRatio: number
+  surfaceState: SurfaceState
+  attitudeMode: AttitudeMode
+}
+
+interface ProximityProps {
+  rows: FlightTelemetryRow[]
+}
+
+interface AttitudeProps {
+  rows: FlightTelemetryRow[]
+  surfaceState?: SurfaceState
+}
+
+type SurfaceState = 'flying' | 'landed' | 'crashed'
+
+const RADIUS = 85
+const VISIBLE_RADIUS = 83.5
+const SIZE = 170
 const CENTER = SIZE / 2
 
 const markerStyles = {
@@ -33,7 +58,7 @@ const markerStyles = {
   antiNormal: { label: 'AN', color: '#b8b8ff' },
 } as const
 
-export function Navball({ orientation, relativePosition, relativeVelocity, parentRotationAxis, mode }: NavballProps) {
+export function Navball({ orientation, relativePosition, relativeVelocity, parentRotationAxis }: NavballProps) {
   const state = computeNavballState({
     orientation,
     relativePosition,
@@ -66,8 +91,7 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
             <stop offset="100%" stopColor="#050912" />
           </radialGradient>
         </defs>
-        <circle cx={CENTER} cy={CENTER} r={RADIUS + 7} fill="rgba(0,0,0,0.55)" />
-        <circle cx={CENTER} cy={CENTER} r={RADIUS} fill="url(#navball-shade)" stroke="#d9e3ff" strokeWidth="2" />
+        <circle cx={CENTER} cy={CENTER} r={VISIBLE_RADIUS} fill="url(#navball-shade)" stroke="#d9e3ff" strokeWidth="2" />
         <g clipPath="url(#navball-clip)">
           <circle cx={CENTER} cy={CENTER} r={RADIUS} fill="rgba(70,95,140,0.35)" />
           {horizonPaths.map((path, index) => (
@@ -123,16 +147,13 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
             )
           })}
         </g>
-        <circle cx={CENTER} cy={CENTER} r={RADIUS} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="1" />
+        <circle cx={CENTER} cy={CENTER} r={VISIBLE_RADIUS} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="1" />
         <g stroke="#ffffff" strokeWidth="2" strokeLinecap="round">
           <line x1={CENTER - 14} y1={CENTER} x2={CENTER - 4} y2={CENTER} />
           <line x1={CENTER + 4} y1={CENTER} x2={CENTER + 14} y2={CENTER} />
           <line x1={CENTER} y1={CENTER - 14} x2={CENTER} y2={CENTER - 4} />
           <line x1={CENTER} y1={CENTER + 4} x2={CENTER} y2={CENTER + 14} />
         </g>
-        <text x={CENTER} y={SIZE - 8} textAnchor="middle" fontFamily="monospace" fontSize="10" fill="rgba(255,255,255,0.65)">
-          {mode === 'surface' ? 'SURF NAV' : 'ORBIT NAV'}
-        </text>
       </svg>
     </div>
   )
@@ -145,6 +166,10 @@ export function NavballCluster({
   parentRotationAxis,
   rows,
   mode,
+  throttle,
+  forceRatio,
+  surfaceState,
+  attitudeMode,
 }: NavballClusterProps) {
   return (
     <div
@@ -159,41 +184,127 @@ export function NavballCluster({
         pointerEvents: 'none',
       }}
     >
-      <TelemetryPanel rows={rows.slice(0, 3)} align="right" />
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <div
-          style={{
-            marginBottom: 4,
-            padding: '2px 8px',
-            border: '1px solid rgba(210,225,255,0.28)',
-            borderRadius: 999,
-            background: mode === 'surface' ? 'rgba(255,170,80,0.2)' : 'rgba(100,180,255,0.16)',
-            color: 'rgba(255,255,255,0.75)',
-            fontFamily: 'monospace',
-            fontSize: 10,
-            letterSpacing: 0.8,
-          }}
-        >
-          {mode === 'surface' ? 'SURFACE MODE' : 'ORBITAL MODE'}
-        </div>
-        <Navball
-          orientation={orientation}
-          relativePosition={relativePosition}
-          relativeVelocity={relativeVelocity}
-          parentRotationAxis={parentRotationAxis}
-          mode={mode}
-        />
-      </div>
-      <TelemetryPanel rows={rows.slice(3)} align="left" />
+      <Proximity rows={rows.slice(0, 3)} />
+      <NavballInstrument
+        orientation={orientation}
+        relativePosition={relativePosition}
+        relativeVelocity={relativeVelocity}
+        parentRotationAxis={parentRotationAxis}
+        mode={mode}
+        throttle={throttle}
+        forceRatio={forceRatio}
+        surfaceState={surfaceState}
+        attitudeMode={attitudeMode}
+      />
+      <Attitude rows={rows.slice(3)} surfaceState={surfaceState} />
     </div>
   )
+}
+
+export function NavballInstrument(props: NavballInstrumentProps) {
+  const { mode, throttle, forceRatio, attitudeMode } = props
+  const throttleArc = computeArcProgressPath({ value: throttle, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45 })
+  const forceArc = computeArcProgressPath({ value: forceRatio, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45, mirror: true })
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: 190,
+        height: 202,
+        fontFamily: 'monospace',
+        pointerEvents: 'none',
+      }}
+    >
+      <svg
+        width="190"
+        height="180"
+        viewBox="0 0 190 180"
+        aria-hidden="true"
+        style={{ position: 'absolute', left: 0, top: 0 }}
+      >
+        <InstrumentArc indicator="force" paths={forceArc} />
+        <InstrumentArc indicator="throttle" paths={throttleArc} />
+      </svg>
+      <StatusPad label={flightRegimeLabel(mode)} style={{ left: 5, top: 0 }} />
+      <StatusPad label={attitudeModeLabel(attitudeMode)} style={{ right: 5, top: 0 }} />
+      <StatusPad style={{ left: 5, top: 156 }} />
+      <StatusPad style={{ right: 5, top: 156 }} />
+      <div style={{ position: 'absolute', left: 10, top: 5 }}>
+        <Navball {...props} />
+      </div>
+    </div>
+  )
+}
+
+function InstrumentArc({
+  indicator,
+  paths,
+}: {
+  indicator: 'force' | 'throttle'
+  paths: { trackPath: string; progressPath: string }
+}) {
+  return (
+    <g data-indicator={indicator}>
+      <path d={paths.trackPath} fill="none" stroke="#406568" strokeWidth="6" />
+      <path d={paths.progressPath} fill="none" stroke="#ffc260" strokeWidth="6" />
+    </g>
+  )
+}
+
+function StatusPad({ label, style }: { label?: string; style: CSSProperties }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        width: 24,
+        height: 24,
+        borderRadius: 999,
+        display: 'grid',
+        placeItems: 'center',
+        background: '#406568',
+        color: '#ffc260',
+        fontSize: 7,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+        ...style,
+      }}
+    >
+      {label}
+    </div>
+  )
+}
+
+function flightRegimeLabel(mode: FlightReferenceMode) {
+  return mode === 'surface' ? 'SUR' : 'ORB'
+}
+
+function surfaceStateLabel(surfaceState: SurfaceState) {
+  if (surfaceState === 'landed') return 'LAND'
+  if (surfaceState === 'crashed') return 'CRASH'
+  return 'FLY'
+}
+
+function attitudeModeLabel(attitudeMode: AttitudeMode) {
+  if (attitudeMode === 'hold-current') return 'HOLD'
+  if (attitudeMode === 'retrograde') return 'RETRO'
+  return 'MAN'
+}
+
+export function Proximity({ rows }: ProximityProps) {
+  return <TelemetryPanel rows={rows} align="right" />
+}
+
+export function Attitude({ rows, surfaceState }: AttitudeProps) {
+  const stateRows = surfaceState ? [{ label: 'STATE', value: surfaceStateLabel(surfaceState) }, ...rows] : rows
+  return <TelemetryPanel rows={stateRows} align="left" />
 }
 
 function TelemetryPanel({ rows, align }: { rows: FlightTelemetryRow[]; align: 'left' | 'right' }) {
   return (
     <div
       style={{
-        minWidth: 116,
+        boxSizing: 'border-box',
+        width: 180,
         padding: '8px 10px',
         marginBottom: 22,
         border: '1px solid rgba(210,225,255,0.28)',
@@ -208,8 +319,8 @@ function TelemetryPanel({ rows, align }: { rows: FlightTelemetryRow[]; align: 'l
     >
       {rows.map((row) => (
         <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-          <span style={{ color: 'rgba(255,255,255,0.5)' }}>{row.label}</span>
-          <span>{row.value}</span>
+          <span style={{ color: 'rgba(210,250,255,0.62)' }}>{row.label}</span>
+          <span style={{ color: 'rgba(255,205,112,0.94)' }}>{row.value}</span>
         </div>
       ))}
     </div>

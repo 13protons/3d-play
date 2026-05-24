@@ -16,8 +16,10 @@
   "dependencies": {
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
+    "lil-gui": "^0.21.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-router-dom": "^7.15.1",
     "three": "^0.183.2",
     "zustand": "^5.0.12"
   },

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Scene } from '../render/Scene'
 import { VehicleScene } from '../render/VehicleScene'
 import { HUD } from '../ui/HUD'
@@ -22,6 +23,7 @@ import {
 } from './flightInput'
 
 export function Flight() {
+  const navigate = useNavigate()
   const activeView = useModeStore((s) => s.activeView)
   const currentThrottle = useTrajectoriesStore((s) => {
     const firstVehicle = Object.values(s.vehicles)[0]
@@ -123,6 +125,7 @@ export function Flight() {
       if (e.key === 'Escape') {
         stopSim()
         useModeStore.getState().enterMenu()
+        navigate('/main')
       }
     }
     function handleKeyUp(e: KeyboardEvent) {
@@ -146,7 +149,7 @@ export function Flight() {
       window.removeEventListener('blur', releaseHeldControls)
       if (animationFrame !== null) cancelAnimationFrame(animationFrame)
     }
-  }, [])
+  }, [navigate])
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#000' }}>
