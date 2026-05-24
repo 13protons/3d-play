@@ -199,7 +199,7 @@ function VehicleBody({
     <group>
       <group ref={spinGroupRef}>
         <mesh ref={meshRef}>
-          <sphereGeometry args={[body.radius, sphereSegments, sphereSegments]} />
+          <sphereGeometry key={sphereSegments} args={[body.radius, sphereSegments, sphereSegments]} />
           <BodyMaterial body={body} />
         </mesh>
       </group>
@@ -329,9 +329,12 @@ function VehicleSurfacePatch() {
     if (!parent) return
     const controls = store.vehicleControls[vehicle.id]
     const cameraDistance = camera.position.length()
+    const bodyDistance = vehicleBodyDistance(vehicle.id, vehicle.parentId)
     if (!controls || !shouldShowLocalSurfacePatch({
       surfaceState: controls.surfaceState,
       cameraDistance,
+      bodyDistance: bodyDistance ?? Number.POSITIVE_INFINITY,
+      bodyRadius: parent.radius,
     })) {
       mesh.visible = false
       return
@@ -519,6 +522,22 @@ function vehicleRadialOut(vehicleId: string, parentId: string): Vec3 | undefined
   if (radialOut.lengthSq() === 0) return undefined
   radialOut.normalize()
   return [radialOut.x, radialOut.y, radialOut.z]
+}
+
+function vehicleBodyDistance(vehicleId: string, parentId: string): number | undefined {
+  const store = useTrajectoriesStore.getState()
+  const vehicleCurve = store.curves[vehicleId]
+  const parentCurve = store.curves[parentId]
+  if (!vehicleCurve || !parentCurve) return undefined
+
+  const t = store.getSimTime()
+  const vehiclePosition = evaluateCurve(vehicleCurve, t)
+  const parentPosition = evaluateCurve(parentCurve, t)
+  return Math.hypot(
+    vehiclePosition[0] - parentPosition[0],
+    vehiclePosition[1] - parentPosition[1],
+    vehiclePosition[2] - parentPosition[2],
+  )
 }
 
 export function VehicleScene() {

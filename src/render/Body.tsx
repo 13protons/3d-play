@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import type { Group, Mesh, PointLight, Sprite } from 'three'
 import { Vector3 } from 'three'
@@ -17,6 +17,7 @@ import {
 } from './rotation'
 import {
   projectedRadiusPx,
+  bodySphereSegmentsForCameraDistance,
   shouldSuppressChildSprite,
   shouldUseBodySprite,
   spriteWorldSize,
@@ -39,6 +40,7 @@ export function Body({ bodyId }: BodyProps) {
   const viewport = useThree((s) => s.size)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
   const showRotationAxes = useModeStore((s) => s.showRotationAxes)
+  const [sphereSegments, setSphereSegments] = useState(32)
 
   useFrame(() => {
     if (useModeStore.getState().activeView !== 'orbital') return
@@ -91,6 +93,11 @@ export function Body({ bodyId }: BodyProps) {
     const pixelsPerRadian = viewport.height / (2 * Math.tan(fov / 2))
     const scenePositionVector = new Vector3(...scenePosition)
     const distanceToCamera = scenePositionVector.distanceTo(camera.position)
+    const nextSegments = bodySphereSegmentsForCameraDistance({
+      distanceToCamera,
+      bodyRadius: body.radius,
+    })
+    setSphereSegments((current) => current === nextSegments ? current : nextSegments)
     const radiusPx = projectedRadiusPx(body.radius, distanceToCamera, pixelsPerRadian)
     const useSprite = shouldUseBodySprite(radiusPx, MESH_THRESHOLD_PX)
 
@@ -147,7 +154,7 @@ export function Body({ bodyId }: BodyProps) {
     <group>
       <group ref={spinGroupRef}>
         <mesh ref={meshRef}>
-          <sphereGeometry args={[body.radius, 32, 32]} />
+          <sphereGeometry key={sphereSegments} args={[body.radius, sphereSegments, sphereSegments]} />
           <BodyMaterial body={body} />
         </mesh>
         {shouldShowBodyRotationAxisInView('orbital', showRotationAxes) && (

@@ -29,11 +29,18 @@ export function shouldHideBodySphereForLocalSurface(input: {
 export function shouldShowLocalSurfacePatch({
   surfaceState,
   cameraDistance,
+  bodyDistance,
+  bodyRadius,
 }: {
   surfaceState: SurfaceState
   cameraDistance: number
+  bodyDistance: number
+  bodyRadius: number
 }): boolean {
-  return surfaceState !== 'flying' && cameraDistance <= LOCAL_SURFACE_MAX_CAMERA_DISTANCE
+  void surfaceState
+  const altitude = bodyDistance - bodyRadius
+  const nearSurface = altitude < bodyRadius
+  return nearSurface && cameraDistance <= LOCAL_SURFACE_MAX_CAMERA_DISTANCE
 }
 
 export function shouldClampCameraAboveLocalSurface({

@@ -77,10 +77,21 @@ describe('surfacePatchSizeForCameraDistance', () => {
 })
 
 describe('shouldShowLocalSurfacePatch', () => {
+  it('shows the local terrain patch while flying within one parent radius of the surface', () => {
+    expect(shouldShowLocalSurfacePatch({
+      surfaceState: 'flying',
+      cameraDistance: 1_500,
+      bodyDistance: 6_372_800,
+      bodyRadius: 6_371_000,
+    })).toBe(true)
+  })
+
   it('keeps the local tangent patch visible through the transition band', () => {
     expect(shouldShowLocalSurfacePatch({
       surfaceState: 'landed',
       cameraDistance: 1_500,
+      bodyDistance: 6_371_000,
+      bodyRadius: 6_371_000,
     })).toBe(true)
   })
 
@@ -88,6 +99,17 @@ describe('shouldShowLocalSurfacePatch', () => {
     expect(shouldShowLocalSurfacePatch({
       surfaceState: 'landed',
       cameraDistance: 2_500,
+      bodyDistance: 6_371_000,
+      bodyRadius: 6_371_000,
+    })).toBe(false)
+  })
+
+  it('hides the flying local terrain patch beyond one parent radius above the surface', () => {
+    expect(shouldShowLocalSurfacePatch({
+      surfaceState: 'flying',
+      cameraDistance: 1_500,
+      bodyDistance: 12_800_000,
+      bodyRadius: 6_371_000,
     })).toBe(false)
   })
 })

@@ -37,6 +37,70 @@ describe('predictVehicleOrbit', () => {
     expect(prediction.warnings).toEqual([])
   })
 
+  it('adds focused samples near the vehicle so low-altitude predictions stay curved', () => {
+    const altitude = 1_800
+    const radius = earthRadius + altitude
+    const circularSpeed = Math.sqrt(earthGm / radius)
+
+    const prediction = predictVehicleOrbit({
+      vehicle: {
+        position: [radius, 0, 0],
+        velocity: [0, 0, circularSpeed],
+      },
+      parent: earth,
+      bodies: [earth],
+    })
+
+    expect(prediction.points.length).toBeGreaterThan(240)
+  })
+
+  it('adds extra samples for highly elliptical orbits with sharp apsis turns', () => {
+    const periapsisRadius = earthRadius + 1_800
+    const apoapsisRadius = earthRadius + 5_000_000
+    const semiMajorAxis = (periapsisRadius + apoapsisRadius) / 2
+    const periapsisSpeed = Math.sqrt(earthGm * (2 / periapsisRadius - 1 / semiMajorAxis))
+    const circularSpeed = Math.sqrt(earthGm / periapsisRadius)
+
+    const circular = predictVehicleOrbit({
+      vehicle: {
+        position: [periapsisRadius, 0, 0],
+        velocity: [0, 0, circularSpeed],
+      },
+      parent: earth,
+      bodies: [earth],
+    })
+    const elliptical = predictVehicleOrbit({
+      vehicle: {
+        position: [periapsisRadius, 0, 0],
+        velocity: [0, 0, periapsisSpeed],
+      },
+      parent: earth,
+      bodies: [earth],
+    })
+
+    expect(elliptical.points.length).toBeGreaterThan(circular.points.length)
+  })
+
+  it('clips impact predictions to the above-surface arc and spends samples there', () => {
+    const currentRadius = earthRadius + 10_000
+    const apoapsisRadius = earthRadius + 12_000
+    const periapsisRadius = earthRadius - 6_300_000
+    const semiMajorAxis = (periapsisRadius + apoapsisRadius) / 2
+    const currentSpeed = Math.sqrt(earthGm * (2 / currentRadius - 1 / semiMajorAxis))
+
+    const prediction = predictVehicleOrbit({
+      vehicle: {
+        position: [currentRadius, 0, 0],
+        velocity: [0, 0, currentSpeed],
+      },
+      parent: earth,
+      bodies: [earth],
+    })
+
+    expect(prediction.points.length).toBeGreaterThan(180)
+    expect(prediction.points.every((point) => Math.hypot(...point) >= earthRadius - 1)).toBe(true)
+  })
+
   it('classifies hyperbolic trajectories as escape', () => {
     const radius = earthRadius + 400_000
     const escapeSpeed = Math.sqrt((2 * earthGm) / radius)

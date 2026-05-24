@@ -3,7 +3,7 @@ import {
   shouldRenderVehicleOrbitPrediction,
   shouldRecomputeVehicleOrbitPrediction,
   vehicleOrbitLineStyle,
-} from '../VehicleOrbitPrediction'
+} from '../vehicleOrbitPredictionMath'
 
 describe('shouldRenderVehicleOrbitPrediction', () => {
   it('renders only in orbital view with available prediction points', () => {

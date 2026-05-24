@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  bodySphereSegmentsForCameraDistance,
   projectedRadiusPx,
   sphereSegmentsForVehicleDistance,
   shouldSuppressChildSprite,
@@ -50,11 +51,22 @@ describe('sphereSegmentsForVehicleDistance', () => {
     expect(sphereSegmentsForVehicleDistance(10.05, 10)).toBe(512)
   })
 
-  it('uses high-resolution body spheres below two radii from center', () => {
-    expect(sphereSegmentsForVehicleDistance(19, 10)).toBe(128)
+  it('uses very high-resolution body spheres below one radius above the surface', () => {
+    expect(sphereSegmentsForVehicleDistance(19, 10)).toBe(512)
   })
 
-  it('uses normal body spheres at or above two radii from center', () => {
-    expect(sphereSegmentsForVehicleDistance(20, 10)).toBe(32)
+  it('uses high-resolution body spheres at the one-radius transition band', () => {
+    expect(sphereSegmentsForVehicleDistance(20, 10)).toBe(128)
+  })
+})
+
+describe('bodySphereSegmentsForCameraDistance', () => {
+  it('uses very high-resolution body spheres when camera is within one radius of the surface', () => {
+    expect(bodySphereSegmentsForCameraDistance({ distanceToCamera: 11, bodyRadius: 10 })).toBe(512)
+  })
+
+  it('uses high-resolution body spheres before dropping to normal far LOD', () => {
+    expect(bodySphereSegmentsForCameraDistance({ distanceToCamera: 25, bodyRadius: 10 })).toBe(128)
+    expect(bodySphereSegmentsForCameraDistance({ distanceToCamera: 40, bodyRadius: 10 })).toBe(32)
   })
 })
