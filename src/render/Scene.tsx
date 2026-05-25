@@ -6,6 +6,8 @@ import { OrbitPrediction } from './OrbitPrediction'
 import { VehicleMarker } from './VehicleMarker'
 import { VehicleOrbitPrediction } from './VehicleOrbitPrediction'
 import { CameraRig } from './CameraRig'
+import { RENDER_LAYERS } from './renderLayers'
+import { PlanetTerrainTiles } from './terrain/PlanetTerrainTiles'
 
 export function Scene() {
   const bodies = useTrajectoriesStore((s) => s.bodies)
@@ -33,6 +35,9 @@ export function Scene() {
       <CameraRig />
       {bodyIds.map((id) => (
         <Body key={id} bodyId={id} />
+      ))}
+      {bodyIds.map((id) => (
+        <PlanetTerrainTiles key={`terrain-${id}`} bodyId={id} renderLayer={RENDER_LAYERS.baseBody} />
       ))}
       {bodyIds.map((id) => (
         <OrbitPrediction key={`prediction-${id}`} bodyId={id} />

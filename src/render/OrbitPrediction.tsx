@@ -8,6 +8,12 @@ import { useTrajectoriesStore } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
 import { sampleOrbitAtTrueAnomalies, stateToElements } from '../sim/orbital/kepler'
 import type { TrajectoryCurve } from '../sim/types'
+import {
+  orbitLineStyleForBody,
+  predictionTrueAnomalies,
+  shouldRecomputeOrbitPrediction,
+  splitOrbitLineSegments,
+} from './orbitPredictionMath'
 
 const ORBIT_SEGMENTS = 192
 const FOCUS_HALF_ANGLE = Math.PI / 18
@@ -18,88 +24,8 @@ interface OrbitPredictionProps {
   bodyId: string
 }
 
-interface OrbitLineStyle {
-  color: string
-  lineWidth: number
-  opacity: number
-}
-
-const ORBIT_COLORS = new Map([
-  ['earth', '#214bb3'],
-  ['venus', '#d99a24'],
-  ['mars', '#d75a32'],
-  ['jupiter', '#c9782e'],
-  ['saturn', '#b58a3a'],
-  ['uranus', '#49b9c4'],
-  ['neptune', '#355fd8'],
-])
-
-const DIM_ORBIT_COLORS = new Map([
-  ['earth', '#102b6d'],
-  ['venus', '#6c4d12'],
-  ['mars', '#6b2d19'],
-  ['jupiter', '#633c17'],
-  ['saturn', '#5a451d'],
-  ['uranus', '#245c62'],
-  ['neptune', '#1a2f6c'],
-])
-
 interface PredictionGeometry {
-  points: [number, number, number][]
-}
-
-export function shouldRecomputeOrbitPrediction(
-  lastComputedSimTime: number | null,
-  currentSimTime: number,
-  intervalSeconds: number,
-): boolean {
-  return (
-    lastComputedSimTime === null ||
-    currentSimTime - lastComputedSimTime >= intervalSeconds
-  )
-}
-
-export function usesUniformOrbitLineOpacity(): boolean {
-  return true
-}
-
-export function orbitLineStyleForBody(
-  bodyId: string | undefined,
-  followTargetId?: string,
-): OrbitLineStyle {
-  const isFocused = bodyId !== undefined && bodyId === followTargetId
-  return {
-    color: (isFocused ? ORBIT_COLORS : DIM_ORBIT_COLORS).get(bodyId ?? '') ??
-      (isFocused ? '#7f8cff' : '#40466f'),
-    lineWidth: isFocused ? 3 : 2,
-    opacity: 1,
-  }
-}
-
-export function predictionTrueAnomalies(
-  currentAnomaly: number,
-  baseSegments: number,
-  focusHalfAngle: number,
-  focusSegments: number,
-): number[] {
-  const twoPi = Math.PI * 2
-  const angles = new Map<number, number>()
-  const add = (theta: number) => {
-    const normalized = ((theta % twoPi) + twoPi) % twoPi
-    angles.set(Math.round(normalized * 1e9), normalized)
-  }
-
-  for (let i = 0; i < baseSegments; i++) {
-    add((i / baseSegments) * twoPi)
-  }
-  for (let i = 0; i <= focusSegments; i++) {
-    const t = i / focusSegments
-    add(currentAnomaly - focusHalfAngle + t * focusHalfAngle * 2)
-  }
-
-  const sorted = Array.from(angles.values()).sort((a, b) => a - b)
-  sorted.push(twoPi)
-  return sorted
+  segments: [number, number, number][][]
 }
 
 export function OrbitPrediction({ bodyId }: OrbitPredictionProps) {
@@ -184,24 +110,26 @@ export function OrbitPrediction({ bodyId }: OrbitPredictionProps) {
       FOCUS_SEGMENTS,
     )
     const points = sampleOrbitAtTrueAnomalies(elements, anomalies)
+    const segments = splitOrbitLineSegments(points, relPos, body.radius * 1.2)
     setPrediction({
-      points,
+      segments,
     })
-    group.visible = points.length > 2
+    group.visible = segments.some((segment) => segment.length > 1)
   })
 
   if (!parentId) return null
 
   return (
     <group ref={groupRef} visible={false}>
-      {prediction && prediction.points.length > 2 && (
+      {prediction?.segments.map((points, index) => points.length > 1 && (
         <Line
-          points={prediction.points}
+          key={index}
+          points={points}
           color={style.color}
           lineWidth={style.lineWidth}
           opacity={style.opacity}
         />
-      )}
+      ))}
     </group>
   )
 }

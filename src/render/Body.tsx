@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import type { Group, Mesh, PointLight, Sprite } from 'three'
 import { Vector3 } from 'three'
@@ -10,18 +10,18 @@ import { OrbitalMarker } from './OrbitalMarker'
 import { RotationLine } from './RotationLine'
 import { BodyMaterial } from './BodyMaterial'
 import {
-  bodyOrientationEuler,
-  bodyRotationAngle,
+  bodySurfaceOrientationEuler,
   rotatingBodyTransform,
   shouldShowBodyRotationAxisInView,
 } from './rotation'
 import {
   projectedRadiusPx,
-  bodySphereSegmentsForCameraDistance,
   shouldSuppressChildSprite,
   shouldUseBodySprite,
   spriteWorldSize,
 } from './lod'
+import { shouldHideFallbackSphereForTiledSurface } from './terrain/terrainLodPolicy'
+import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
 
 const MESH_THRESHOLD_PX = 6
 const SPRITE_SIZE_PX = 12
@@ -40,7 +40,10 @@ export function Body({ bodyId }: BodyProps) {
   const viewport = useThree((s) => s.size)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
   const showRotationAxes = useModeStore((s) => s.showRotationAxes)
-  const [sphereSegments, setSphereSegments] = useState(32)
+  const surfaceGeometry = useMemo(
+    () => body ? createBodySurfaceGeometry(body.radius) : undefined,
+    [body],
+  )
 
   useFrame(() => {
     if (useModeStore.getState().activeView !== 'orbital') return
@@ -93,13 +96,9 @@ export function Body({ bodyId }: BodyProps) {
     const pixelsPerRadian = viewport.height / (2 * Math.tan(fov / 2))
     const scenePositionVector = new Vector3(...scenePosition)
     const distanceToCamera = scenePositionVector.distanceTo(camera.position)
-    const nextSegments = bodySphereSegmentsForCameraDistance({
-      distanceToCamera,
-      bodyRadius: body.radius,
-    })
-    setSphereSegments((current) => current === nextSegments ? current : nextSegments)
     const radiusPx = projectedRadiusPx(body.radius, distanceToCamera, pixelsPerRadian)
     const useSprite = shouldUseBodySprite(radiusPx, MESH_THRESHOLD_PX)
+    const hideFallbackSphere = shouldHideFallbackSphereForTiledSurface((radiusPx * 2) / viewport.height)
 
     let suppressSprite = false
     if (useSprite && body.parentId) {
@@ -124,15 +123,17 @@ export function Body({ bodyId }: BodyProps) {
       }
     }
 
-    mesh.visible = !useSprite
+    mesh.visible = !useSprite && !hideFallbackSphere
     sprite.visible = useSprite && !suppressSprite
     if (spinGroup) {
       spinGroup.visible = mesh.visible
       spinGroup.rotation.set(
-        ...bodyOrientationEuler(
-          bodyRotationAngle(body.rotationPhase, body.angularVelocity, t),
-          body.axialTilt,
-        ),
+        ...bodySurfaceOrientationEuler({
+          rotationPhase: body.rotationPhase,
+          angularVelocity: body.angularVelocity,
+          simTime: t,
+          axialTilt: body.axialTilt,
+        }),
       )
     }
     const spriteSize = spriteWorldSize(
@@ -153,8 +154,7 @@ export function Body({ bodyId }: BodyProps) {
   return (
     <group>
       <group ref={spinGroupRef}>
-        <mesh ref={meshRef}>
-          <sphereGeometry key={sphereSegments} args={[body.radius, sphereSegments, sphereSegments]} />
+        <mesh ref={meshRef} geometry={surfaceGeometry}>
           <BodyMaterial body={body} />
         </mesh>
         {shouldShowBodyRotationAxisInView('orbital', showRotationAxes) && (

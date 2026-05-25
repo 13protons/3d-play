@@ -21,6 +21,23 @@ export function bodyOrientationEuler(
   return [0, spinAngle, (axialTiltDegrees * Math.PI) / 180, 'ZXY']
 }
 
+export function bodySurfaceOrientationEuler({
+  rotationPhase,
+  angularVelocity,
+  simTime,
+  axialTilt,
+}: {
+  rotationPhase: number
+  angularVelocity: number
+  simTime: number
+  axialTilt: number
+}): [number, number, number, EulerOrder] {
+  return bodyOrientationEuler(
+    bodyRotationAngle(rotationPhase, angularVelocity, simTime),
+    axialTilt,
+  )
+}
+
 export type RotationLinePoints = [[number, number, number], [number, number, number]]
 export type CraftDebugAxisSegments = {
   x: RotationLinePoints
