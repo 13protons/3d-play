@@ -1,17 +1,30 @@
 import { describe, expect, it } from 'vitest'
 import { generatedTerrainTileSource } from '../terrain/generatedTileSource'
-import { generateBodySurfaceGeometryData } from '../bodySurfaceGeometry'
+import {
+  bodySurfaceFallbackLod,
+  cachedBodySurfaceGeometryData,
+  createBodySurfaceGeometry,
+  generateBodySurfaceGeometryData,
+} from '../bodySurfaceGeometry'
 import { selectCubeSphereShellTiles, selectTerrainTiles } from '../terrain/tileSelection'
 import { TerrainTileCache } from '../terrain/tileCache'
 import { terrainTileChildren, terrainTileKey } from '../terrain/tileId'
+import { mergeTerrainTileData, terrainTileSelectionKey } from '../terrain/tileGeometry'
+import {
+  resolveOrbitalTerrainRenderData,
+  resolveVehicleTerrainRenderData,
+} from '../terrain/terrainRenderData'
 import {
   maxTileLodForBodyRadius,
   maxVehicleTileCameraDistance,
   maxOrbitalTileCameraDistance,
+  minTileLodForBodyRadius,
+  orbitalPlanetSurfaceRenderDecision,
   planetSurfaceRenderMode,
   shouldHideFallbackSphereForTiledSurface,
   shouldUseTiledPlanetSurface,
   tileEdgeMeters,
+  vehiclePlanetSurfaceRenderDecision,
 } from '../terrain/terrainLodPolicy'
 
 describe('selectTerrainTiles', () => {
@@ -130,6 +143,21 @@ describe('generatedTerrainTileSource', () => {
     expect(fallbackSurface.uvs[fallbackCenter + 1]).toBeCloseTo(terrainTile.uvs[terrainCenter + 1], 6)
   })
 
+  it('uses a coarser default fallback surface than tiled rendering', () => {
+    expect(bodySurfaceFallbackLod()).toBeLessThan(minTileLodForBodyRadius())
+  })
+
+  it('reuses cached fallback surface data without sharing BufferGeometry instances', () => {
+    const firstData = cachedBodySurfaceGeometryData(100)
+    const secondData = cachedBodySurfaceGeometryData(100)
+    const firstGeometry = createBodySurfaceGeometry(100)
+    const secondGeometry = createBodySurfaceGeometry(100)
+
+    expect(secondData).toBe(firstData)
+    expect(secondGeometry).not.toBe(firstGeometry)
+    expect(secondGeometry.getAttribute('position').array).toBe(firstGeometry.getAttribute('position').array)
+  })
+
   it('keeps equirectangular u coordinates continuous inside seam-crossing tiles', async () => {
     const tile = await generatedTerrainTileSource.getTile({
       bodyId: 'earth',
@@ -172,6 +200,116 @@ describe('generatedTerrainTileSource', () => {
     }
 
     expect(maxAdjacentDelta).toBeLessThan(0.5)
+  })
+})
+
+describe('terrainTileGeometry', () => {
+  it('builds a stable selection key without depending on array identity', () => {
+    const tiles = selectCubeSphereShellTiles({ bodyId: 'earth', lod: 1 })
+    const copiedTiles = tiles.map((tile) => ({ ...tile }))
+
+    expect(terrainTileSelectionKey(copiedTiles)).toBe(terrainTileSelectionKey(tiles))
+  })
+
+  it('merges terrain tile geometry and offsets later tile indices', () => {
+    const first = {
+      id: { bodyId: 'earth', face: 'px' as const, lod: 0, x: 0, y: 0 },
+      positions: new Float32Array([0, 0, 1, 1, 0, 0, 0, 1, 0]),
+      normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+      uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
+      indices: new Uint32Array([0, 1, 2]),
+      minHeight: 0,
+      maxHeight: 0,
+    }
+    const second = {
+      id: { bodyId: 'earth', face: 'nx' as const, lod: 0, x: 0, y: 0 },
+      positions: new Float32Array([0, 0, -1, -1, 0, 0, 0, -1, 0]),
+      normals: new Float32Array([0, 0, -1, 0, 0, -1, 0, 0, -1]),
+      uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
+      indices: new Uint32Array([0, 2, 1]),
+      minHeight: 0,
+      maxHeight: 0,
+    }
+
+    const merged = mergeTerrainTileData([first, second])
+
+    expect(merged.positions).toBeInstanceOf(Float32Array)
+    expect(merged.indices).toBeInstanceOf(Uint32Array)
+    expect(Array.from(merged.positions)).toEqual([...first.positions, ...second.positions])
+    expect(Array.from(merged.indices)).toEqual([0, 1, 2, 3, 5, 4])
+  })
+})
+
+describe('terrainRenderData', () => {
+  const body = {
+    id: 'earth',
+    name: 'Earth',
+    parentId: 'sun',
+    mass: 1,
+    gm: 1,
+    radius: 100,
+    axialTilt: 23.5,
+    angularVelocity: 0.1,
+    rotationPhase: 0.2,
+    color: '#ffffff',
+    emissive: false,
+    minimumLight: 0,
+  }
+
+  it('resolves orbital terrain placement from evaluated positions', () => {
+    const renderData = resolveOrbitalTerrainRenderData({
+      body,
+      bodyPosition: [1_000, 0, 0],
+      targetPosition: [100, 0, 0],
+      cameraPosition: [900, 0, 0],
+      fovRadians: Math.PI / 3,
+      viewportHeight: 1_000,
+      simTime: 2,
+    })
+
+    expect(renderData).toMatchObject({
+      view: 'orbital',
+      groupPosition: [900, 0, 0],
+      cameraDistance: 0,
+      showTerrainTiles: true,
+    })
+    expect(renderData?.rotation).toEqual([0, 0.4, (23.5 * Math.PI) / 180, 'ZXY'])
+  })
+
+  it('returns null when vehicle terrain would not actually replace the parent surface', () => {
+    const renderData = resolveVehicleTerrainRenderData({
+      body,
+      bodyPosition: [0, 0, 0],
+      vehiclePosition: [110, 0, 0],
+      vehicleParentId: 'moon',
+      cameraPosition: [0, 0, 1],
+      fovRadians: Math.PI / 3,
+      viewportHeight: 1_000,
+      simTime: 0,
+    })
+
+    expect(renderData).toBeNull()
+  })
+
+  it('resolves vehicle terrain placement from evaluated positions', () => {
+    const renderData = resolveVehicleTerrainRenderData({
+      body,
+      bodyPosition: [0, 0, 0],
+      vehiclePosition: [110, 0, 0],
+      vehicleParentId: 'earth',
+      cameraPosition: [0, 0, 1],
+      fovRadians: Math.PI / 3,
+      viewportHeight: 1_000,
+      simTime: 2,
+    })
+
+    expect(renderData).toMatchObject({
+      view: 'vehicle',
+      groupPosition: [-110, 0, 0],
+      cameraDistance: expect.any(Number),
+      showTerrainTiles: true,
+    })
+    expect(renderData?.focusDirection).toEqual([1, 0, 0])
   })
 })
 
@@ -227,6 +365,76 @@ describe('terrainLodPolicy', () => {
     expect(maxVehicleTileCameraDistance(6_371_000)).toBeCloseTo(127_420, 0)
     expect(maxVehicleTileCameraDistance(1_737_000)).toBeCloseTo(34_740, 0)
   })
+
+  it('returns one exclusive orbital surface visibility decision', () => {
+    expect(orbitalPlanetSurfaceRenderDecision({
+      bodyRadius: 100,
+      cameraDistance: 4_000,
+      fovRadians: Math.PI / 3,
+      viewportHeight: 1_000,
+    })).toMatchObject({
+      mode: 'sphere',
+      showFallbackSphere: true,
+      showTerrainTiles: false,
+    })
+
+    expect(orbitalPlanetSurfaceRenderDecision({
+      bodyRadius: 100,
+      cameraDistance: 1_000,
+      fovRadians: Math.PI / 3,
+      viewportHeight: 1_000,
+    })).toMatchObject({
+      mode: 'tiles',
+      showFallbackSphere: false,
+      showTerrainTiles: true,
+    })
+  })
+
+  it('keeps the vehicle fallback visible unless terrain tiles are actually eligible', () => {
+    const baseDecision = {
+      bodyId: 'earth',
+      vehicleParentId: 'earth',
+      bodyRadius: 100,
+      bodyDistance: 110,
+      localCameraDistance: 1,
+      cameraDistance: 1_000,
+      fovRadians: Math.PI / 3,
+      viewportHeight: 1_000,
+    }
+
+    expect(vehiclePlanetSurfaceRenderDecision(baseDecision)).toMatchObject({
+      mode: 'tiles',
+      showFallbackSphere: false,
+      showTerrainTiles: true,
+    })
+
+    expect(vehiclePlanetSurfaceRenderDecision({
+      ...baseDecision,
+      vehicleParentId: 'moon',
+    })).toMatchObject({
+      mode: 'sphere',
+      showFallbackSphere: true,
+      showTerrainTiles: false,
+    })
+
+    expect(vehiclePlanetSurfaceRenderDecision({
+      ...baseDecision,
+      bodyDistance: 121,
+    })).toMatchObject({
+      mode: 'sphere',
+      showFallbackSphere: true,
+      showTerrainTiles: false,
+    })
+
+    expect(vehiclePlanetSurfaceRenderDecision({
+      ...baseDecision,
+      localCameraDistance: maxVehicleTileCameraDistance(100) + 1,
+    })).toMatchObject({
+      mode: 'sphere',
+      showFallbackSphere: true,
+      showTerrainTiles: false,
+    })
+  })
 })
 
 describe('TerrainTileCache', () => {
@@ -255,5 +463,56 @@ describe('TerrainTileCache', () => {
 
     expect(a).toBe(b)
     expect(calls).toBe(1)
+  })
+
+  it('clears failed in-flight requests so later loads can retry', async () => {
+    let calls = 0
+    const id = { bodyId: 'earth', face: 'px' as const, lod: 1, x: 0, y: 0 }
+    const tile = {
+      id,
+      positions: new Float32Array(),
+      normals: new Float32Array(),
+      uvs: new Float32Array(),
+      indices: new Uint32Array(),
+      minHeight: 0,
+      maxHeight: 0,
+    }
+    const cache = new TerrainTileCache({
+      getTile: async () => {
+        calls += 1
+        if (calls === 1) throw new Error('temporary tile load failure')
+        return tile
+      },
+    })
+
+    await expect(cache.getTile(id, { bodyRadius: 100 })).rejects.toThrow('temporary tile load failure')
+    await expect(cache.getTile(id, { bodyRadius: 100 })).resolves.toBe(tile)
+    expect(calls).toBe(2)
+  })
+
+  it('evicts least-recently-used loaded tiles when the cache exceeds its bound', async () => {
+    const cache = new TerrainTileCache({
+      getTile: async (id) => ({
+        id,
+        positions: new Float32Array(),
+        normals: new Float32Array(),
+        uvs: new Float32Array(),
+        indices: new Uint32Array(),
+        minHeight: 0,
+        maxHeight: 0,
+      }),
+    }, { maxLoadedTiles: 2 })
+    const first = { bodyId: 'earth', face: 'px' as const, lod: 1, x: 0, y: 0 }
+    const second = { bodyId: 'earth', face: 'px' as const, lod: 1, x: 1, y: 0 }
+    const third = { bodyId: 'earth', face: 'px' as const, lod: 1, x: 0, y: 1 }
+
+    await cache.getTile(first, { bodyRadius: 100 })
+    await cache.getTile(second, { bodyRadius: 100 })
+    cache.getCachedTile(first)
+    await cache.getTile(third, { bodyRadius: 100 })
+
+    expect(cache.getCachedTile(first)).toBeDefined()
+    expect(cache.getCachedTile(second)).toBeUndefined()
+    expect(cache.getCachedTile(third)).toBeDefined()
   })
 })

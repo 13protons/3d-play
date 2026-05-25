@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isVehicleActivelyAccelerating,
   predictionStateForReferenceFrame,
   shouldPredictVehicleOrbit,
   shouldRenderVehicleOrbitPrediction,
@@ -24,6 +25,42 @@ describe('shouldRecomputeVehicleOrbitPrediction', () => {
     expect(shouldRecomputeVehicleOrbitPrediction(null, 100, 5, false)).toBe(true)
     expect(shouldRecomputeVehicleOrbitPrediction(100, 104.9, 5, false)).toBe(false)
     expect(shouldRecomputeVehicleOrbitPrediction(100, 105, 5, false)).toBe(true)
+  })
+
+  it('recomputes when simulated time rewinds', () => {
+    expect(shouldRecomputeVehicleOrbitPrediction(100, 99, 5, false)).toBe(true)
+  })
+
+  it('recomputes when prediction inputs are replaced while coasting', () => {
+    const oldCurve = { id: 'vehicle' }
+    const newCurve = { id: 'vehicle' }
+
+    expect(shouldRecomputeVehicleOrbitPrediction(100, 101, 5, false, [oldCurve], [oldCurve])).toBe(false)
+    expect(shouldRecomputeVehicleOrbitPrediction(100, 101, 5, false, [oldCurve], [newCurve])).toBe(true)
+  })
+})
+
+describe('isVehicleActivelyAccelerating', () => {
+  it('does not treat coasting gravity-driven velocity changes as active acceleration', () => {
+    expect(isVehicleActivelyAccelerating({
+      throttle: 0,
+      orientation: [0, 0, 0, 1],
+      angularVelocity: [0, 0, 0],
+      attitudeMode: 'manual',
+      surfaceState: 'flying',
+      currentThrust: 0,
+    })).toBe(false)
+  })
+
+  it('forces immediate recompute while thrust is being applied', () => {
+    expect(isVehicleActivelyAccelerating({
+      throttle: 0.5,
+      orientation: [0, 0, 0, 1],
+      angularVelocity: [0, 0, 0],
+      attitudeMode: 'manual',
+      surfaceState: 'flying',
+      currentThrust: 100,
+    })).toBe(true)
   })
 })
 

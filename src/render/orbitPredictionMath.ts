@@ -28,11 +28,19 @@ export function shouldRecomputeOrbitPrediction(
   lastComputedSimTime: number | null,
   currentSimTime: number,
   intervalSeconds: number,
+  lastInputs: readonly unknown[] = [],
+  currentInputs: readonly unknown[] = lastInputs,
 ): boolean {
   return (
     lastComputedSimTime === null ||
+    !sameInputs(lastInputs, currentInputs) ||
+    currentSimTime < lastComputedSimTime ||
     currentSimTime - lastComputedSimTime >= intervalSeconds
   )
+}
+
+function sameInputs(left: readonly unknown[], right: readonly unknown[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
 export function usesUniformOrbitLineOpacity(): boolean {
@@ -90,12 +98,18 @@ export function splitOrbitLineSegments(
   for (const point of points) {
     const inside = distance(point, bodyPosition) <= exclusionRadius
     if (previousPoint) {
-      const boundary = lineSphereBoundaryPoint(previousPoint, point, bodyPosition, exclusionRadius)
+      const boundaries = lineSphereBoundaryPoints(previousPoint, point, bodyPosition, exclusionRadius)
+      const boundary = boundaries[0]
       if (!previousInside && inside && boundary) {
         current.push(boundary)
       }
       if (previousInside && !inside && boundary) {
         current = [boundary]
+      }
+      if (!previousInside && !inside && boundaries.length === 2) {
+        current.push(boundaries[0])
+        if (current.length > 0) segments.push(current)
+        current = [boundaries[1]]
       }
     }
     if (inside) {
@@ -122,12 +136,12 @@ function distance(
   return Math.hypot(point[0] - center[0], point[1] - center[1], point[2] - center[2])
 }
 
-function lineSphereBoundaryPoint(
+function lineSphereBoundaryPoints(
   from: [number, number, number],
   to: [number, number, number],
   center: [number, number, number],
   radius: number,
-): [number, number, number] | null {
+): [number, number, number][] {
   const ox = from[0] - center[0]
   const oy = from[1] - center[1]
   const oz = from[2] - center[2]
@@ -138,11 +152,12 @@ function lineSphereBoundaryPoint(
   const b = 2 * (ox * dx + oy * dy + oz * dz)
   const c = ox * ox + oy * oy + oz * oz - radius * radius
   const discriminant = b * b - 4 * a * c
-  if (a <= 0 || discriminant < 0) return null
+  if (a <= 0 || discriminant < 0) return []
   const sqrt = Math.sqrt(discriminant)
   const t0 = (-b - sqrt) / (2 * a)
   const t1 = (-b + sqrt) / (2 * a)
-  const t = [t0, t1].find((value) => value >= 0 && value <= 1)
-  if (t === undefined) return null
-  return [from[0] + dx * t, from[1] + dy * t, from[2] + dz * t]
+  return [t0, t1]
+    .filter((value, index, values) => value >= 0 && value <= 1 && values.indexOf(value) === index)
+    .sort((left, right) => left - right)
+    .map((t) => [from[0] + dx * t, from[1] + dy * t, from[2] + dz * t])
 }

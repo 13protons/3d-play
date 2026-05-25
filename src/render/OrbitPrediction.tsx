@@ -31,6 +31,7 @@ interface PredictionGeometry {
 export function OrbitPrediction({ bodyId }: OrbitPredictionProps) {
   const groupRef = useRef<Group>(null)
   const lastComputedSimTimeRef = useRef<number | null>(null)
+  const lastPredictionInputsRef = useRef<readonly unknown[]>([])
   const [prediction, setPrediction] = useState<PredictionGeometry | null>(null)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
   const parentId = body?.parentId
@@ -79,15 +80,19 @@ export function OrbitPrediction({ bodyId }: OrbitPredictionProps) {
       parentPos[2] - camZ,
     )
 
+    const predictionInputs = [bodyCurve, parentCurve, parentBody, body] as const
     if (!shouldRecomputeOrbitPrediction(
       lastComputedSimTimeRef.current,
       t,
       RECOMPUTE_INTERVAL_SECONDS,
+      lastPredictionInputsRef.current,
+      predictionInputs,
     )) {
       return
     }
 
     lastComputedSimTimeRef.current = t
+    lastPredictionInputsRef.current = predictionInputs
     const bodyPos = evaluateCurve(bodyCurve, t)
     const bodyVel = hermiteVelocity(bodyCurve, t)
     const parentVel = hermiteVelocity(parentCurve, t)

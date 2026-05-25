@@ -36,7 +36,7 @@ import {
 } from './rotation'
 import { RENDER_LAYERS, TERRAIN_RENDER_PASSES } from './renderLayers'
 import { PlanetTerrainTiles } from './terrain/PlanetTerrainTiles'
-import { maxVehicleTileCameraDistance } from './terrain/terrainLodPolicy'
+import { vehiclePlanetSurfaceRenderDecision } from './terrain/terrainLodPolicy'
 import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
 
 const SUN_RENDER_DISTANCE = 5e8
@@ -86,10 +86,11 @@ function VehicleBody({
   const spinGroupRef = useRef<Group>(null)
   const meshRef = useRef<Mesh>(null)
   const camera = useThree((s) => s.camera)
+  const viewport = useThree((s) => s.size)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
   const surfaceGeometry = useMemo(
     () => body ? createBodySurfaceGeometry(body.radius) : undefined,
-    [body],
+    [body?.radius],
   )
 
   useFrame(() => {
@@ -117,8 +118,6 @@ function VehicleBody({
           cameraDistance: camera.position.length(),
         })
       : false
-    const hideForTiledSurface = vehicle?.parentId === bodyId && camera.position.length() <= maxVehicleTileCameraDistance(body.radius)
-
     const bodyPos = evaluateCurve(bodyCurve, t)
     const vehiclePos = evaluateCurve(vehicleCurve, t)
     const renderBody = body.emissive
@@ -135,6 +134,26 @@ function VehicleBody({
     const scenePosition: [number, number, number] = renderBody
       ? renderBody.position
       : [bodyPos[0] - vehiclePos[0], bodyPos[1] - vehiclePos[1], bodyPos[2] - vehiclePos[2]]
+    const cameraRelative: Vec3 = [
+      camera.position.x - scenePosition[0],
+      camera.position.y - scenePosition[1],
+      camera.position.z - scenePosition[2],
+    ]
+    const vehicleRelative: Vec3 = [
+      vehiclePos[0] - bodyPos[0],
+      vehiclePos[1] - bodyPos[1],
+      vehiclePos[2] - bodyPos[2],
+    ]
+    const surfaceDecision = vehiclePlanetSurfaceRenderDecision({
+      bodyId,
+      vehicleParentId: vehicle?.parentId,
+      bodyRadius: body.radius,
+      bodyDistance: Math.hypot(...vehicleRelative),
+      localCameraDistance: camera.position.length(),
+      cameraDistance: Math.hypot(...cameraRelative),
+      fovRadians: 'fov' in camera ? (camera.fov * Math.PI) / 180 : Math.PI / 3,
+      viewportHeight: viewport.height,
+    })
     const transform = vehicleBodyTransform(scenePosition)
     if (spinGroup) spinGroup.position.set(...transform.groupPosition)
     mesh.position.set(...transform.meshPosition)
@@ -176,7 +195,7 @@ function VehicleBody({
         )
       : false
 
-    mesh.visible = !sunOccluded && !hideForLocalSurface && !hideForTiledSurface
+    mesh.visible = !sunOccluded && !hideForLocalSurface && surfaceDecision.showFallbackSphere
 
     if (body.emissive && mesh.material && 'opacity' in mesh.material) {
       const material = mesh.material as MeshBasicMaterial

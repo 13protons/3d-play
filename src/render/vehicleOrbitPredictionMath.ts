@@ -1,7 +1,9 @@
 import type { VehicleOrbitPredictionStatus } from '../sim/orbital/vehiclePrediction'
 import type { FlightReferenceMode, Vec3 } from '../sim/vehicle/referenceFrame'
+import type { VehicleControlMeta } from '../state/trajectories'
 
 const SURFACE_PREDICTION_MIN_SPEED_METERS_PER_SECOND = 1
+const ACTIVE_THRUST_EPSILON = 1e-6
 
 interface VehicleOrbitLineStyle {
   color: string
@@ -21,12 +23,24 @@ export function shouldRecomputeVehicleOrbitPrediction(
   currentSimTime: number,
   intervalSeconds: number,
   accelerating: boolean,
+  lastInputs: readonly unknown[] = [],
+  currentInputs: readonly unknown[] = lastInputs,
 ): boolean {
   return (
     accelerating ||
     lastComputedSimTime === null ||
+    !sameInputs(lastInputs, currentInputs) ||
+    currentSimTime < lastComputedSimTime ||
     currentSimTime - lastComputedSimTime >= intervalSeconds
   )
+}
+
+function sameInputs(left: readonly unknown[], right: readonly unknown[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+export function isVehicleActivelyAccelerating(control?: VehicleControlMeta): boolean {
+  return (control?.currentThrust ?? 0) > ACTIVE_THRUST_EPSILON || (control?.throttle ?? 0) > ACTIVE_THRUST_EPSILON
 }
 
 export function shouldPredictVehicleOrbit({

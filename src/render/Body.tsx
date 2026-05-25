@@ -20,7 +20,7 @@ import {
   shouldUseBodySprite,
   spriteWorldSize,
 } from './lod'
-import { shouldHideFallbackSphereForTiledSurface } from './terrain/terrainLodPolicy'
+import { orbitalPlanetSurfaceRenderDecision } from './terrain/terrainLodPolicy'
 import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
 
 const MESH_THRESHOLD_PX = 6
@@ -42,7 +42,7 @@ export function Body({ bodyId }: BodyProps) {
   const showRotationAxes = useModeStore((s) => s.showRotationAxes)
   const surfaceGeometry = useMemo(
     () => body ? createBodySurfaceGeometry(body.radius) : undefined,
-    [body],
+    [body?.radius],
   )
 
   useFrame(() => {
@@ -98,7 +98,12 @@ export function Body({ bodyId }: BodyProps) {
     const distanceToCamera = scenePositionVector.distanceTo(camera.position)
     const radiusPx = projectedRadiusPx(body.radius, distanceToCamera, pixelsPerRadian)
     const useSprite = shouldUseBodySprite(radiusPx, MESH_THRESHOLD_PX)
-    const hideFallbackSphere = shouldHideFallbackSphereForTiledSurface((radiusPx * 2) / viewport.height)
+    const surfaceDecision = orbitalPlanetSurfaceRenderDecision({
+      bodyRadius: body.radius,
+      cameraDistance: distanceToCamera,
+      fovRadians: fov,
+      viewportHeight: viewport.height,
+    })
 
     let suppressSprite = false
     if (useSprite && body.parentId) {
@@ -123,7 +128,7 @@ export function Body({ bodyId }: BodyProps) {
       }
     }
 
-    mesh.visible = !useSprite && !hideFallbackSphere
+    mesh.visible = !useSprite && surfaceDecision.showFallbackSphere
     sprite.visible = useSprite && !suppressSprite
     if (spinGroup) {
       spinGroup.visible = mesh.visible

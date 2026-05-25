@@ -17,6 +17,18 @@ describe('shouldRecomputeOrbitPrediction', () => {
     expect(shouldRecomputeOrbitPrediction(100, 700, 600)).toBe(true)
   })
 
+  it('recomputes when simulated time rewinds', () => {
+    expect(shouldRecomputeOrbitPrediction(100, 99, 600)).toBe(true)
+  })
+
+  it('recomputes when prediction inputs are replaced before the interval elapses', () => {
+    const oldCurve = { id: 'earth' }
+    const newCurve = { id: 'earth' }
+
+    expect(shouldRecomputeOrbitPrediction(100, 101, 600, [oldCurve], [oldCurve])).toBe(false)
+    expect(shouldRecomputeOrbitPrediction(100, 101, 600, [oldCurve], [newCurve])).toBe(true)
+  })
+
   it('uses uniform material opacity instead of per-vertex opacity', () => {
     expect(usesUniformOrbitLineOpacity()).toBe(true)
   })
@@ -71,6 +83,18 @@ describe('splitOrbitLineSegments', () => {
     expect(segments).toEqual([
       [[-100, 0, 0], [-1, 0, 0]],
       [[1, 0, 0], [100, 0, 0]],
+    ])
+  })
+
+  it('opens a gap for sparse outside-to-outside chords that cross through the body mesh', () => {
+    const segments = splitOrbitLineSegments([
+      [-3, 0, 0],
+      [3, 0, 0],
+    ], [0, 0, 0], 1)
+
+    expect(segments).toEqual([
+      [[-3, 0, 0], [-1, 0, 0]],
+      [[1, 0, 0], [3, 0, 0]],
     ])
   })
 

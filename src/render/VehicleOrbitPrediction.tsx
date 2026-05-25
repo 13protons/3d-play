@@ -17,6 +17,7 @@ import {
   rotationAxisFromAxialTilt,
 } from '../sim/vehicle/referenceFrame'
 import {
+  isVehicleActivelyAccelerating,
   predictionStateForReferenceFrame,
   shouldPredictVehicleOrbit,
   shouldRecomputeVehicleOrbitPrediction,
@@ -25,7 +26,6 @@ import {
 } from './vehicleOrbitPredictionMath'
 
 const RECOMPUTE_INTERVAL_SECONDS = 5
-const ACCELERATING_SPEED_DELTA = 0.005
 
 interface VehicleOrbitPredictionProps {
   vehicleId: string
@@ -34,7 +34,7 @@ interface VehicleOrbitPredictionProps {
 export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProps) {
   const groupRef = useRef<Group>(null)
   const lastComputedSimTimeRef = useRef<number | null>(null)
-  const lastVelocityRef = useRef<[number, number, number] | null>(null)
+  const lastPredictionInputsRef = useRef<readonly unknown[]>([])
   const [prediction, setPrediction] = useState<VehicleOrbitPredictionResult | null>(null)
   const vehicle = useTrajectoriesStore((s) => s.vehicles[vehicleId])
   const style = useMemo(
@@ -72,17 +72,21 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
 
     const vehicleVelocity = hermiteVelocity(vehicleCurve, t)
     const vehiclePos = evaluateCurve(vehicleCurve, t) as [number, number, number]
-    const accelerating = isAccelerating(lastVelocityRef.current, vehicleVelocity)
-    lastVelocityRef.current = vehicleVelocity
+    const controls = store.vehicleControls[vehicleId]
+    const accelerating = isVehicleActivelyAccelerating(controls)
+    const predictionInputs = [vehicleCurve, parentCurve, parentBody, controls] as const
     if (!shouldRecomputeVehicleOrbitPrediction(
       lastComputedSimTimeRef.current,
       t,
       RECOMPUTE_INTERVAL_SECONDS,
       accelerating,
+      lastPredictionInputsRef.current,
+      predictionInputs,
     )) {
       return
     }
     lastComputedSimTimeRef.current = t
+    lastPredictionInputsRef.current = predictionInputs
 
     const parentVelocity = hermiteVelocity(parentCurve, t)
     const relativePosition: [number, number, number] = [
@@ -103,7 +107,7 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
       parentGm: parentBody.gm,
       parentAngularVelocity: parentBody.angularVelocity,
       parentRotationAxis,
-      surfaceState: store.vehicleControls[vehicleId]?.surfaceState ?? 'flying',
+      surfaceState: controls?.surfaceState ?? 'flying',
     })
     const predictionState = predictionStateForReferenceFrame({
       mode: referenceFrame.mode,
@@ -165,18 +169,6 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
       )}
     </group>
   )
-}
-
-function isAccelerating(
-  previousVelocity: [number, number, number] | null,
-  currentVelocity: [number, number, number],
-): boolean {
-  if (!previousVelocity) return true
-  return Math.hypot(
-    currentVelocity[0] - previousVelocity[0],
-    currentVelocity[1] - previousVelocity[1],
-    currentVelocity[2] - previousVelocity[2],
-  ) > ACCELERATING_SPEED_DELTA
 }
 
 function hermiteVelocity(

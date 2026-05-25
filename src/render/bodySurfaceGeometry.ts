@@ -1,10 +1,29 @@
 import { BufferAttribute, BufferGeometry } from 'three'
 import { generateTerrainTile } from './terrain/generatedTileSource'
+import { mergeTerrainTileData } from './terrain/tileGeometry'
 import { terrainTileColumnCount } from './terrain/tileId'
 import { minTileLodForBodyRadius } from './terrain/terrainLodPolicy'
 import type { TerrainCubeFace, TerrainTileData } from './terrain/types'
 
 const CUBE_FACES: TerrainCubeFace[] = ['px', 'nx', 'py', 'ny', 'pz', 'nz']
+const FALLBACK_SURFACE_LOD = 1
+const fallbackGeometryDataCache = new Map<string, TerrainTileData>()
+
+export function bodySurfaceFallbackLod(): number {
+  return FALLBACK_SURFACE_LOD
+}
+
+export function cachedBodySurfaceGeometryData(
+  bodyRadius: number,
+  lod = bodySurfaceFallbackLod(),
+): TerrainTileData {
+  const key = `${bodyRadius}:${lod}`
+  const cached = fallbackGeometryDataCache.get(key)
+  if (cached) return cached
+  const generated = generateBodySurfaceGeometryData(bodyRadius, lod)
+  fallbackGeometryDataCache.set(key, generated)
+  return generated
+}
 
 export function generateBodySurfaceGeometryData(
   bodyRadius: number,
@@ -21,47 +40,14 @@ export function generateBodySurfaceGeometryData(
     return faceTiles
   })
 
-  const positionLength = tiles.reduce((sum, tile) => sum + tile.positions.length, 0)
-  const normalLength = tiles.reduce((sum, tile) => sum + tile.normals.length, 0)
-  const uvLength = tiles.reduce((sum, tile) => sum + tile.uvs.length, 0)
-  const indexLength = tiles.reduce((sum, tile) => sum + tile.indices.length, 0)
-  const positions = new Float32Array(positionLength)
-  const normals = new Float32Array(normalLength)
-  const uvs = new Float32Array(uvLength)
-  const indices = new Uint32Array(indexLength)
-
-  let positionOffset = 0
-  let normalOffset = 0
-  let uvOffset = 0
-  let indexOffset = 0
-  let vertexOffset = 0
-  for (const tile of tiles) {
-    positions.set(tile.positions, positionOffset)
-    normals.set(tile.normals, normalOffset)
-    uvs.set(tile.uvs, uvOffset)
-    for (let i = 0; i < tile.indices.length; i++) {
-      indices[indexOffset + i] = tile.indices[i] + vertexOffset
-    }
-    positionOffset += tile.positions.length
-    normalOffset += tile.normals.length
-    uvOffset += tile.uvs.length
-    indexOffset += tile.indices.length
-    vertexOffset += tile.positions.length / 3
-  }
-
-  return {
-    id: { bodyId: 'body-surface', face: 'px', lod, x: 0, y: 0 },
-    positions,
-    normals,
-    uvs,
-    indices,
-    minHeight: 0,
-    maxHeight: 0,
-  }
+  return mergeTerrainTileData(tiles)
 }
 
-export function createBodySurfaceGeometry(bodyRadius: number): BufferGeometry {
-  const surface = generateBodySurfaceGeometryData(bodyRadius)
+export function createBodySurfaceGeometry(
+  bodyRadius: number,
+  lod = bodySurfaceFallbackLod(),
+): BufferGeometry {
+  const surface = cachedBodySurfaceGeometryData(bodyRadius, lod)
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new BufferAttribute(surface.positions, 3))
   geometry.setAttribute('normal', new BufferAttribute(surface.normals, 3))
