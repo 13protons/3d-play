@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import type { Group, Mesh, PointLight, Sprite } from 'three'
 import { Vector3 } from 'three'
@@ -10,8 +10,7 @@ import { OrbitalMarker } from './OrbitalMarker'
 import { RotationLine } from './RotationLine'
 import { BodyMaterial } from './BodyMaterial'
 import {
-  bodyOrientationEuler,
-  bodyRotationAngle,
+  bodySurfaceOrientationEuler,
   rotatingBodyTransform,
   shouldShowBodyRotationAxisInView,
 } from './rotation'
@@ -21,6 +20,8 @@ import {
   shouldUseBodySprite,
   spriteWorldSize,
 } from './lod'
+import { orbitalPlanetSurfaceRenderDecision } from './terrain/terrainLodPolicy'
+import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
 
 const MESH_THRESHOLD_PX = 6
 const SPRITE_SIZE_PX = 12
@@ -39,6 +40,10 @@ export function Body({ bodyId }: BodyProps) {
   const viewport = useThree((s) => s.size)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
   const showRotationAxes = useModeStore((s) => s.showRotationAxes)
+  const surfaceGeometry = useMemo(
+    () => body ? createBodySurfaceGeometry(body.radius) : undefined,
+    [body?.radius],
+  )
 
   useFrame(() => {
     if (useModeStore.getState().activeView !== 'orbital') return
@@ -93,6 +98,12 @@ export function Body({ bodyId }: BodyProps) {
     const distanceToCamera = scenePositionVector.distanceTo(camera.position)
     const radiusPx = projectedRadiusPx(body.radius, distanceToCamera, pixelsPerRadian)
     const useSprite = shouldUseBodySprite(radiusPx, MESH_THRESHOLD_PX)
+    const surfaceDecision = orbitalPlanetSurfaceRenderDecision({
+      bodyRadius: body.radius,
+      cameraDistance: distanceToCamera,
+      fovRadians: fov,
+      viewportHeight: viewport.height,
+    })
 
     let suppressSprite = false
     if (useSprite && body.parentId) {
@@ -117,15 +128,17 @@ export function Body({ bodyId }: BodyProps) {
       }
     }
 
-    mesh.visible = !useSprite
+    mesh.visible = !useSprite && surfaceDecision.showFallbackSphere
     sprite.visible = useSprite && !suppressSprite
     if (spinGroup) {
       spinGroup.visible = mesh.visible
       spinGroup.rotation.set(
-        ...bodyOrientationEuler(
-          bodyRotationAngle(body.rotationPhase, body.angularVelocity, t),
-          body.axialTilt,
-        ),
+        ...bodySurfaceOrientationEuler({
+          rotationPhase: body.rotationPhase,
+          angularVelocity: body.angularVelocity,
+          simTime: t,
+          axialTilt: body.axialTilt,
+        }),
       )
     }
     const spriteSize = spriteWorldSize(
@@ -146,8 +159,7 @@ export function Body({ bodyId }: BodyProps) {
   return (
     <group>
       <group ref={spinGroupRef}>
-        <mesh ref={meshRef}>
-          <sphereGeometry args={[body.radius, 32, 32]} />
+        <mesh ref={meshRef} geometry={surfaceGeometry}>
           <BodyMaterial body={body} />
         </mesh>
         {shouldShowBodyRotationAxisInView('orbital', showRotationAxes) && (

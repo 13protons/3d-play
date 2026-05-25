@@ -32,6 +32,24 @@ export interface NavballState {
   horizon: ProjectedNavballPoint[]
 }
 
+export function eulerDegreesToQuaternion({
+  yaw,
+  pitch,
+  roll,
+}: {
+  yaw: number
+  pitch: number
+  roll: number
+}): Quaternion {
+  const halfYaw = degreesToRadians(yaw) / 2
+  const halfPitch = degreesToRadians(pitch) / 2
+  const halfRoll = degreesToRadians(roll) / 2
+  const yawQ: Quaternion = [0, Math.sin(halfYaw), 0, Math.cos(halfYaw)]
+  const pitchQ: Quaternion = [Math.sin(halfPitch), 0, 0, Math.cos(halfPitch)]
+  const rollQ: Quaternion = [0, 0, Math.sin(halfRoll), Math.cos(halfRoll)]
+  return normalizeQuaternion(multiplyQuaternions(multiplyQuaternions(yawQ, pitchQ), rollQ))
+}
+
 export function computeNavballFrame({
   relativePosition,
   relativeVelocity,
@@ -205,6 +223,32 @@ function rotateVectorByQuaternion(vector: Vec3, q: Quaternion): Vec3 {
     iy * qw + iw * -qy + iz * -qx - ix * -qz,
     iz * qw + iw * -qz + ix * -qy - iy * -qx,
   ]
+}
+
+function multiplyQuaternions(a: Quaternion, b: Quaternion): Quaternion {
+  const [ax, ay, az, aw] = a
+  const [bx, by, bz, bw] = b
+  return [
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw,
+    aw * bw - ax * bx - ay * by - az * bz,
+  ]
+}
+
+function normalizeQuaternion(q: Quaternion): Quaternion {
+  const magnitude = Math.hypot(q[0], q[1], q[2], q[3])
+  if (magnitude <= 0 || !Number.isFinite(magnitude)) return [0, 0, 0, 1]
+  return [
+    cleanNumber(q[0] / magnitude),
+    cleanNumber(q[1] / magnitude),
+    cleanNumber(q[2] / magnitude),
+    cleanNumber(q[3] / magnitude),
+  ]
+}
+
+function degreesToRadians(degrees: number): number {
+  return (degrees * Math.PI) / 180
 }
 
 function normalize(vector: Vec3, fallback: Vec3): Vec3 {

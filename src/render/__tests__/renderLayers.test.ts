@@ -10,10 +10,10 @@ describe('RENDER_LAYERS', () => {
 })
 
 describe('TERRAIN_RENDER_PASSES', () => {
-  it('clears terrain depth before drawing the vehicle so terrain does not hide intersecting geometry', () => {
+  it('keeps terrain depth-tested against the base body, then clears before drawing the vehicle', () => {
     expect(TERRAIN_RENDER_PASSES).toEqual([
       { name: 'base-body', layer: RENDER_LAYERS.baseBody, clearDepthBefore: false },
-      { name: 'terrain-overlay', layer: RENDER_LAYERS.terrainOverlay, clearDepthBefore: true },
+      { name: 'terrain-overlay', layer: RENDER_LAYERS.terrainOverlay, clearDepthBefore: false },
       { name: 'vehicle', layer: RENDER_LAYERS.vehicle, clearDepthBefore: true },
     ])
   })

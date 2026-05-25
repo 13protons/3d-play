@@ -1,12 +1,8 @@
+import { mainMenuLinks, scenarios } from '../appRoutes'
+
 interface MainMenuProps {
   onLaunch: (scenarioId: string) => void
 }
-
-const scenarios = [
-  { id: 'sun-earth-moon', label: 'Launch: Sun-Earth-Moon' },
-  { id: 'inner-solar-system', label: 'Launch: Inner Solar System' },
-  { id: 'full-solar-system', label: 'Launch: Full Solar System' },
-]
 
 export function MainMenu({ onLaunch }: MainMenuProps) {
   return (
@@ -46,6 +42,26 @@ export function MainMenu({ onLaunch }: MainMenuProps) {
           >
             {scenario.label}
           </button>
+        ))}
+        {mainMenuLinks.map((link) => (
+          <a
+            key={link.path}
+            href={link.path}
+            style={{
+              padding: '10px 32px',
+              fontSize: 13,
+              background: 'rgba(255,255,255,0.06)',
+              color: 'rgba(255,255,255,0.78)',
+              border: '1px solid rgba(255,255,255,0.18)',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontFamily: 'monospace',
+              textAlign: 'center',
+              textDecoration: 'none',
+            }}
+          >
+            {link.label}
+          </a>
         ))}
       </div>
     </div>

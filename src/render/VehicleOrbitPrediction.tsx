@@ -10,59 +10,31 @@ import {
   predictVehicleOrbit,
   type PredictionBodyState,
   type VehicleOrbitPrediction as VehicleOrbitPredictionResult,
-  type VehicleOrbitPredictionStatus,
 } from '../sim/orbital/vehiclePrediction'
 import type { TrajectoryCurve } from '../sim/types'
+import {
+  computeFlightReferenceFrame,
+  rotationAxisFromAxialTilt,
+} from '../sim/vehicle/referenceFrame'
+import {
+  isVehicleActivelyAccelerating,
+  predictionStateForReferenceFrame,
+  shouldPredictVehicleOrbit,
+  shouldRecomputeVehicleOrbitPrediction,
+  shouldRenderVehicleOrbitPrediction,
+  vehicleOrbitLineStyle,
+} from './vehicleOrbitPredictionMath'
 
 const RECOMPUTE_INTERVAL_SECONDS = 5
-const ACCELERATING_SPEED_DELTA = 0.005
 
 interface VehicleOrbitPredictionProps {
   vehicleId: string
 }
 
-interface VehicleOrbitLineStyle {
-  color: string
-  lineWidth: number
-  opacity: number
-}
-
-export function shouldRenderVehicleOrbitPrediction(
-  activeView: 'orbital' | 'vehicle',
-  pointCount: number,
-): boolean {
-  return activeView === 'orbital' && pointCount > 2
-}
-
-export function shouldRecomputeVehicleOrbitPrediction(
-  lastComputedSimTime: number | null,
-  currentSimTime: number,
-  intervalSeconds: number,
-  accelerating: boolean,
-): boolean {
-  return (
-    accelerating ||
-    lastComputedSimTime === null ||
-    currentSimTime - lastComputedSimTime >= intervalSeconds
-  )
-}
-
-export function vehicleOrbitLineStyle(
-  status: VehicleOrbitPredictionStatus,
-): VehicleOrbitLineStyle {
-  if (status === 'escape') return { color: '#f0b028', lineWidth: 3, opacity: 1 }
-  if (status === 'encounter') return { color: '#ff5a4f', lineWidth: 3, opacity: 1 }
-  if (status === 'strong-perturbation') {
-    return { color: '#d6a64a', lineWidth: 3, opacity: 1 }
-  }
-  if (status === 'invalid') return { color: '#666666', lineWidth: 2, opacity: 1 }
-  return { color: '#28f0a0', lineWidth: 3, opacity: 1 }
-}
-
 export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProps) {
   const groupRef = useRef<Group>(null)
   const lastComputedSimTimeRef = useRef<number | null>(null)
-  const lastVelocityRef = useRef<[number, number, number] | null>(null)
+  const lastPredictionInputsRef = useRef<readonly unknown[]>([])
   const [prediction, setPrediction] = useState<VehicleOrbitPredictionResult | null>(null)
   const vehicle = useTrajectoriesStore((s) => s.vehicles[vehicleId])
   const style = useMemo(
@@ -75,10 +47,7 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
     if (!group || !vehicle) return
 
     const activeView = useModeStore.getState().activeView
-    group.visible = shouldRenderVehicleOrbitPrediction(
-      activeView,
-      prediction?.points.length ?? 0,
-    )
+    group.visible = shouldRenderVehicleOrbitPrediction(activeView, prediction?.points.length ?? 0)
     if (activeView !== 'orbital') return
 
     const store = useTrajectoriesStore.getState()
@@ -102,20 +71,64 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
     )
 
     const vehicleVelocity = hermiteVelocity(vehicleCurve, t)
-    const accelerating = isAccelerating(lastVelocityRef.current, vehicleVelocity)
-    lastVelocityRef.current = vehicleVelocity
+    const vehiclePos = evaluateCurve(vehicleCurve, t) as [number, number, number]
+    const controls = store.vehicleControls[vehicleId]
+    const accelerating = isVehicleActivelyAccelerating(controls)
+    const predictionInputs = [vehicleCurve, parentCurve, parentBody, controls] as const
     if (!shouldRecomputeVehicleOrbitPrediction(
       lastComputedSimTimeRef.current,
       t,
       RECOMPUTE_INTERVAL_SECONDS,
       accelerating,
+      lastPredictionInputsRef.current,
+      predictionInputs,
     )) {
       return
     }
     lastComputedSimTimeRef.current = t
+    lastPredictionInputsRef.current = predictionInputs
 
-    const vehiclePos = evaluateCurve(vehicleCurve, t)
     const parentVelocity = hermiteVelocity(parentCurve, t)
+    const relativePosition: [number, number, number] = [
+      vehiclePos[0] - parentPos[0],
+      vehiclePos[1] - parentPos[1],
+      vehiclePos[2] - parentPos[2],
+    ]
+    const relativeVelocity: [number, number, number] = [
+      vehicleVelocity[0] - parentVelocity[0],
+      vehicleVelocity[1] - parentVelocity[1],
+      vehicleVelocity[2] - parentVelocity[2],
+    ]
+    const parentRotationAxis = rotationAxisFromAxialTilt(parentBody.axialTilt)
+    const referenceFrame = computeFlightReferenceFrame({
+      relativePosition,
+      relativeVelocity,
+      parentRadius: parentBody.radius,
+      parentGm: parentBody.gm,
+      parentAngularVelocity: parentBody.angularVelocity,
+      parentRotationAxis,
+      surfaceState: controls?.surfaceState ?? 'flying',
+    })
+    const predictionState = predictionStateForReferenceFrame({
+      mode: referenceFrame.mode,
+      vehiclePosition: vehiclePos,
+      vehicleVelocity,
+      parentPosition: parentPos as [number, number, number],
+      parentVelocity,
+      parentAngularVelocity: parentBody.angularVelocity,
+      parentRotationAxis,
+    })
+    if (!shouldPredictVehicleOrbit({
+      mode: referenceFrame.mode,
+      relativeVelocity: [
+        predictionState.vehicle.velocity[0] - parentVelocity[0],
+        predictionState.vehicle.velocity[1] - parentVelocity[1],
+        predictionState.vehicle.velocity[2] - parentVelocity[2],
+      ],
+    })) {
+      setPrediction(null)
+      return
+    }
     const bodyStates = Object.values(bodies).flatMap((body): PredictionBodyState[] => {
       const curve = curves[body.id]
       if (!curve) return []
@@ -130,7 +143,7 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
     })
 
     setPrediction(predictVehicleOrbit({
-      vehicle: { position: vehiclePos, velocity: vehicleVelocity },
+      vehicle: predictionState.vehicle,
       parent: {
         id: parentBody.id,
         gm: parentBody.gm,
@@ -156,18 +169,6 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
       )}
     </group>
   )
-}
-
-function isAccelerating(
-  previousVelocity: [number, number, number] | null,
-  currentVelocity: [number, number, number],
-): boolean {
-  if (!previousVelocity) return true
-  return Math.hypot(
-    currentVelocity[0] - previousVelocity[0],
-    currentVelocity[1] - previousVelocity[1],
-    currentVelocity[2] - previousVelocity[2],
-  ) > ACCELERATING_SPEED_DELTA
 }
 
 function hermiteVelocity(

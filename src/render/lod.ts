@@ -33,7 +33,21 @@ export function sphereSegmentsForVehicleDistance(
   distanceFromBodyCenter: number,
   bodyRadius: number,
 ): number {
-  const altitude = distanceFromBodyCenter - bodyRadius
-  if (altitude <= bodyRadius * 0.01) return 512
-  return distanceFromBodyCenter < bodyRadius * 2 ? 128 : 32
+  return bodySphereSegmentsForCameraDistance({
+    distanceToCamera: distanceFromBodyCenter,
+    bodyRadius,
+  })
+}
+
+export function bodySphereSegmentsForCameraDistance({
+  distanceToCamera,
+  bodyRadius,
+}: {
+  distanceToCamera: number
+  bodyRadius: number
+}): number {
+  const altitude = distanceToCamera - bodyRadius
+  if (altitude < bodyRadius) return 512
+  if (distanceToCamera < bodyRadius * 3) return 128
+  return 32
 }

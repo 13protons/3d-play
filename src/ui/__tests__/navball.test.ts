@@ -4,10 +4,29 @@ import {
   computeNavballFrame,
   computeNavballMarkers,
   computeNavballState,
+  eulerDegreesToQuaternion,
   projectNavballVector,
   shouldRenderNavballMarker,
   visibleNavballSegments,
 } from '../navballMath'
+
+describe('eulerDegreesToQuaternion', () => {
+  it('returns identity for zero attitude', () => {
+    expect(eulerDegreesToQuaternion({ yaw: 0, pitch: 0, roll: 0 })).toEqual([0, 0, 0, 1])
+  })
+
+  it('rotates navball markers when yaw changes', () => {
+    const markers = computeNavballMarkers({
+      orientation: eulerDegreesToQuaternion({ yaw: 90, pitch: 0, roll: 0 }),
+      relativePosition: [1, 0, 0],
+      relativeVelocity: [0, 0, 1],
+      radius: 50,
+    })
+
+    expect(markers.prograde.x).toBeCloseTo(-50)
+    expect(markers.prograde.visible).toBe(true)
+  })
+})
 
 describe('computeNavballCompassFrame', () => {
   it('builds cardinal vectors from the projected parent rotation axis at the equator', () => {

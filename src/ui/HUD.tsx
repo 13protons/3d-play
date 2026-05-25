@@ -6,6 +6,7 @@ import { WARP_RATES } from '../sim/warp'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
 import { computeFlightReadout, flightTelemetryRows } from './flightReadout'
 import { NavballCluster } from './Navball'
+import { computeForceLoadRatio } from './navballInstrumentMath'
 import {
   computeFlightReferenceFrame,
   rotationAxisFromAxialTilt,
@@ -289,6 +290,14 @@ export function HUD() {
           relativeVelocity={flightReadout.frame.navVelocity}
           parentRotationAxis={flightReadout.parentRotationAxis}
           mode={flightReadout.frame.mode}
+          throttle={throttle}
+          forceRatio={computeForceLoadRatio({
+            currentThrust: vehicleControl.currentThrust,
+            aeroForceWorld: vehicleControl.aeroForceWorld,
+            mass: vehicleControl.mass,
+          })}
+          surfaceState={vehicleControl.surfaceState}
+          attitudeMode={vehicleControl.attitudeMode}
           rows={flightTelemetryRows({
             readout: flightReadout.readout,
             throttle,

@@ -88,17 +88,17 @@ describe('flightTelemetryRows', () => {
     })
 
     expect(rows).toEqual([
-      { label: 'STATE', value: 'LANDED' },
       { label: 'ALT', value: '400.0 km' },
       { label: 'VEL', value: '7.7 km/s' },
       { label: 'VERT', value: '-12 m/s' },
-      { label: 'THR', value: '100%' },
       { label: 'MASS', value: '9000 kg' },
-      { label: 'FORCE', value: '300 kN' },
-      { label: 'MODE', value: 'HOLD-CURRENT' },
-      { label: 'RATE', value: 'P 0.25 Y -0.50 R 0.00' },
     ])
     expect(rows.map((row) => row.label)).not.toContain('ACC')
+    expect(rows.map((row) => row.label)).not.toContain('RATE')
+    expect(rows.map((row) => row.label)).not.toContain('STATE')
+    expect(rows.map((row) => row.label)).not.toContain('THR')
+    expect(rows.map((row) => row.label)).not.toContain('FORCE')
+    expect(rows.map((row) => row.label)).not.toContain('MODE')
   })
 
   it('formats closed orbit summary rows', () => {

@@ -40,6 +40,10 @@ export interface VehicleOrbitPrediction {
 }
 
 const DEFAULT_SEGMENTS = 192
+const DEFAULT_FOCUS_HALF_ANGLE = Math.PI / 18
+const DEFAULT_FOCUS_SEGMENTS = 96
+const APSIS_FOCUS_ECCENTRICITY = 0.05
+const APSIS_FOCUS_SEGMENTS = 96
 const DEFAULT_PERTURBATION_RATIO_THRESHOLD = 0.02
 
 export function predictVehicleOrbit({
@@ -52,6 +56,15 @@ export function predictVehicleOrbit({
   const relPos = subtract(vehicle.position, parent.position)
   const relVel = subtract(vehicle.velocity, parent.velocity)
   const warnings: string[] = []
+  if (mag(relVel) < 1e-6 || mag(cross(relPos, relVel)) < 1e-6) {
+    return {
+      status: 'invalid',
+      parentId: parent.id,
+      points: [],
+      period: null,
+      warnings: ['degenerate-state'],
+    }
+  }
 
   const elements = stateToElements(relPos, relVel, parent.gm)
   if (!Number.isFinite(elements.a) || elements.a <= 0 || elements.e >= 1) {
@@ -70,7 +83,15 @@ export function predictVehicleOrbit({
     warnings.push('apoapsis-exceeds-parent-soi')
   }
 
-  const anomalies = oneCycleAnomalies(segments)
+  const anomalies = visibleFocusedCycleAnomalies(
+    elements,
+    parent.radius,
+    elements.ta,
+    segments,
+    DEFAULT_FOCUS_HALF_ANGLE,
+    DEFAULT_FOCUS_SEGMENTS,
+    elements.e,
+  )
   const points = sampleOrbitAtTrueAnomalies(elements, anomalies)
   if (points.length <= 2) {
     return {
@@ -119,6 +140,92 @@ function oneCycleAnomalies(segments: number): number[] {
     anomalies.push((i / segments) * Math.PI * 2)
   }
   return anomalies
+}
+
+function focusedCycleAnomalies(
+  currentAnomaly: number,
+  baseSegments: number,
+  focusHalfAngle: number,
+  focusSegments: number,
+  eccentricity: number,
+): number[] {
+  const twoPi = Math.PI * 2
+  const anomalies = new Map<number, number>()
+  const add = (theta: number) => {
+    const normalized = ((theta % twoPi) + twoPi) % twoPi
+    anomalies.set(Math.round(normalized * 1e9), normalized)
+  }
+
+  for (const anomaly of oneCycleAnomalies(baseSegments)) add(anomaly)
+  for (let i = 0; i <= focusSegments; i++) {
+    add(currentAnomaly - focusHalfAngle + (i / focusSegments) * focusHalfAngle * 2)
+  }
+  if (eccentricity >= APSIS_FOCUS_ECCENTRICITY) {
+    for (let i = 0; i <= APSIS_FOCUS_SEGMENTS; i++) {
+      const offset = -focusHalfAngle + (i / APSIS_FOCUS_SEGMENTS) * focusHalfAngle * 2
+      add(offset)
+      add(Math.PI + offset)
+    }
+  }
+
+  const sorted = Array.from(anomalies.values()).sort((a, b) => a - b)
+  if (sorted[sorted.length - 1] !== twoPi) sorted.push(twoPi)
+  return sorted
+}
+
+function visibleFocusedCycleAnomalies(
+  elements: ReturnType<typeof stateToElements>,
+  parentRadius: number,
+  currentAnomaly: number,
+  baseSegments: number,
+  focusHalfAngle: number,
+  focusSegments: number,
+  eccentricity: number,
+): number[] {
+  const periapsis = elements.a * (1 - elements.e)
+  if (periapsis >= parentRadius || elements.e <= 1e-10) {
+    return focusedCycleAnomalies(currentAnomaly, baseSegments, focusHalfAngle, focusSegments, eccentricity)
+  }
+
+  const apoapsis = elements.a * (1 + elements.e)
+  if (apoapsis <= parentRadius) return []
+
+  const p = elements.a * (1 - elements.e * elements.e)
+  const threshold = (p / parentRadius - 1) / elements.e
+  if (threshold >= 1) {
+    return focusedCycleAnomalies(currentAnomaly, baseSegments, focusHalfAngle, focusSegments, eccentricity)
+  }
+  if (threshold <= -1) return []
+
+  const start = Math.acos(threshold)
+  const end = Math.PI * 2 - start
+  const anomalies = new Map<number, number>()
+  const add = (theta: number) => {
+    if (theta < start || theta > end) return
+    anomalies.set(Math.round(theta * 1e9), theta)
+  }
+
+  for (let i = 0; i <= baseSegments; i++) {
+    add(start + ((end - start) * i) / baseSegments)
+  }
+  addFocusedWindow(anomalies, currentAnomaly, focusHalfAngle, focusSegments, start, end)
+  addFocusedWindow(anomalies, Math.PI, focusHalfAngle, APSIS_FOCUS_SEGMENTS, start, end)
+
+  return Array.from(anomalies.values()).sort((a, b) => a - b)
+}
+
+function addFocusedWindow(
+  anomalies: Map<number, number>,
+  center: number,
+  halfAngle: number,
+  segments: number,
+  start: number,
+  end: number,
+): void {
+  for (let i = 0; i <= segments; i++) {
+    const theta = center - halfAngle + (i / segments) * halfAngle * 2
+    if (theta >= start && theta <= end) anomalies.set(Math.round(theta * 1e9), theta)
+  }
 }
 
 function sampleOpenEscapeArc(
@@ -254,6 +361,17 @@ function subtract(
   b: [number, number, number],
 ): [number, number, number] {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+function cross(
+  a: [number, number, number],
+  b: [number, number, number],
+): [number, number, number] {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ]
 }
 
 function distance(a: [number, number, number], b: [number, number, number]): number {

@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Stars, OrbitControls } from '@react-three/drei'
-import { BufferAttribute, BufferGeometry, Vector3 } from 'three'
+import { Vector3 } from 'three'
 import type { AmbientLight, DirectionalLight, Group, Mesh, MeshBasicMaterial, Object3D } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { useModeStore } from '../state/mode'
@@ -29,21 +29,15 @@ import {
   SURFACE_CAMERA_MIN_HEIGHT,
   shouldClampCameraAboveLocalSurface,
   shouldHideBodySphereForLocalSurface,
-  shouldShowLocalSurfacePatch,
-  surfacePatchFrame,
-  surfacePatchSizeForCameraDistance,
 } from './surfacePatch'
 import {
-  bodyOrientationEuler,
-  bodyRotationAngle,
+  bodySurfaceOrientationEuler,
   vehicleBodyTransform,
 } from './rotation'
-import { sphereSegmentsForVehicleDistance } from './lod'
 import { RENDER_LAYERS, TERRAIN_RENDER_PASSES } from './renderLayers'
-import {
-  createSphericalCapOverlayGeometryData,
-  TERRAIN_OVERLAY_VISUAL_BIAS,
-} from './surfaceOverlayGeometry'
+import { PlanetTerrainTiles } from './terrain/PlanetTerrainTiles'
+import { vehiclePlanetSurfaceRenderDecision } from './terrain/terrainLodPolicy'
+import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
 
 const SUN_RENDER_DISTANCE = 5e8
 
@@ -92,8 +86,12 @@ function VehicleBody({
   const spinGroupRef = useRef<Group>(null)
   const meshRef = useRef<Mesh>(null)
   const camera = useThree((s) => s.camera)
+  const viewport = useThree((s) => s.size)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
-  const [sphereSegments, setSphereSegments] = useState(32)
+  const surfaceGeometry = useMemo(
+    () => body ? createBodySurfaceGeometry(body.radius) : undefined,
+    [body?.radius],
+  )
 
   useFrame(() => {
     if (useModeStore.getState().activeView !== 'vehicle') return
@@ -120,17 +118,8 @@ function VehicleBody({
           cameraDistance: camera.position.length(),
         })
       : false
-
     const bodyPos = evaluateCurve(bodyCurve, t)
     const vehiclePos = evaluateCurve(vehicleCurve, t)
-    const bodyDistance = Math.hypot(
-      bodyPos[0] - vehiclePos[0],
-      bodyPos[1] - vehiclePos[1],
-      bodyPos[2] - vehiclePos[2],
-    )
-    const nextSegments = sphereSegmentsForVehicleDistance(bodyDistance, body.radius)
-    setSphereSegments((current) => current === nextSegments ? current : nextSegments)
-
     const renderBody = body.emissive
       ? projectDistantSphere(
           vehiclePos as Vec3,
@@ -145,6 +134,26 @@ function VehicleBody({
     const scenePosition: [number, number, number] = renderBody
       ? renderBody.position
       : [bodyPos[0] - vehiclePos[0], bodyPos[1] - vehiclePos[1], bodyPos[2] - vehiclePos[2]]
+    const cameraRelative: Vec3 = [
+      camera.position.x - scenePosition[0],
+      camera.position.y - scenePosition[1],
+      camera.position.z - scenePosition[2],
+    ]
+    const vehicleRelative: Vec3 = [
+      vehiclePos[0] - bodyPos[0],
+      vehiclePos[1] - bodyPos[1],
+      vehiclePos[2] - bodyPos[2],
+    ]
+    const surfaceDecision = vehiclePlanetSurfaceRenderDecision({
+      bodyId,
+      vehicleParentId: vehicle?.parentId,
+      bodyRadius: body.radius,
+      bodyDistance: Math.hypot(...vehicleRelative),
+      localCameraDistance: camera.position.length(),
+      cameraDistance: Math.hypot(...cameraRelative),
+      fovRadians: 'fov' in camera ? (camera.fov * Math.PI) / 180 : Math.PI / 3,
+      viewportHeight: viewport.height,
+    })
     const transform = vehicleBodyTransform(scenePosition)
     if (spinGroup) spinGroup.position.set(...transform.groupPosition)
     mesh.position.set(...transform.meshPosition)
@@ -157,10 +166,12 @@ function VehicleBody({
 
     if (spinGroup) {
       spinGroup.rotation.set(
-        ...bodyOrientationEuler(
-          bodyRotationAngle(body.rotationPhase, body.angularVelocity, t),
-          body.axialTilt,
-        ),
+        ...bodySurfaceOrientationEuler({
+          rotationPhase: body.rotationPhase,
+          angularVelocity: body.angularVelocity,
+          simTime: t,
+          axialTilt: body.axialTilt,
+        }),
       )
     }
 
@@ -184,7 +195,7 @@ function VehicleBody({
         )
       : false
 
-    mesh.visible = !sunOccluded && !hideForLocalSurface
+    mesh.visible = !sunOccluded && !hideForLocalSurface && surfaceDecision.showFallbackSphere
 
     if (body.emissive && mesh.material && 'opacity' in mesh.material) {
       const material = mesh.material as MeshBasicMaterial
@@ -198,8 +209,7 @@ function VehicleBody({
   return (
     <group>
       <group ref={spinGroupRef}>
-        <mesh ref={meshRef}>
-          <sphereGeometry args={[body.radius, sphereSegments, sphereSegments]} />
+        <mesh ref={meshRef} geometry={surfaceGeometry}>
           <BodyMaterial body={body} />
         </mesh>
       </group>
@@ -308,72 +318,6 @@ function VehicleMesh() {
   )
 }
 
-function VehicleSurfacePatch() {
-  const meshRef = useRef<Mesh>(null)
-  const geometryKeyRef = useRef('')
-  const camera = useThree((s) => s.camera)
-  const vehicles = useTrajectoriesStore((s) => s.vehicles)
-  const bodies = useTrajectoriesStore((s) => s.bodies)
-  const vehicle = Object.values(vehicles)[0]
-  const parent = vehicle ? bodies[vehicle.parentId] : undefined
-
-  useFrame(() => {
-    const mesh = meshRef.current
-    if (!mesh) return
-    mesh.layers.set(RENDER_LAYERS.terrainOverlay)
-
-    const store = useTrajectoriesStore.getState()
-    const vehicle = Object.values(store.vehicles)[0]
-    if (!vehicle) return
-    const parent = store.bodies[vehicle.parentId]
-    if (!parent) return
-    const controls = store.vehicleControls[vehicle.id]
-    const cameraDistance = camera.position.length()
-    if (!controls || !shouldShowLocalSurfacePatch({
-      surfaceState: controls.surfaceState,
-      cameraDistance,
-    })) {
-      mesh.visible = false
-      return
-    }
-
-    const radialOut = vehicleRadialOut(vehicle.id, vehicle.parentId)
-    if (!radialOut) {
-      mesh.visible = false
-      return
-    }
-
-    const frame = surfacePatchFrame(radialOut)
-    const patchSize = surfacePatchSizeForCameraDistance(cameraDistance)
-    const geometryKey = `${frame.normal.map((value) => value.toFixed(6)).join(',')}:${parent.radius}:${patchSize.toFixed(0)}`
-    if (geometryKeyRef.current !== geometryKey) {
-      const geometryData = createSphericalCapOverlayGeometryData({
-        centerDirection: frame.normal,
-        radius: parent.radius,
-        size: patchSize,
-        segments: 32,
-        visualBias: TERRAIN_OVERLAY_VISUAL_BIAS,
-      })
-      mesh.geometry.dispose()
-      mesh.geometry = bufferGeometryFromData(geometryData)
-      geometryKeyRef.current = geometryKey
-    }
-    mesh.visible = true
-    mesh.scale.setScalar(1)
-    mesh.position.set(...frame.position)
-    mesh.quaternion.identity()
-  })
-
-  if (!parent) return null
-
-  return (
-    <mesh ref={meshRef} visible={false}>
-      <bufferGeometry />
-      <BodyMaterial body={parent} />
-    </mesh>
-  )
-}
-
 function VehicleSceneRenderPasses() {
   const gl = useThree((s) => s.gl)
   const scene = useThree((s) => s.scene)
@@ -413,7 +357,6 @@ function VehicleSceneContent() {
       <VehicleViewControls />
       <VehicleSceneRenderPasses />
       <VehicleMesh />
-      <VehicleSurfacePatch />
       {firstVehicle && (
         <VehicleSunLight
           vehicleId={firstVehicle.id}
@@ -429,6 +372,9 @@ function VehicleSceneContent() {
             visibleBodyIds={visibleBodyIds}
           />
         ))}
+      {firstVehicle && (
+        <PlanetTerrainTiles bodyId={firstVehicle.parentId} vehicleId={firstVehicle.id} />
+      )}
     </>
   )
 }
@@ -502,25 +448,6 @@ function VehicleViewControls() {
   return <OrbitControls ref={controlsRef} minDistance={SURFACE_CAMERA_MIN_HEIGHT * 2} maxDistance={1e9} />
 }
 
-function vehicleRadialOut(vehicleId: string, parentId: string): Vec3 | undefined {
-  const store = useTrajectoriesStore.getState()
-  const vehicleCurve = store.curves[vehicleId]
-  const parentCurve = store.curves[parentId]
-  if (!vehicleCurve || !parentCurve) return undefined
-
-  const t = store.getSimTime()
-  const vehiclePosition = evaluateCurve(vehicleCurve, t)
-  const parentPosition = evaluateCurve(parentCurve, t)
-  const radialOut = new Vector3(
-    vehiclePosition[0] - parentPosition[0],
-    vehiclePosition[1] - parentPosition[1],
-    vehiclePosition[2] - parentPosition[2],
-  )
-  if (radialOut.lengthSq() === 0) return undefined
-  radialOut.normalize()
-  return [radialOut.x, radialOut.y, radialOut.z]
-}
-
 export function VehicleScene() {
   const active = useModeStore((s) => s.activeView === 'vehicle')
 
@@ -555,18 +482,4 @@ function enableRenderableLayers(layers: { enable: (layer: number) => void }) {
 function setLayerRecursively(object: Object3D, layer: number) {
   object.layers.set(layer)
   for (const child of object.children) setLayerRecursively(child, layer)
-}
-
-function bufferGeometryFromData({
-  positions,
-  normals,
-  uvs,
-  indices,
-}: ReturnType<typeof createSphericalCapOverlayGeometryData>): BufferGeometry {
-  const geometry = new BufferGeometry()
-  geometry.setAttribute('position', new BufferAttribute(positions, 3))
-  geometry.setAttribute('normal', new BufferAttribute(normals, 3))
-  geometry.setAttribute('uv', new BufferAttribute(uvs, 2))
-  geometry.setIndex(new BufferAttribute(indices, 1))
-  return geometry
 }

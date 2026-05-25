@@ -3,6 +3,7 @@ import { Euler, Quaternion, Vector3 } from 'three'
 import {
   bodyOrientationEuler,
   bodyRotationAngle,
+  bodySurfaceOrientationEuler,
   craftDebugAeroForceSegment,
   craftDebugAxisSegments,
   rotatingBodyTransform,
@@ -38,6 +39,17 @@ describe('bodyOrientationEuler', () => {
       expect(axis.y).toBeCloseTo(expectedAxis.y)
       expect(axis.z).toBeCloseTo(expectedAxis.z)
     }
+  })
+})
+
+describe('bodySurfaceOrientationEuler', () => {
+  it('uses the same spin and tilt orientation for sphere and tiled surfaces', () => {
+    expect(bodySurfaceOrientationEuler({
+      rotationPhase: 0.5,
+      angularVelocity: 2,
+      simTime: 10,
+      axialTilt: 23.44,
+    })).toEqual(bodyOrientationEuler(20.5, 23.44))
   })
 })
 

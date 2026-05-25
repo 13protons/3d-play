@@ -3,8 +3,9 @@ import {
   orbitLineStyleForBody,
   predictionTrueAnomalies,
   shouldRecomputeOrbitPrediction,
+  splitOrbitLineSegments,
   usesUniformOrbitLineOpacity,
-} from '../OrbitPrediction'
+} from '../orbitPredictionMath'
 
 describe('shouldRecomputeOrbitPrediction', () => {
   it('recomputes when no prediction has been computed yet', () => {
@@ -14,6 +15,18 @@ describe('shouldRecomputeOrbitPrediction', () => {
   it('waits until the simulated interval has elapsed', () => {
     expect(shouldRecomputeOrbitPrediction(100, 699.9, 600)).toBe(false)
     expect(shouldRecomputeOrbitPrediction(100, 700, 600)).toBe(true)
+  })
+
+  it('recomputes when simulated time rewinds', () => {
+    expect(shouldRecomputeOrbitPrediction(100, 99, 600)).toBe(true)
+  })
+
+  it('recomputes when prediction inputs are replaced before the interval elapses', () => {
+    const oldCurve = { id: 'earth' }
+    const newCurve = { id: 'earth' }
+
+    expect(shouldRecomputeOrbitPrediction(100, 101, 600, [oldCurve], [oldCurve])).toBe(false)
+    expect(shouldRecomputeOrbitPrediction(100, 101, 600, [oldCurve], [newCurve])).toBe(true)
   })
 
   it('uses uniform material opacity instead of per-vertex opacity', () => {
@@ -41,5 +54,57 @@ describe('predictionTrueAnomalies', () => {
     )
 
     expect(nearby.length).toBeGreaterThan(3)
+  })
+})
+
+describe('splitOrbitLineSegments', () => {
+  it('opens a gap where an orbit line would pass through its body mesh', () => {
+    const segments = splitOrbitLineSegments([
+      [-3, 0, 0],
+      [-1, 0, 0],
+      [0, 0, 0],
+      [1, 0, 0],
+      [3, 0, 0],
+    ], [0, 0, 0], 1.1)
+
+    expect(segments).toEqual([
+      [[-3, 0, 0], [-1.1, 0, 0]],
+      [[1.1, 0, 0], [3, 0, 0]],
+    ])
+  })
+
+  it('clips to the body boundary instead of dropping sparse orbit samples', () => {
+    const segments = splitOrbitLineSegments([
+      [-100, 0, 0],
+      [0, 0, 0],
+      [100, 0, 0],
+    ], [0, 0, 0], 1)
+
+    expect(segments).toEqual([
+      [[-100, 0, 0], [-1, 0, 0]],
+      [[1, 0, 0], [100, 0, 0]],
+    ])
+  })
+
+  it('opens a gap for sparse outside-to-outside chords that cross through the body mesh', () => {
+    const segments = splitOrbitLineSegments([
+      [-3, 0, 0],
+      [3, 0, 0],
+    ], [0, 0, 0], 1)
+
+    expect(segments).toEqual([
+      [[-3, 0, 0], [-1, 0, 0]],
+      [[1, 0, 0], [3, 0, 0]],
+    ])
+  })
+
+  it('keeps uninterrupted orbit lines away from the body mesh', () => {
+    const points: [number, number, number][] = [
+      [3, 0, 0],
+      [4, 0, 0],
+      [5, 0, 0],
+    ]
+
+    expect(splitOrbitLineSegments(points, [0, 0, 0], 1)).toEqual([points])
   })
 })

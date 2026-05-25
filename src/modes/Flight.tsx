@@ -1,11 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Scene } from '../render/Scene'
 import { VehicleScene } from '../render/VehicleScene'
 import { HUD } from '../ui/HUD'
 import { useInputStore } from '../state/input'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useModeStore } from '../state/mode'
-import { stopSim } from '../state/bridge'
+import { pauseSim, resumeSim, stopSim } from '../state/bridge'
 import { nextWarpRate, prevWarpRate } from '../sim/warp'
 import {
   adjustThrottle,
@@ -20,8 +21,13 @@ import {
   throttlePresetForKeyDown,
   type ThrottleDirection,
 } from './flightInput'
+import {
+  nextPauseMenuStateForEscape,
+  shouldProcessFlightControlKey,
+} from './flightPause'
 
 export function Flight() {
+  const navigate = useNavigate()
   const activeView = useModeStore((s) => s.activeView)
   const currentThrottle = useTrajectoriesStore((s) => {
     const firstVehicle = Object.values(s.vehicles)[0]
@@ -31,10 +37,18 @@ export function Flight() {
   const throttleRef = useRef(0)
   const throttleDirectionRef = useRef<ThrottleDirection>(0)
   const reactionWheelTorqueRef = useRef<[number, number, number]>([0.25, 0.25, 0.25])
+  const [paused, setPaused] = useState(false)
+  const pausedRef = useRef(false)
 
   useEffect(() => {
     throttleRef.current = currentThrottle
   }, [currentThrottle])
+
+  useEffect(() => {
+    pausedRef.current = paused
+    if (paused) pauseSim()
+    else resumeSim()
+  }, [paused])
 
   useEffect(() => {
     let animationFrame: number | null = null
@@ -80,8 +94,18 @@ export function Flight() {
     }
 
     function handleKeyDown(e: KeyboardEvent) {
+      if (!shouldProcessFlightControlKey({ paused: pausedRef.current, key: e.key })) return
       const { warpRate, simTime } = useTrajectoriesStore.getState()
       if (e.repeat) return
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setPaused((value) => {
+          const nextPaused = nextPauseMenuStateForEscape(value)
+          if (nextPaused) releaseHeldControls()
+          return nextPaused
+        })
+        return
+      }
       if (e.key === ']') {
         useInputStore
           .getState()
@@ -120,12 +144,9 @@ export function Flight() {
         reactionWheelKeysRef.current.add(e.key.toLowerCase())
         pushRcsCommand()
       }
-      if (e.key === 'Escape') {
-        stopSim()
-        useModeStore.getState().enterMenu()
-      }
     }
     function handleKeyUp(e: KeyboardEvent) {
+      if (pausedRef.current) return
       throttleDirectionRef.current = throttleDirectionForKeyUp(throttleDirectionRef.current, e)
       if (['w', 'a', 's', 'd', 'q', 'e'].includes(e.key.toLowerCase())) {
         reactionWheelKeysRef.current.delete(e.key.toLowerCase())
@@ -145,8 +166,19 @@ export function Flight() {
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', releaseHeldControls)
       if (animationFrame !== null) cancelAnimationFrame(animationFrame)
+      resumeSim()
     }
-  }, [])
+  }, [navigate])
+
+  function resumeFlight() {
+    setPaused(false)
+  }
+
+  function exitFlight() {
+    stopSim()
+    useModeStore.getState().enterMenu()
+    navigate('/main')
+  }
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#000' }}>
@@ -158,6 +190,48 @@ export function Flight() {
       </div>
       <VehicleScene />
       <HUD />
+      {paused && <PauseMenu onResume={resumeFlight} onExit={exitFlight} />}
+    </div>
+  )
+}
+
+function PauseMenu({
+  onResume,
+  onExit,
+}: {
+  onResume: () => void
+  onExit: () => void
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pause-title"
+      style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'grid',
+        placeItems: 'center',
+        background: 'rgba(0, 0, 0, 0.58)',
+        color: '#d8f8ff',
+        zIndex: 20,
+      }}
+    >
+      <div style={{
+        minWidth: 280,
+        border: '1px solid rgba(120, 230, 255, 0.45)',
+        borderRadius: 12,
+        background: 'rgba(5, 13, 24, 0.92)',
+        boxShadow: '0 0 42px rgba(60, 210, 255, 0.18)',
+        padding: 24,
+        textAlign: 'center',
+      }}>
+        <h2 id="pause-title" style={{ margin: '0 0 16px', letterSpacing: 4, textTransform: 'uppercase' }}>Paused</h2>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <button type="button" onClick={onResume}>Resume</button>
+          <button type="button" onClick={onExit}>Exit to Menu</button>
+        </div>
+      </div>
     </div>
   )
 }
