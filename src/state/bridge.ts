@@ -23,6 +23,7 @@ let animFrameId: number | null = null
 let simTime = 0
 let warpRate = 1
 let lastWallTime = 0
+let paused = false
 
 // Worker state machine
 type WorkerState = 'idle' | 'busy'
@@ -275,6 +276,10 @@ export async function startSim(scenarioId: string): Promise<void> {
 
     // Flush input commands (warp changes)
     flushCommands()
+    if (paused) {
+      animFrameId = requestAnimationFrame(loop)
+      return
+    }
 
     // Compute target time
     const simDelta = wallDelta * warpRate
@@ -344,12 +349,25 @@ export function stopSim(): void {
   }
   simTime = 0
   warpRate = 1
+  paused = false
   orbitalState = 'idle'
   vehicleState = 'idle'
   pendingTargetTime = null
   latestOrbitalCurves = []
   useTrajectoriesStore.getState().reset()
   useVehicleStore.getState().reset()
+}
+
+export function pauseSim(): void {
+  paused = true
+}
+
+export function resumeSim(): void {
+  paused = false
+}
+
+export function isSimPaused(): boolean {
+  return paused
 }
 
 type VehicleWorkerAtmosphere = {

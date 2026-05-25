@@ -9,12 +9,12 @@ import { evaluateCurve } from '../../sim/curves'
 import { BodyMaterial } from '../BodyMaterial'
 import { RENDER_LAYERS } from '../renderLayers'
 import { generatedTerrainTileSource } from './generatedTileSource'
-import { bufferGeometryFromTerrainTileData, mergeTerrainTileData, terrainTileSelectionKey } from './tileGeometry'
+import { cachedTerrainTilesForIds, bufferGeometryFromTerrainTileData, mergeTerrainTileData, terrainTileSelectionKey } from './tileGeometry'
 import { TerrainTileCache } from './tileCache'
 import { selectCubeSphereShellTiles } from './tileSelection'
 import { minTileLodForBodyRadius } from './terrainLodPolicy'
 import { resolveOrbitalTerrainRenderData, resolveVehicleTerrainRenderData } from './terrainRenderData'
-import type { TerrainTileData, TerrainTileId, Vec3 } from './types'
+import type { TerrainTileId, Vec3 } from './types'
 
 interface PlanetTerrainTilesProps {
   bodyId: string
@@ -118,9 +118,10 @@ function TerrainTileBatchMesh({
   version: number
 }) {
   const geometry = useMemo(() => {
-    const tiles = tileIds
-      .map((tileId) => cache.getCachedTile(tileId))
-      .filter((tile): tile is TerrainTileData => tile !== undefined)
+    const tiles = cachedTerrainTilesForIds({
+      tileIds,
+      getCachedTile: (tileId) => cache.getCachedTile(tileId),
+    })
     if (tiles.length === 0) return null
     return bufferGeometryFromTerrainTileData(mergeTerrainTileData(tiles))
   }, [cache, tileIds, version])

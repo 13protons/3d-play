@@ -9,7 +9,7 @@ import {
 import { selectCubeSphereShellTiles, selectTerrainTiles } from '../terrain/tileSelection'
 import { TerrainTileCache } from '../terrain/tileCache'
 import { terrainTileChildren, terrainTileKey } from '../terrain/tileId'
-import { mergeTerrainTileData, terrainTileSelectionKey } from '../terrain/tileGeometry'
+import { cachedTerrainTilesForIds, mergeTerrainTileData, terrainTileSelectionKey } from '../terrain/tileGeometry'
 import {
   resolveOrbitalTerrainRenderData,
   resolveVehicleTerrainRenderData,
@@ -237,6 +237,68 @@ describe('terrainTileGeometry', () => {
     expect(merged.indices).toBeInstanceOf(Uint32Array)
     expect(Array.from(merged.positions)).toEqual([...first.positions, ...second.positions])
     expect(Array.from(merged.indices)).toEqual([0, 1, 2, 3, 5, 4])
+  })
+
+  it('merges terrain tile geometry with two tile-array passes', () => {
+    const first = {
+      id: { bodyId: 'earth', face: 'px' as const, lod: 0, x: 0, y: 0 },
+      positions: new Float32Array([0, 0, 1]),
+      normals: new Float32Array([0, 0, 1]),
+      uvs: new Float32Array([0, 0]),
+      indices: new Uint32Array([0]),
+      minHeight: -1,
+      maxHeight: 2,
+    }
+    const second = {
+      id: { bodyId: 'earth', face: 'nx' as const, lod: 0, x: 0, y: 0 },
+      positions: new Float32Array([0, 0, -1]),
+      normals: new Float32Array([0, 0, -1]),
+      uvs: new Float32Array([1, 1]),
+      indices: new Uint32Array([0]),
+      minHeight: -2,
+      maxHeight: 3,
+    }
+    let tileReads = 0
+    const tiles = new Proxy([first, second], {
+      get(target, prop, receiver) {
+        if (prop === '0' || prop === '1') tileReads += 1
+        return Reflect.get(target, prop, receiver)
+      },
+    })
+
+    const merged = mergeTerrainTileData(tiles)
+
+    expect(tileReads).toBe(4)
+    expect(merged.minHeight).toBe(-2)
+    expect(merged.maxHeight).toBe(3)
+  })
+
+  it('collects cached terrain tiles in one tile-id pass without map/filter arrays', () => {
+    const tileId = { bodyId: 'earth', face: 'px' as const, lod: 0, x: 0, y: 0 }
+    const cachedTile = {
+      id: tileId,
+      positions: new Float32Array(),
+      normals: new Float32Array(),
+      uvs: new Float32Array(),
+      indices: new Uint32Array(),
+      minHeight: 0,
+      maxHeight: 0,
+    }
+    let tileIdIterations = 0
+    const tileIds = new Proxy([tileId, { ...tileId, x: 1 }], {
+      get(target, prop, receiver) {
+        if (prop === Symbol.iterator) tileIdIterations += 1
+        return Reflect.get(target, prop, receiver)
+      },
+    })
+
+    const tiles = cachedTerrainTilesForIds({
+      tileIds,
+      getCachedTile: (id) => id.x === 0 ? cachedTile : undefined,
+    })
+
+    expect(tileIdIterations).toBe(1)
+    expect(tiles).toEqual([cachedTile])
   })
 })
 

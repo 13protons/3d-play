@@ -6,11 +6,38 @@ export function terrainTileSelectionKey(tileIds: TerrainTileId[]): string {
   return tileIds.map(terrainTileKey).join('|')
 }
 
+export function cachedTerrainTilesForIds({
+  tileIds,
+  getCachedTile,
+}: {
+  tileIds: TerrainTileId[]
+  getCachedTile: (tileId: TerrainTileId) => TerrainTileData | undefined
+}): TerrainTileData[] {
+  const tiles: TerrainTileData[] = []
+  for (const tileId of tileIds) {
+    const tile = getCachedTile(tileId)
+    if (tile) tiles.push(tile)
+  }
+  return tiles
+}
+
 export function mergeTerrainTileData(tiles: TerrainTileData[]): TerrainTileData {
-  const positionLength = tiles.reduce((sum, tile) => sum + tile.positions.length, 0)
-  const normalLength = tiles.reduce((sum, tile) => sum + tile.normals.length, 0)
-  const uvLength = tiles.reduce((sum, tile) => sum + tile.uvs.length, 0)
-  const indexLength = tiles.reduce((sum, tile) => sum + tile.indices.length, 0)
+  let firstTile: TerrainTileData | undefined
+  let positionLength = 0
+  let normalLength = 0
+  let uvLength = 0
+  let indexLength = 0
+  let minHeight = Number.POSITIVE_INFINITY
+  let maxHeight = Number.NEGATIVE_INFINITY
+  for (const tile of tiles) {
+    firstTile ??= tile
+    positionLength += tile.positions.length
+    normalLength += tile.normals.length
+    uvLength += tile.uvs.length
+    indexLength += tile.indices.length
+    minHeight = Math.min(minHeight, tile.minHeight)
+    maxHeight = Math.max(maxHeight, tile.maxHeight)
+  }
   const positions = new Float32Array(positionLength)
   const normals = new Float32Array(normalLength)
   const uvs = new Float32Array(uvLength)
@@ -36,13 +63,13 @@ export function mergeTerrainTileData(tiles: TerrainTileData[]): TerrainTileData 
   }
 
   return {
-    id: tiles[0]?.id ?? { bodyId: 'empty', face: 'px', lod: 0, x: 0, y: 0 },
+    id: firstTile?.id ?? { bodyId: 'empty', face: 'px', lod: 0, x: 0, y: 0 },
     positions,
     normals,
     uvs,
     indices,
-    minHeight: Math.min(...tiles.map((tile) => tile.minHeight), 0),
-    maxHeight: Math.max(...tiles.map((tile) => tile.maxHeight), 0),
+    minHeight: firstTile ? minHeight : 0,
+    maxHeight: firstTile ? maxHeight : 0,
   }
 }
 
