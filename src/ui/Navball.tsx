@@ -7,8 +7,9 @@ import {
   type Vec3,
 } from './navballMath'
 import { computeArcProgressPath } from './navballInstrumentMath'
-import type { AttitudeMode, FlightTelemetryRow } from './flightReadout'
+import type { FlightTelemetryRow } from './flightReadout'
 import type { FlightReferenceMode } from '../sim/vehicle/referenceFrame'
+import type { AutopilotMode } from '../sim/autopilot'
 
 interface NavballProps {
   orientation: Quaternion
@@ -23,14 +24,14 @@ interface NavballClusterProps extends NavballProps {
   throttle: number
   forceRatio: number
   surfaceState: SurfaceState
-  attitudeMode: AttitudeMode
+  autopilotMode: AutopilotMode
 }
 
 interface NavballInstrumentProps extends NavballProps {
   throttle: number
   forceRatio: number
   surfaceState: SurfaceState
-  attitudeMode: AttitudeMode
+  autopilotMode: AutopilotMode
 }
 
 interface ProximityProps {
@@ -169,7 +170,7 @@ export function NavballCluster({
   throttle,
   forceRatio,
   surfaceState,
-  attitudeMode,
+  autopilotMode,
 }: NavballClusterProps) {
   return (
     <div
@@ -194,7 +195,7 @@ export function NavballCluster({
         throttle={throttle}
         forceRatio={forceRatio}
         surfaceState={surfaceState}
-        attitudeMode={attitudeMode}
+        autopilotMode={autopilotMode}
       />
       <Attitude rows={rows.slice(3)} surfaceState={surfaceState} />
     </div>
@@ -202,7 +203,7 @@ export function NavballCluster({
 }
 
 export function NavballInstrument(props: NavballInstrumentProps) {
-  const { mode, throttle, forceRatio, attitudeMode } = props
+  const { mode, throttle, forceRatio, autopilotMode } = props
   const throttleArc = computeArcProgressPath({ value: throttle, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45 })
   const forceArc = computeArcProgressPath({ value: forceRatio, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45, mirror: true })
   return (
@@ -226,7 +227,7 @@ export function NavballInstrument(props: NavballInstrumentProps) {
         <InstrumentArc indicator="throttle" paths={throttleArc} />
       </svg>
       <StatusPad label={flightRegimeLabel(mode)} style={{ left: 5, top: 0 }} />
-      <StatusPad label={attitudeModeLabel(attitudeMode)} style={{ right: 5, top: 0 }} />
+      <StatusPad label={autopilotModeLabel(autopilotMode)} style={{ right: 5, top: 0 }} />
       <StatusPad style={{ left: 5, top: 156 }} />
       <StatusPad style={{ right: 5, top: 156 }} />
       <div style={{ position: 'absolute', left: 10, top: 5 }}>
@@ -284,10 +285,17 @@ function surfaceStateLabel(surfaceState: SurfaceState) {
   return 'FLY'
 }
 
-function attitudeModeLabel(attitudeMode: AttitudeMode) {
-  if (attitudeMode === 'hold-current') return 'HOLD'
-  if (attitudeMode === 'retrograde') return 'RETRO'
-  return 'MAN'
+function autopilotModeLabel(mode: AutopilotMode): string {
+  switch (mode) {
+    case 'damp': return 'HOLD'
+    case 'prograde': return 'PRO'
+    case 'retrograde': return 'RETRO'
+    case 'normal': return 'NORM'
+    case 'antinormal': return 'ANTI'
+    case 'radial-out': return 'RAD+'
+    case 'radial-in': return 'RAD-'
+    default: return 'MAN'
+  }
 }
 
 export function Proximity({ rows }: ProximityProps) {

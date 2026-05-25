@@ -1,7 +1,7 @@
 import type { OrbitSummary } from '../sim/vehicle/referenceFrame'
+import type { AutopilotMode } from '../sim/autopilot'
 
 type Vec3 = [number, number, number]
-export type AttitudeMode = 'manual' | 'hold-current' | 'retrograde'
 
 export interface FlightReadoutInput {
   vehiclePosition: Vec3
@@ -64,7 +64,7 @@ export function flightTelemetryRows({
   throttle: number
   angularVelocity: Vec3
   surfaceState: 'flying' | 'landed' | 'crashed'
-  attitudeMode?: AttitudeMode
+  autopilotMode?: AutopilotMode
   mass?: number
   maxThrust?: number
   orbit?: OrbitSummary

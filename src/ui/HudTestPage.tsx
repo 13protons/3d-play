@@ -11,15 +11,16 @@ import { HudPlaygroundBootstrap } from './HudPlaygroundBootstrap'
 import { computeForceLoadRatio } from './navballInstrumentMath'
 import { eulerDegreesToQuaternion, type Quaternion } from './navballMath'
 
+import type { AutopilotMode } from '../sim/autopilot'
+
 type HudSurfaceState = 'flying' | 'landed' | 'crashed'
-type HudAttitudeMode = 'manual' | 'hold-current' | 'retrograde'
 type HudOrbitKind = 'closed' | 'open' | 'impacting'
 type HudReferenceMode = 'orbital' | 'surface'
 
 interface HudPlaygroundParams {
   mode: HudReferenceMode
   surfaceState: HudSurfaceState
-  attitudeMode: HudAttitudeMode
+  autopilotMode: AutopilotMode
   throttle: number
   altitudeMeters: number
   speedMetersPerSecond: number
@@ -42,7 +43,7 @@ interface HudPlaygroundParams {
 const initialHudParams: HudPlaygroundParams = {
   mode: 'orbital',
   surfaceState: 'flying',
-  attitudeMode: 'hold-current',
+  autopilotMode: 'damp',
   throttle: 0.62,
   altitudeMeters: 400_000,
   speedMetersPerSecond: 7_672,
@@ -122,7 +123,7 @@ export function HudTestPage() {
                 mass: params.massKg,
               })}
               surfaceState={params.surfaceState}
-              attitudeMode={params.attitudeMode}
+              autopilotMode={params.autopilotMode}
             />
           </Centered>
         )}
@@ -185,7 +186,7 @@ function hudRows(params: HudPlaygroundParams) {
     throttle: params.throttle,
     angularVelocity: [params.pitchRate, params.yawRate, params.rollRate],
     surfaceState: params.surfaceState,
-    attitudeMode: params.attitudeMode,
+    autopilotMode: params.autopilotMode,
     mass: params.massKg,
     maxThrust: params.thrustNewtons,
     orbit: {
@@ -212,7 +213,7 @@ function configureProximityControls(gui: GUI, params: HudPlaygroundParams, updat
 function configureNavballControls(gui: GUI, params: HudPlaygroundParams, update: () => void) {
   gui.add(params, 'mode', ['orbital', 'surface']).name('Regime').onChange(update)
   gui.add(params, 'surfaceState', ['flying', 'landed', 'crashed']).name('State').onChange(update)
-  gui.add(params, 'attitudeMode', ['manual', 'hold-current', 'retrograde']).name('Hold').onChange(update)
+  gui.add(params, 'autopilotMode', ['off', 'damp', 'prograde', 'retrograde', 'normal', 'antinormal', 'radial-out', 'radial-in']).name('Autopilot').onChange(update)
   gui.add(params, 'throttle', 0, 1, 0.01).name('Throttle').onChange(update)
   gui.add(params, 'thrustNewtons', 0, 1_000_000, 1_000).name('Force N').onChange(update)
   gui.add(params, 'aeroForceNewtons', 0, 1_000_000, 1_000).name('Aero force N').onChange(update)

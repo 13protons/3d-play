@@ -59,7 +59,7 @@ describe('NavballInstrument', () => {
         throttle={0.62}
         forceRatio={0.18}
         surfaceState="flying"
-        attitudeMode="hold-current"
+        autopilotMode="damp"
       />
     )
 
@@ -85,7 +85,7 @@ describe('NavballInstrument', () => {
         throttle={0.62}
         forceRatio={0.18}
         surfaceState="crashed"
-        attitudeMode="manual"
+        autopilotMode="off"
       />
     )
 

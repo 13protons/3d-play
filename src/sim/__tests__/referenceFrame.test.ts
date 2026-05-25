@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeFlightReferenceFrame, referenceFrameRetrogradeDirection } from '../vehicle/referenceFrame'
+import { computeFlightReferenceFrame } from '../vehicle/referenceFrame'
 
 const earthRadius = 6_371_000
 const earthGm = 3.98600435436e14
@@ -139,19 +139,35 @@ describe('computeFlightReferenceFrame', () => {
     expect(result.navVelocity).toEqual(result.surfaceVelocity)
   })
 
-  it('uses surface-relative nav velocity for retrograde direction in surface mode', () => {
-    const retrograde = referenceFrameRetrogradeDirection({
-      relativePosition: [earthRadius, 0, 0],
-      relativeVelocity: [1000, 0, 0],
+  it('reports orbit normal perpendicular to position and velocity', () => {
+    const r = earthRadius + 100_000
+    const result = computeFlightReferenceFrame({
+      relativePosition: [r, 0, 0],
+      relativeVelocity: [0, 0, Math.sqrt(earthGm / r)],
       parentRadius: earthRadius,
       parentGm: earthGm,
-      parentAngularVelocity: 1,
+      parentAngularVelocity: 0,
+      parentRotationAxis: [0, 1, 0],
+      surfaceState: 'flying',
+    })
+
+    expect(result.orbitNormal[0]).toBeCloseTo(0)
+    expect(result.orbitNormal[1]).toBeCloseTo(-1)
+    expect(result.orbitNormal[2]).toBeCloseTo(0)
+  })
+
+  it('falls back to parent rotation axis when orbit normal is degenerate', () => {
+    const result = computeFlightReferenceFrame({
+      relativePosition: [earthRadius, 0, 0],
+      relativeVelocity: [0, 0, 0],
+      parentRadius: earthRadius,
+      parentGm: earthGm,
+      parentAngularVelocity: 0,
       parentRotationAxis: [0, 1, 0],
       surfaceState: 'landed',
     })
 
-    expect(retrograde[0]).toBeCloseTo(-1000 / Math.hypot(1000, earthRadius))
-    expect(retrograde[1]).toBeCloseTo(0)
-    expect(retrograde[2]).toBeCloseTo(-earthRadius / Math.hypot(1000, earthRadius))
+    expect(result.orbitNormal).toEqual([0, 1, 0])
   })
+
 })

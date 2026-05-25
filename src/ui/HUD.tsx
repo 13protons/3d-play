@@ -2,6 +2,7 @@ import { useTrajectoriesStore } from '../state/trajectories'
 import { useCameraStore } from '../state/camera'
 import { useInputStore } from '../state/input'
 import { useModeStore } from '../state/mode'
+import { useAutopilotStore } from '../state/autopilot'
 import { WARP_RATES } from '../sim/warp'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
 import { computeFlightReadout, flightTelemetryRows } from './flightReadout'
@@ -11,7 +12,17 @@ import {
   computeFlightReferenceFrame,
   rotationAxisFromAxialTilt,
 } from '../sim/vehicle/referenceFrame'
-import { toggledAttitudeMode } from '../sim/vehicle/controls'
+import type { AutopilotMode } from '../sim/autopilot'
+
+const AUTOPILOT_BUTTONS: { mode: AutopilotMode; label: string }[] = [
+  { mode: 'damp', label: 'Hold' },
+  { mode: 'prograde', label: 'Pro' },
+  { mode: 'retrograde', label: 'Retro' },
+  { mode: 'normal', label: 'Nor' },
+  { mode: 'antinormal', label: 'Anti' },
+  { mode: 'radial-out', label: 'Rad+' },
+  { mode: 'radial-in', label: 'Rad-' },
+]
 
 function formatTime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
@@ -38,6 +49,7 @@ export function HUD() {
   const showRotationAxes = useModeStore((s) => s.showRotationAxes)
   const toggleView = useModeStore((s) => s.toggleView)
   const toggleRotationAxes = useModeStore((s) => s.toggleRotationAxes)
+  const autopilotModes = useAutopilotStore((s) => s.modes)
   const targetName = bodies[followTargetId]?.name ?? vehicles[followTargetId]?.name ?? followTargetId
   const firstVehicle = Object.values(vehicles)[0]
   const throttle = firstVehicle ? (vehicleControls[firstVehicle.id]?.throttle ?? 0) : 0
@@ -95,14 +107,13 @@ export function HUD() {
       .push({ type: 'set-warp', rate, simTime })
   }
 
-  function setAttitudeMode(mode: 'manual' | 'hold-current' | 'retrograde') {
-    useInputStore
-      .getState()
-      .push({
-        type: 'set-attitude-mode',
-        mode: toggledAttitudeMode(vehicleControl?.attitudeMode ?? 'manual', mode),
-        simTime,
-      })
+  const activeAutopilotMode: AutopilotMode = firstVehicle
+    ? (autopilotModes[firstVehicle.id] ?? 'off')
+    : 'off'
+
+  function toggleAutopilotMode(mode: AutopilotMode) {
+    if (!firstVehicle) return
+    useAutopilotStore.getState().toggleMode(firstVehicle.id, mode)
   }
 
   return (
@@ -213,36 +224,25 @@ export function HUD() {
         >
           Rotation Axis: {showRotationAxes ? 'On' : 'Off'}
         </button>
-        {vehicleControl && (
+        {vehicleControl && firstVehicle && (
           <>
-            <button
-              onClick={() => setAttitudeMode('hold-current')}
-              style={{
-                background: vehicleControl.attitudeMode === 'hold-current' ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
-                color: '#ccc',
-                border: '1px solid #333',
-                padding: '4px 8px',
-                cursor: 'pointer',
-                fontFamily: 'monospace',
-                fontSize: 12,
-              }}
-            >
-              Hold
-            </button>
-            <button
-              onClick={() => setAttitudeMode('retrograde')}
-              style={{
-                background: vehicleControl.attitudeMode === 'retrograde' ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
-                color: '#ccc',
-                border: '1px solid #333',
-                padding: '4px 8px',
-                cursor: 'pointer',
-                fontFamily: 'monospace',
-                fontSize: 12,
-              }}
-            >
-              Retrograde
-            </button>
+            {AUTOPILOT_BUTTONS.map(({ mode, label }) => (
+              <button
+                key={mode}
+                onClick={() => toggleAutopilotMode(mode)}
+                style={{
+                  background: activeAutopilotMode === mode ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
+                  color: '#ccc',
+                  border: '1px solid #333',
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </>
         )}
       </div>
@@ -297,13 +297,13 @@ export function HUD() {
             mass: vehicleControl.mass,
           })}
           surfaceState={vehicleControl.surfaceState}
-          attitudeMode={vehicleControl.attitudeMode}
+          autopilotMode={activeAutopilotMode}
           rows={flightTelemetryRows({
             readout: flightReadout.readout,
             throttle,
             angularVelocity: vehicleControl.angularVelocity,
             surfaceState: vehicleControl.surfaceState,
-            attitudeMode: vehicleControl.attitudeMode,
+            autopilotMode: activeAutopilotMode,
             mass: vehicleControl.mass,
             maxThrust: vehicleControl.currentThrust ?? vehicleControl.maxThrust,
             orbit: flightReadout.frame.orbit,

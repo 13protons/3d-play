@@ -4,7 +4,6 @@ export const THROTTLE_RAMP_RATE = 0.5
 
 export type Quaternion = [number, number, number, number]
 export type Vec3 = [number, number, number]
-export type AttitudeMode = 'manual' | 'hold-current' | 'retrograde'
 export interface ThrustModel {
   maxThrust: number
   mass: number
@@ -95,11 +94,6 @@ export function manualReactionWheelTorque({
   return commandTorque
 }
 
-export function toggledAttitudeMode(current: AttitudeMode, requested: AttitudeMode): AttitudeMode {
-  if (requested === 'manual') return 'manual'
-  return current === requested ? 'manual' : requested
-}
-
 export function sumAndClampTorque(a: Vec3, b: Vec3, maxTorque: Vec3): Vec3 {
   return [
     clamp(a[0] + b[0], -maxTorque[0], maxTorque[0]),
@@ -135,12 +129,32 @@ export function forwardDirectionHoldTorque({
   naturalFrequency = 2,
 }: ForwardDirectionHoldInput): Vec3 {
   const targetLocal = rotateVectorByQuaternion(normalizeVec3(targetForward, [0, 0, 1]), conjugateQuaternion(currentOrientation))
-  const error = cross([0, 0, 1], targetLocal)
+  const error = forwardAlignmentError(targetLocal)
   return [
     cleanZero(pidStep({ error: error[0], integral: 0, derivative: -angularVelocity[0], kp: momentOfInertia[0] * naturalFrequency * naturalFrequency, ki: 0, kd: 2 * momentOfInertia[0] * naturalFrequency, maxOutput: maxTorque[0] })),
     cleanZero(pidStep({ error: error[1], integral: 0, derivative: -angularVelocity[1], kp: momentOfInertia[1] * naturalFrequency * naturalFrequency, ki: 0, kd: 2 * momentOfInertia[1] * naturalFrequency, maxOutput: maxTorque[1] })),
     cleanZero(pidStep({ error: 0, integral: 0, derivative: -angularVelocity[2], kp: 0, ki: 0, kd: 2 * momentOfInertia[2] * naturalFrequency, maxOutput: maxTorque[2] })),
   ]
+}
+
+/**
+ * Rotation-vector error (axis * angle, in radians) that takes local +Z onto
+ * targetLocal. Magnitude grows linearly with the angle, avoiding the sin(θ)
+ * collapse of a bare cross product at 180° — without that the autopilot would
+ * stall when asked to flip to the opposite direction.
+ */
+export function forwardAlignmentError(targetLocal: Vec3): Vec3 {
+  const crossError = cross([0, 0, 1], targetLocal)
+  const sinTheta = Math.hypot(crossError[0], crossError[1], crossError[2])
+  const cosTheta = targetLocal[2]
+  if (sinTheta < 1e-6) {
+    // Either aligned or antipodal. Antipodal: pick any perpendicular axis and
+    // command a half-turn. Aligned: zero error.
+    return cosTheta < 0 ? [Math.PI, 0, 0] : [0, 0, 0]
+  }
+  const angle = Math.atan2(sinTheta, cosTheta)
+  const scale = angle / sinTheta
+  return [crossError[0] * scale, crossError[1] * scale, crossError[2] * scale]
 }
 
 export function attitudeHoldTorque({

@@ -26,6 +26,8 @@ export interface FlightReferenceFrame {
   surfaceVelocity: Vec3
   navVelocity: Vec3
   radialOut: Vec3
+  /** Orbit-plane normal, normalize(cross(r, v_orbital)). Falls back to parent rotation axis when degenerate. */
+  orbitNormal: Vec3
 }
 
 export function computeFlightReferenceFrame({
@@ -53,6 +55,7 @@ export function computeFlightReferenceFrame({
   const mode = surfaceState !== 'flying' || orbit.kind === 'impacting'
     ? 'surface'
     : 'orbital'
+  const orbitNormal = normalize(cross(relativePosition, relativeVelocity), parentRotationAxis)
 
   return {
     mode,
@@ -62,14 +65,8 @@ export function computeFlightReferenceFrame({
     surfaceVelocity,
     navVelocity: mode === 'surface' ? surfaceVelocity : relativeVelocity,
     radialOut,
+    orbitNormal,
   }
-}
-
-export function referenceFrameRetrogradeDirection(
-  input: FlightReferenceFrameInput,
-): Vec3 {
-  const frame = computeFlightReferenceFrame(input)
-  return normalize(scale(frame.navVelocity, -1), [0, 0, -1])
 }
 
 export function rotationAxisFromAxialTilt(axialTiltDegrees: number): Vec3 {

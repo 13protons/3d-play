@@ -82,7 +82,7 @@ describe('flightTelemetryRows', () => {
       throttle: 1,
       angularVelocity: [0.25, -0.5, 0],
       surfaceState: 'landed',
-      attitudeMode: 'hold-current',
+      autopilotMode: 'damp',
       mass: 9000,
       maxThrust: 300000,
     })

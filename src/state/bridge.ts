@@ -6,10 +6,14 @@
 import { useTrajectoriesStore } from './trajectories'
 import { useInputStore } from './input'
 import { useVehicleStore } from './vehicle'
+import { useAutopilotStore } from './autopilot'
 import type { BodyMeta } from './trajectories'
 import type { VehicleAero, VehicleAttitude, VehicleEngine, VehicleResources } from '../sim/types'
 import type { TrajectoryCurve } from '../sim/types'
 import { G } from '../sim/constants'
+import { computeAttitudeTarget } from '../sim/autopilot'
+import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
+import { rotationAxisFromAxialTilt } from '../sim/vehicle/referenceFrame'
 import {
   jplEclipticToAppYUpVector,
   vectorToSectorPosition,
@@ -35,6 +39,19 @@ let pendingTargetTime: number | null = null
 
 // Body metadata for computing G*M
 let bodyGMs: [string, number][] = []
+
+// Per-body surface info (for autopilot reference frame)
+interface BodySurfaceInfo {
+  gm: number
+  radius: number
+  angularVelocity: number
+  rotationAxis: [number, number, number]
+}
+const bodySurfaceMap = new Map<string, BodySurfaceInfo>()
+
+// Active vehicle (for autopilot dispatch)
+let activeVehicleId: string | null = null
+let activeVehicleParentId: string | null = null
 
 // Latest orbital curves (forwarded to vehicle worker)
 let latestOrbitalCurves: TrajectoryCurve[] = []
@@ -124,6 +141,18 @@ export async function startSim(scenarioId: string): Promise<void> {
       def.atmosphere as VehicleWorkerAtmosphere | undefined,
     ] as [string, number, number, number, VehicleWorkerAtmosphere | undefined]
   })
+
+  bodySurfaceMap.clear()
+  for (const def of bodyDefs as Record<string, unknown>[]) {
+    const physics = def.physics as Record<string, unknown>
+    const id = def.id as string
+    bodySurfaceMap.set(id, {
+      gm: (physics.gm as number | undefined) ?? G * (physics.mass as number),
+      radius: physics.radius as number,
+      angularVelocity: physics.angularVelocity as number,
+      rotationAxis: rotationAxisFromAxialTilt(physics.axialTilt as number),
+    })
+  }
 
   // Spawn the orbital worker
   orbitalWorker = new Worker(
@@ -240,7 +269,7 @@ export async function startSim(scenarioId: string): Promise<void> {
           throttle: msg.throttle,
           orientation: msg.orientation,
           angularVelocity: msg.angularVelocity,
-          attitudeMode: msg.attitudeMode,
+          attitudeTargetKind: msg.attitudeTargetKind,
           surfaceState: msg.surfaceState,
           reactionWheelTorque: msg.reactionWheelTorque,
           mass: msg.mass,
@@ -250,6 +279,9 @@ export async function startSim(scenarioId: string): Promise<void> {
         })
       }
     }
+
+    activeVehicleId = v.id as string
+    activeVehicleParentId = v.parentId as string
 
     vehicleWorker.postMessage({
       type: 'init',
@@ -302,11 +334,53 @@ export async function startSim(scenarioId: string): Promise<void> {
 function dispatchVehicle(targetTime: number): void {
   if (!vehicleWorker || vehicleState !== 'idle') return
   vehicleState = 'busy'
+  dispatchAutopilotTarget(targetTime)
   vehicleWorker.postMessage({
     type: 'advance',
     targetTime,
     bodyCurves: latestOrbitalCurves,
   })
+}
+
+function dispatchAutopilotTarget(targetTime: number): void {
+  if (!vehicleWorker || !activeVehicleId || !activeVehicleParentId) return
+
+  const mode = useAutopilotStore.getState().modes[activeVehicleId] ?? 'off'
+  const state = useTrajectoriesStore.getState()
+  const vehicleCurve = state.curves[activeVehicleId]
+  const parentCurve = state.curves[activeVehicleParentId]
+  const surface = bodySurfaceMap.get(activeVehicleParentId)
+  const control = state.vehicleControls[activeVehicleId]
+
+  if (!vehicleCurve || !parentCurve || !surface) {
+    vehicleWorker.postMessage({ type: 'set-attitude-target', target: { kind: 'manual' } })
+    return
+  }
+
+  const vehiclePos = evaluateCurve(vehicleCurve, targetTime)
+  const vehicleVel = evaluateCurveVelocity(vehicleCurve, targetTime)
+  const parentPos = evaluateCurve(parentCurve, targetTime)
+  const parentVel = evaluateCurveVelocity(parentCurve, targetTime)
+
+  const target = computeAttitudeTarget(mode, {
+    relativePosition: [
+      vehiclePos[0] - parentPos[0],
+      vehiclePos[1] - parentPos[1],
+      vehiclePos[2] - parentPos[2],
+    ],
+    relativeVelocity: [
+      vehicleVel[0] - parentVel[0],
+      vehicleVel[1] - parentVel[1],
+      vehicleVel[2] - parentVel[2],
+    ],
+    parentRadius: surface.radius,
+    parentGm: surface.gm,
+    parentAngularVelocity: surface.angularVelocity,
+    parentRotationAxis: surface.rotationAxis,
+    surfaceState: control?.surfaceState ?? 'flying',
+  })
+
+  vehicleWorker.postMessage({ type: 'set-attitude-target', target })
 }
 
 function flushCommands(): void {
@@ -328,8 +402,8 @@ function flushCommands(): void {
         roll: cmd.roll,
       })
     }
-    if (cmd.type === 'set-attitude-mode' && vehicleWorker) {
-      vehicleWorker.postMessage({ type: 'set-attitude-mode', mode: cmd.mode })
+    if (cmd.type === 'set-attitude-target' && vehicleWorker) {
+      vehicleWorker.postMessage({ type: 'set-attitude-target', target: cmd.target })
     }
   }
 }
@@ -354,8 +428,12 @@ export function stopSim(): void {
   vehicleState = 'idle'
   pendingTargetTime = null
   latestOrbitalCurves = []
+  bodySurfaceMap.clear()
+  activeVehicleId = null
+  activeVehicleParentId = null
   useTrajectoriesStore.getState().reset()
   useVehicleStore.getState().reset()
+  useAutopilotStore.getState().reset()
 }
 
 export function pauseSim(): void {

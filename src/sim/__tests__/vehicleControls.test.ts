@@ -11,7 +11,6 @@ import {
   angularVelocityForReactionWheelKeys,
   reactionWheelTorqueForKeys,
   sumAndClampTorque,
-  toggledAttitudeMode,
   shouldEmitAeroForce,
   shouldDisableThrottleForWarp,
   shouldStabilizeAngularVelocityForWarp,
@@ -75,18 +74,6 @@ describe('manualReactionWheelTorque', () => {
     })
 
     expect(torque).toEqual([0, 0, 0])
-  })
-})
-
-describe('toggledAttitudeMode', () => {
-  it('turns an active autopilot mode off when requested again', () => {
-    expect(toggledAttitudeMode('retrograde', 'retrograde')).toBe('manual')
-    expect(toggledAttitudeMode('hold-current', 'hold-current')).toBe('manual')
-  })
-
-  it('switches to a different requested autopilot mode', () => {
-    expect(toggledAttitudeMode('manual', 'retrograde')).toBe('retrograde')
-    expect(toggledAttitudeMode('retrograde', 'hold-current')).toBe('hold-current')
   })
 })
 
@@ -202,6 +189,21 @@ describe('forwardDirectionHoldTorque', () => {
     expect(torque[0]).toBe(0)
     expect(torque[1]).toBeGreaterThan(0)
     expect(torque[2]).toBe(0)
+  })
+
+  it('still produces torque when target is exactly opposite to current forward', () => {
+    // Identity orientation -> vehicle forward is +z. Asking for -z is a 180° flip;
+    // a bare cross-product error would be zero here.
+    const torque = forwardDirectionHoldTorque({
+      currentOrientation: [0, 0, 0, 1],
+      targetForward: [0, 0, -1],
+      angularVelocity: [0, 0, 0],
+      maxTorque: [400_000, 400_000, 250_000],
+      momentOfInertia: [12_000, 12_000, 8_000],
+    })
+
+    const magnitude = Math.hypot(torque[0], torque[1], torque[2])
+    expect(magnitude).toBeGreaterThan(0)
   })
 })
 

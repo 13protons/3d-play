@@ -32,7 +32,7 @@ export interface TrajectoryCurve {
 export type VehicleCommand =
   | { type: 'set-throttle'; value: number; simTime: number }
   | { type: 'set-attitude'; pitch: number; yaw: number; roll: number; simTime: number }
-  | { type: 'set-attitude-mode'; mode: VehicleAttitudeMode; simTime: number }
+  | { type: 'set-attitude-target'; target: AttitudeTarget; simTime: number }
   | { type: 'stage'; simTime: number }
 
 /** Commands routed to the orbital worker */
@@ -41,7 +41,14 @@ export type SimCommand =
 
 export type Command = VehicleCommand | SimCommand
 
-export type VehicleAttitudeMode = 'manual' | 'hold-current' | 'retrograde'
+/**
+ * Vehicle-worker-level attitude target. Autopilots emit this; the worker
+ * tracks whatever is requested without knowing which autopilot produced it.
+ */
+export type AttitudeTarget =
+  | { kind: 'manual' }
+  | { kind: 'damp' }
+  | { kind: 'seek-forward'; vector: [number, number, number] }
 
 // ---------------------------------------------------------------------------
 // Gravity Sources (sent from bridge to vehicle worker)
@@ -114,7 +121,7 @@ export type VehicleWorkerInbound =
   | { type: 'set-warp'; rate: number }
   | { type: 'set-throttle'; value: number }
   | { type: 'set-attitude'; pitch: number; yaw: number; roll: number }
-  | { type: 'set-attitude-mode'; mode: VehicleAttitudeMode }
+  | { type: 'set-attitude-target'; target: AttitudeTarget }
 
 /** Outbound messages from the vehicle worker */
 export type VehicleWorkerOutbound =
@@ -134,7 +141,7 @@ export type VehicleWorkerOutbound =
       throttle: number
       orientation: [number, number, number, number]
       angularVelocity: [number, number, number]
-      attitudeMode: VehicleAttitudeMode
+      attitudeTargetKind: AttitudeTarget['kind']
       surfaceState: 'flying' | 'landed' | 'crashed'
       reactionWheelTorque?: [number, number, number]
       mass?: number
