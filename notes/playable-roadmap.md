@@ -8,33 +8,42 @@ Out of scope for this milestone: parts/editor, NPC worker, environment patches, 
 
 ---
 
-## Epic 1 — Map View
+## Epic 1 — Orbit View Interaction
 
-Dual-canvas map overlay per [09-game-modes.md](09-game-modes.md). Sim keeps running underneath.
+The existing orbital scene (`src/render/Scene.tsx`) already renders bodies, full orbit lines, vehicle markers, and predicted trajectories with a pan/zoom camera. It IS the map — the separate-canvas plan in [09-game-modes.md](09-game-modes.md) is deferred. Instead, augment what's there with the interaction primitives Epic 2 needs.
 
-- [ ] Mount second `<Canvas>` for map view; flight canvas stays mounted
-- [ ] `useFrame` gating so the inactive canvas is frozen (zero cost)
-- [ ] System-scale camera: pan / zoom / focus-on-body
-- [ ] Render full orbit paths from trajectory curves (closed-orbit approximation from current `p, v` — Keplerian conic for display only, not physics)
-- [ ] Render vehicle predicted trajectory (extends existing `VehicleOrbitPrediction`)
-- [ ] Toggle binding (`M` key) with input-context push/pop
-- [ ] Body labels + selection highlight in map view
-- [ ] Map ↔ flight focus target sync
+- [x] `M` key toggle binding (`src/modes/Flight.tsx:119`)
+- [x] Map ↔ flight focus sync (single `useCameraStore.followTargetId`, both views subscribe)
+- [ ] Body labels (HTML overlay or sprites) with size-based culling
+- [ ] 3D body picking — click a body in the scene to set focus/target (HUD list already has this; the 3D scene doesn't)
+- [ ] Input context push/pop per [09-game-modes.md](09-game-modes.md) — defer until Epic 2 introduces a real conflict (click-to-place vs vehicle controls)
+
+Deferred (revisit if performance/structure demands it):
+- Second `<Canvas>` + `useFrame` freeze gating
+- Keplerian conic display fallback (current sampled-trajectory rendering is fine)
 
 ## Epic 2 — Maneuver Nodes
 
-Plan-then-execute burns. Node lives in input/state stores, drives both map preview and autopilot hold.
+Plan-then-execute burns. Node lives in state, drives both orbit-view preview and autopilot hold. This is where mission planning actually starts to feel like a game.
+
+**Data**
 
 - [ ] `ManeuverNode` type: `{ simTime, deltaV: [prograde, normal, radial], vesselId }`
 - [ ] Maneuver store (Zustand) — list of pending nodes per vessel
-- [ ] Map-view node placement: click on orbit → creates node at that anomaly
+
+**Placement & editing in the orbit view**
+
+- [ ] Click on vehicle prediction line → create node at that anomaly (ray-pick onto the existing sampled trajectory)
 - [ ] Drag handles on node: prograde/retrograde, normal/antinormal, radial-in/out
-- [ ] Post-burn trajectory preview: integrate (or patched-conic-approximate) forward from node, render on map
-- [ ] Time-to-node readout on HUD
-- [ ] Auto-warp-to-node (warp until burn start, then drop warp)
-- [ ] Node "execute" handoff: feeds desired attitude vector to autopilot (Epic 3)
-- [ ] Burn-time estimate from current TWR; render "burn start" / "burn end" markers
+- [ ] Post-burn trajectory preview — integrate (or patched-conic-approximate) forward from node, render on the same canvas as a distinct line
 - [ ] Node deletion / editing
+
+**HUD & execution**
+
+- [ ] Time-to-node readout on HUD
+- [ ] Burn-time estimate from current TWR; "burn start" / "burn end" markers
+- [ ] Auto-warp-to-node (warp until ~burn start, then drop warp)
+- [ ] Node execute handoff — autopilot consumes the node's deltaV-frame vector, seeks attitude, throttles for the burn window
 
 ## Epic 3 — Attitude Hold Modes (Autopilot v0.1)
 
@@ -44,25 +53,25 @@ Pitch/yaw seek only — no roll seek. Roll is always damp-only (already true in 
 
 **Architecture work**
 
-- [ ] Split `VehicleAttitudeMode` into two concerns:
+- [x] Split `VehicleAttitudeMode` into two concerns:
   - Vehicle control state: `'manual' | 'damp' | 'seek-forward'` (later: `'seek-orientation'`)
   - Autopilot mode: `'off' | 'prograde' | 'retrograde' | 'normal' | 'antinormal' | 'radial-in' | 'radial-out'` (later: `target`, `maneuver`)
-- [ ] New worker message: `{ type: 'set-attitude-target', kind: 'forward' | 'damp' | 'manual', vector?: Vec3, simTime }`
-- [ ] Vehicle worker stops owning autopilot mode — only owns the seek primitive
-- [ ] Autopilot module: pure function `(autopilotMode, vehicleState, trajectoryFrame) → AttitudeTarget`
-- [ ] Decide placement (see below) and wire it into the per-tick loop
+- [x] New worker message: `{ type: 'set-attitude-target', kind: 'forward' | 'damp' | 'manual', vector?: Vec3, simTime }`
+- [x] Vehicle worker stops owning autopilot mode — only owns the seek primitive
+- [x] Autopilot module: pure function `(autopilotMode, vehicleState, trajectoryFrame) → AttitudeTarget`
+- [x] Decide placement (see below) and wire it into the per-tick loop (bridge dispatches per-tick)
 
 **Autopilot modes (each ~10 lines once infra is done)**
 
-- [ ] Prograde / Retrograde (uses `navVelocity` from `computeFlightReferenceFrame` — auto-switches orbital ↔ surface like the navball)
-- [ ] Normal / Antinormal (orbit-plane normal, always orbital frame — degenerates near-radial; fall back to `damp`)
-- [ ] Radial-in / Radial-out (already-computed `radialOut` from the reference frame)
+- [x] Prograde / Retrograde (uses `navVelocity` from `computeFlightReferenceFrame` — auto-switches orbital ↔ surface like the navball)
+- [x] Normal / Antinormal (orbit-plane normal, always orbital frame — degenerates near-radial; fall back to `damp`)
+- [x] Radial-in / Radial-out (already-computed `radialOut` from the reference frame)
 
 **UI & navball**
 
-- [ ] Hold-mode button cluster on HUD (autopilot mode buttons, manual cancels)
-- [ ] Navball markers for prograde, retrograde, normal, antinormal, radial-in, radial-out
-- [ ] Active autopilot mode indicator on HUD
+- [x] Hold-mode button cluster on HUD (autopilot mode buttons, manual cancels)
+- [x] Navball markers for prograde, retrograde, normal, antinormal, radial-in, radial-out
+- [x] Active autopilot mode indicator on HUD
 - [ ] Mode persists across warp; verify `shouldStabilizeAngularVelocityForWarp` still gates correctly
 
 **Deferred to later epics**
@@ -93,8 +102,8 @@ Make the autopilot feel good. Current PD-style reaction-wheel torque tends to ov
 
 ## Suggested order
 
-1. Epic 3 first (hold modes) — unlocks the autopilot interface that Epic 2 will hand off to. Self-contained and shippable.
-2. Epic 1 (map view) — needed before maneuver nodes can be placed.
-3. Epic 2 (maneuver nodes) — depends on 1 and 3.
+1. ~~Epic 3 (hold modes)~~ — done.
+2. Epic 1 (orbit view interaction) — small, unblocks Epic 2.
+3. Epic 2 (maneuver nodes) — the main gameplay loop.
 4. Epic 4 (control quality) — easier to tune once you can place a node and watch the craft fail to hit it.
 5. Epic 5 — incremental throughout.

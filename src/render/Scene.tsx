@@ -2,6 +2,7 @@ import { Canvas } from '@react-three/fiber'
 import { Stars } from '@react-three/drei'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { Body } from './Body'
+import { ManeuverNodeOverlay } from './ManeuverNodeOverlay'
 import { OrbitPrediction } from './OrbitPrediction'
 import { VehicleMarker } from './VehicleMarker'
 import { VehicleOrbitPrediction } from './VehicleOrbitPrediction'
@@ -47,6 +48,9 @@ export function Scene() {
       ))}
       {Object.keys(vehicles).map((id) => (
         <VehicleOrbitPrediction key={`vprediction-${id}`} vehicleId={id} />
+      ))}
+      {Object.keys(vehicles).map((id) => (
+        <ManeuverNodeOverlay key={`mnode-${id}`} vehicleId={id} />
       ))}
     </Canvas>
   )

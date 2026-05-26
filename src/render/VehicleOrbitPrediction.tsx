@@ -1,16 +1,23 @@
 import { useMemo, useRef, useState } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import { Line } from '@react-three/drei'
 import type { Group } from 'three'
 import { useCameraStore } from '../state/camera'
+import { useManeuverStore } from '../state/maneuver'
 import { useModeStore } from '../state/mode'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
+import { stateToElements } from '../sim/orbital/kepler'
 import {
   predictVehicleOrbit,
   type PredictionBodyState,
   type VehicleOrbitPrediction as VehicleOrbitPredictionResult,
 } from '../sim/orbital/vehiclePrediction'
+import {
+  nearestAnomalyToPoint,
+  timeAtAnomaly,
+  type Vec3 as ManeuverVec3,
+} from '../sim/maneuverNode'
 import type { TrajectoryCurve } from '../sim/types'
 import {
   computeFlightReferenceFrame,
@@ -155,6 +162,15 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
     }))
   })
 
+  const handleOrbitClick = (event: ThreeEvent<MouseEvent>) => {
+    if (useModeStore.getState().activeView !== 'orbital') return
+    const group = groupRef.current
+    if (!group) return
+    event.stopPropagation()
+    const localPoint = group.worldToLocal(event.point.clone())
+    placeManeuverNodeFromClick(vehicleId, [localPoint.x, localPoint.y, localPoint.z])
+  }
+
   if (!vehicle) return null
 
   return (
@@ -165,10 +181,48 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
           color={style.color}
           lineWidth={style.lineWidth}
           opacity={style.opacity}
+          onClick={handleOrbitClick}
         />
       )}
     </group>
   )
+}
+
+function placeManeuverNodeFromClick(vehicleId: string, parentRelativeClick: ManeuverVec3) {
+  const store = useTrajectoriesStore.getState()
+  const vehicle = store.vehicles[vehicleId]
+  if (!vehicle) return
+  const parent = store.bodies[vehicle.parentId]
+  const vehicleCurve = store.curves[vehicleId]
+  const parentCurve = store.curves[vehicle.parentId]
+  if (!parent || !vehicleCurve || !parentCurve) return
+
+  const t = store.getSimTime()
+  const vehiclePos = evaluateCurve(vehicleCurve, t)
+  const parentPos = evaluateCurve(parentCurve, t)
+  const vehicleVelocity = hermiteVelocity(vehicleCurve, t)
+  const parentVelocity = hermiteVelocity(parentCurve, t)
+  const relativePosition: ManeuverVec3 = [
+    vehiclePos[0] - parentPos[0],
+    vehiclePos[1] - parentPos[1],
+    vehiclePos[2] - parentPos[2],
+  ]
+  const relativeVelocity: ManeuverVec3 = [
+    vehicleVelocity[0] - parentVelocity[0],
+    vehicleVelocity[1] - parentVelocity[1],
+    vehicleVelocity[2] - parentVelocity[2],
+  ]
+  const elements = stateToElements(relativePosition, relativeVelocity, parent.gm)
+  const anomaly = nearestAnomalyToPoint(elements, parentRelativeClick)
+  const simTime = timeAtAnomaly(elements, t, anomaly)
+  if (simTime === null) return
+
+  useManeuverStore.getState().setNode({
+    id: `${vehicleId}-node`,
+    vesselId: vehicleId,
+    simTime,
+    deltaV: { prograde: 0, normal: 0, radial: 0 },
+  })
 }
 
 function hermiteVelocity(

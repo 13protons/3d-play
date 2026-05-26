@@ -1,8 +1,11 @@
+import type { CSSProperties } from 'react'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useCameraStore } from '../state/camera'
 import { useInputStore } from '../state/input'
+import { useManeuverStore } from '../state/maneuver'
 import { useModeStore } from '../state/mode'
 import { useAutopilotStore } from '../state/autopilot'
+import type { ManeuverDeltaV } from '../sim/maneuverNode'
 import { WARP_RATES } from '../sim/warp'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
 import { computeFlightReadout, flightTelemetryRows } from './flightReadout'
@@ -22,6 +25,12 @@ const AUTOPILOT_BUTTONS: { mode: AutopilotMode; label: string }[] = [
   { mode: 'antinormal', label: 'Anti' },
   { mode: 'radial-out', label: 'Rad+' },
   { mode: 'radial-in', label: 'Rad-' },
+]
+
+const DELTA_V_AXES: { key: keyof ManeuverDeltaV; positive: string; negative: string }[] = [
+  { key: 'prograde', positive: 'Pro', negative: 'Retro' },
+  { key: 'normal', positive: 'Nor', negative: 'Anti' },
+  { key: 'radial', positive: 'Rad+', negative: 'Rad-' },
 ]
 
 function formatTime(seconds: number): string {
@@ -50,6 +59,7 @@ export function HUD() {
   const toggleView = useModeStore((s) => s.toggleView)
   const toggleRotationAxes = useModeStore((s) => s.toggleRotationAxes)
   const autopilotModes = useAutopilotStore((s) => s.modes)
+  const maneuverNodes = useManeuverStore((s) => s.nodes)
   const targetName = bodies[followTargetId]?.name ?? vehicles[followTargetId]?.name ?? followTargetId
   const firstVehicle = Object.values(vehicles)[0]
   const throttle = firstVehicle ? (vehicleControls[firstVehicle.id]?.throttle ?? 0) : 0
@@ -283,6 +293,13 @@ export function HUD() {
         &nbsp; WASD/QE reaction wheel
         &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
+      {firstVehicle && maneuverNodes[firstVehicle.id] && (
+        <ManeuverNodePanel
+          vesselId={firstVehicle.id}
+          node={maneuverNodes[firstVehicle.id]}
+          simTime={simTime}
+        />
+      )}
       {vehicleControl && relativePosition && flightReadout && (
         <NavballCluster
           orientation={vehicleControl.orientation}
@@ -312,4 +329,90 @@ export function HUD() {
       )}
     </div>
   )
+}
+
+interface ManeuverNodePanelProps {
+  vesselId: string
+  node: { simTime: number; deltaV: ManeuverDeltaV }
+  simTime: number
+}
+
+function ManeuverNodePanel({ vesselId, node, simTime }: ManeuverNodePanelProps) {
+  const updateDeltaV = useManeuverStore((s) => s.updateDeltaV)
+  const clearNode = useManeuverStore((s) => s.clearNode)
+  const dt = node.simTime - simTime
+  const totalDeltaV = Math.hypot(node.deltaV.prograde, node.deltaV.normal, node.deltaV.radial)
+
+  function adjust(key: keyof ManeuverDeltaV, delta: number) {
+    updateDeltaV(vesselId, { [key]: node.deltaV[key] + delta })
+  }
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        right: 16,
+        top: 96,
+        width: 240,
+        padding: 12,
+        background: 'rgba(0,0,0,0.6)',
+        border: '1px solid rgba(255,204,0,0.4)',
+        borderRadius: 4,
+        color: 'white',
+        fontFamily: 'monospace',
+        fontSize: 12,
+        pointerEvents: 'auto',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ color: '#ffcc00', fontWeight: 'bold' }}>MANEUVER NODE</div>
+        <button
+          onClick={() => clearNode(vesselId)}
+          style={{
+            background: 'transparent',
+            color: '#ff7777',
+            border: '1px solid #883333',
+            borderRadius: 3,
+            padding: '0 6px',
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+          }}
+        >
+          ×
+        </button>
+      </div>
+      <div style={{ opacity: 0.7, fontSize: 11 }}>
+        {dt >= 0 ? `T- ${formatTime(dt)}` : `passed ${formatTime(-dt)} ago`}
+      </div>
+      <div style={{ marginTop: 4, fontSize: 11 }}>
+        Total ΔV: <span style={{ color: '#ffcc00' }}>{totalDeltaV.toFixed(1)} m/s</span>
+      </div>
+      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {DELTA_V_AXES.map(({ key, positive, negative }) => (
+          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 56, opacity: 0.7 }}>{positive}/{negative}</div>
+            <button onClick={() => adjust(key, -10)} style={deltaButtonStyle}>−10</button>
+            <button onClick={() => adjust(key, -1)} style={deltaButtonStyle}>−1</button>
+            <div style={{ flex: 1, textAlign: 'center', color: node.deltaV[key] !== 0 ? '#ffcc00' : '#ccc' }}>
+              {node.deltaV[key].toFixed(1)}
+            </div>
+            <button onClick={() => adjust(key, 1)} style={deltaButtonStyle}>+1</button>
+            <button onClick={() => adjust(key, 10)} style={deltaButtonStyle}>+10</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+const deltaButtonStyle: CSSProperties = {
+  background: 'rgba(255,255,255,0.08)',
+  color: 'white',
+  border: '1px solid rgba(255,255,255,0.2)',
+  borderRadius: 3,
+  padding: '2px 4px',
+  cursor: 'pointer',
+  fontFamily: 'monospace',
+  fontSize: 10,
+  minWidth: 28,
 }
