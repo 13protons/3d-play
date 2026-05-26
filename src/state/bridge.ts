@@ -3,6 +3,7 @@
  * routes commands, orchestrates sequential advance: orbital -> vehicle.
  */
 
+import { useCameraStore } from './camera'
 import { useTrajectoriesStore } from './trajectories'
 import { useInputStore } from './input'
 import { useVehicleStore } from './vehicle'
@@ -219,6 +220,10 @@ export async function startSim(scenarioId: string): Promise<void> {
       id: v.id, name: v.name, parentId: v.parentId, mesh: v.mesh,
     }))
     useTrajectoriesStore.getState().setVehicles(vehicleMetas)
+    const firstVehicleId = vehicleMetas[0]?.id
+    if (typeof firstVehicleId === 'string') {
+      useCameraStore.getState().setFollowTarget(firstVehicleId)
+    }
     for (const v of vehicles as Record<string, unknown>[]) {
       if (v.resources) {
         const resourcesInput = v.resources as { dryMass: number; fuelMass: number }

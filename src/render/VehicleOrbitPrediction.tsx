@@ -3,8 +3,9 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import { Line } from '@react-three/drei'
 import type { Group } from 'three'
 import { useCameraStore } from '../state/camera'
-import { useManeuverStore } from '../state/maneuver'
+import { placeManeuverNode } from '../state/maneuverActions'
 import { useModeStore } from '../state/mode'
+import { useOrbitPredictionStore } from '../state/orbitPrediction'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
 import { stateToElements } from '../sim/orbital/kepler'
@@ -13,11 +14,6 @@ import {
   type PredictionBodyState,
   type VehicleOrbitPrediction as VehicleOrbitPredictionResult,
 } from '../sim/orbital/vehiclePrediction'
-import {
-  nearestAnomalyToPoint,
-  timeAtAnomaly,
-  type Vec3 as ManeuverVec3,
-} from '../sim/maneuverNode'
 import type { TrajectoryCurve } from '../sim/types'
 import {
   computeFlightReferenceFrame,
@@ -134,6 +130,7 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
       ],
     })) {
       setPrediction(null)
+      useOrbitPredictionStore.getState().clearSnapshot(vehicleId)
       return
     }
     const bodyStates = Object.values(bodies).flatMap((body): PredictionBodyState[] => {
@@ -149,7 +146,7 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
       }]
     })
 
-    setPrediction(predictVehicleOrbit({
+    const result = predictVehicleOrbit({
       vehicle: predictionState.vehicle,
       parent: {
         id: parentBody.id,
@@ -159,7 +156,25 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
         velocity: parentVelocity,
       },
       bodies: bodyStates,
-    }))
+    })
+    setPrediction(result)
+
+    // Publish elements for the maneuver node + waypoint markers, so they sit
+    // exactly on this line instead of drifting on their own re-fit.
+    const predictionRelPos: [number, number, number] = [
+      predictionState.vehicle.position[0] - parentPos[0],
+      predictionState.vehicle.position[1] - parentPos[1],
+      predictionState.vehicle.position[2] - parentPos[2],
+    ]
+    const predictionRelVel: [number, number, number] = [
+      predictionState.vehicle.velocity[0] - parentVelocity[0],
+      predictionState.vehicle.velocity[1] - parentVelocity[1],
+      predictionState.vehicle.velocity[2] - parentVelocity[2],
+    ]
+    useOrbitPredictionStore.getState().setSnapshot(vehicleId, {
+      elements: stateToElements(predictionRelPos, predictionRelVel, parentBody.gm),
+      simTime: t,
+    })
   })
 
   const handleOrbitClick = (event: ThreeEvent<MouseEvent>) => {
@@ -168,7 +183,10 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
     if (!group) return
     event.stopPropagation()
     const localPoint = group.worldToLocal(event.point.clone())
-    placeManeuverNodeFromClick(vehicleId, [localPoint.x, localPoint.y, localPoint.z])
+    placeManeuverNode(vehicleId, {
+      kind: 'point',
+      pointParentRelative: [localPoint.x, localPoint.y, localPoint.z],
+    })
   }
 
   if (!vehicle) return null
@@ -176,53 +194,27 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
   return (
     <group ref={groupRef} visible={false}>
       {prediction && prediction.points.length > 2 && (
-        <Line
-          points={prediction.points}
-          color={style.color}
-          lineWidth={style.lineWidth}
-          opacity={style.opacity}
-          onClick={handleOrbitClick}
-        />
+        <>
+          <Line
+            points={prediction.points}
+            color={style.color}
+            lineWidth={style.lineWidth}
+            opacity={style.opacity}
+          />
+          {/* Wider invisible hit-line so the orbit is easy to click. */}
+          <Line
+            points={prediction.points}
+            color={style.color}
+            lineWidth={16}
+            transparent
+            opacity={0}
+            depthTest={false}
+            onClick={handleOrbitClick}
+          />
+        </>
       )}
     </group>
   )
-}
-
-function placeManeuverNodeFromClick(vehicleId: string, parentRelativeClick: ManeuverVec3) {
-  const store = useTrajectoriesStore.getState()
-  const vehicle = store.vehicles[vehicleId]
-  if (!vehicle) return
-  const parent = store.bodies[vehicle.parentId]
-  const vehicleCurve = store.curves[vehicleId]
-  const parentCurve = store.curves[vehicle.parentId]
-  if (!parent || !vehicleCurve || !parentCurve) return
-
-  const t = store.getSimTime()
-  const vehiclePos = evaluateCurve(vehicleCurve, t)
-  const parentPos = evaluateCurve(parentCurve, t)
-  const vehicleVelocity = hermiteVelocity(vehicleCurve, t)
-  const parentVelocity = hermiteVelocity(parentCurve, t)
-  const relativePosition: ManeuverVec3 = [
-    vehiclePos[0] - parentPos[0],
-    vehiclePos[1] - parentPos[1],
-    vehiclePos[2] - parentPos[2],
-  ]
-  const relativeVelocity: ManeuverVec3 = [
-    vehicleVelocity[0] - parentVelocity[0],
-    vehicleVelocity[1] - parentVelocity[1],
-    vehicleVelocity[2] - parentVelocity[2],
-  ]
-  const elements = stateToElements(relativePosition, relativeVelocity, parent.gm)
-  const anomaly = nearestAnomalyToPoint(elements, parentRelativeClick)
-  const simTime = timeAtAnomaly(elements, t, anomaly)
-  if (simTime === null) return
-
-  useManeuverStore.getState().setNode({
-    id: `${vehicleId}-node`,
-    vesselId: vehicleId,
-    simTime,
-    deltaV: { prograde: 0, normal: 0, radial: 0 },
-  })
 }
 
 function hermiteVelocity(

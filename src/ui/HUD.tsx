@@ -168,44 +168,32 @@ export function HUD() {
           pointerEvents: 'auto',
         }}
       >
-        {Object.values(bodies).map((body) => (
-          <button
-            key={body.id}
-            onClick={() => setFollowTarget(body.id)}
-            style={{
-              padding: '4px 10px',
-              background:
-                body.id === followTargetId
-                  ? 'rgba(255,255,255,0.25)'
-                  : 'rgba(255,255,255,0.08)',
-              color: 'white',
-              border: '1px solid rgba(255,255,255,0.3)',
-              borderRadius: 4,
-              cursor: 'pointer',
-              fontFamily: 'monospace',
-              fontSize: 12,
-            }}
-          >
-            {body.name}
-          </button>
-        ))}
-        {Object.values(vehicles).map((v) => (
-          <button
-            key={v.id}
-            onClick={() => setFollowTarget(v.id)}
-            style={{
-              background: followTargetId === v.id ? '#335533' : '#1a1a2e',
-              color: followTargetId === v.id ? '#88ff88' : '#ccc',
-              border: '1px solid #333',
-              padding: '4px 8px',
-              cursor: 'pointer',
-              fontFamily: 'monospace',
-              fontSize: 12,
-            }}
-          >
-            {v.name}
-          </button>
-        ))}
+        <select
+          value={followTargetId}
+          onChange={(e) => setFollowTarget(e.target.value)}
+          style={{
+            background: '#1a1a2e',
+            color: '#ccc',
+            border: '1px solid #333',
+            padding: '4px 8px',
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            fontSize: 12,
+          }}
+        >
+          {Object.values(vehicles).length > 0 && (
+            <optgroup label="Vehicles">
+              {Object.values(vehicles).map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </optgroup>
+          )}
+          <optgroup label="Bodies">
+            {Object.values(bodies).map((body) => (
+              <option key={body.id} value={body.id}>{body.name}</option>
+            ))}
+          </optgroup>
+        </select>
         <button
           onClick={toggleView}
           style={{

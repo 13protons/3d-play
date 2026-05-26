@@ -5,9 +5,9 @@ import type { Group, Mesh } from 'three'
 import { useCameraStore } from '../state/camera'
 import { useManeuverStore } from '../state/maneuver'
 import { useModeStore } from '../state/mode'
+import { useOrbitPredictionStore, type OrbitPredictionSnapshot } from '../state/orbitPrediction'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
-import { stateToElements } from '../sim/orbital/kepler'
 import {
   predictVehicleOrbit,
   type PredictionBodyState,
@@ -16,6 +16,7 @@ import {
   anomalyAtTime,
   applyManeuverDeltaV,
   stateAtAnomaly,
+  type ManeuverNode,
   type Vec3,
 } from '../sim/maneuverNode'
 import type { TrajectoryCurve } from '../sim/types'
@@ -34,6 +35,8 @@ interface OverlayState {
 export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
   const groupRef = useRef<Group>(null)
   const markerRef = useRef<Mesh>(null)
+  const lastSnapshotRef = useRef<OrbitPredictionSnapshot | null>(null)
+  const lastNodeRef = useRef<ManeuverNode | null>(null)
   const lastComputedRef = useRef<number | null>(null)
   const [overlay, setOverlay] = useState<OverlayState | null>(null)
   const node = useManeuverStore((s) => s.nodes[vehicleId])
@@ -47,15 +50,22 @@ export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
 
     if (!vehicle || !node) {
       if (overlay !== null) setOverlay(null)
+      lastSnapshotRef.current = null
+      lastNodeRef.current = null
       lastComputedRef.current = null
+      return
+    }
+
+    const snapshot = useOrbitPredictionStore.getState().snapshots[vehicleId]
+    if (!snapshot) {
+      if (overlay !== null) setOverlay(null)
       return
     }
 
     const store = useTrajectoriesStore.getState()
     const parent = store.bodies[vehicle.parentId]
-    const vehicleCurve = store.curves[vehicleId]
     const parentCurve = store.curves[vehicle.parentId]
-    if (!parent || !vehicleCurve || !parentCurve) return
+    if (!parent || !parentCurve) return
 
     const t = store.getSimTime()
     const parentPos = evaluateCurve(parentCurve, t)
@@ -67,19 +77,26 @@ export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
       parentPos[2] - targetPos[2],
     )
 
-    const last = lastComputedRef.current
-    const dueForRecompute = last === null || Math.abs(t - last) >= RECOMPUTE_INTERVAL_SECONDS
+    const snapshotChanged = lastSnapshotRef.current !== snapshot
+    const nodeChanged = lastNodeRef.current !== node
+    const dueForRecompute =
+      snapshotChanged ||
+      nodeChanged ||
+      lastComputedRef.current === null ||
+      Math.abs(t - lastComputedRef.current) >= RECOMPUTE_INTERVAL_SECONDS
     if (!dueForRecompute) return
 
     const computed = computeOverlay({
-      vehicleCurve,
-      parentCurve,
+      snapshot,
       parent,
+      parentPosNow: parentPos,
       bodies: store.bodies,
       curves: store.curves,
-      simTime: t,
+      simTimeNow: t,
       node,
     })
+    lastSnapshotRef.current = snapshot
+    lastNodeRef.current = node
     lastComputedRef.current = t
     setOverlay(computed)
   })
@@ -108,42 +125,27 @@ export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
 }
 
 function computeOverlay({
-  vehicleCurve,
-  parentCurve,
+  snapshot,
   parent,
+  parentPosNow,
   bodies,
   curves,
-  simTime,
+  simTimeNow,
   node,
 }: {
-  vehicleCurve: TrajectoryCurve
-  parentCurve: TrajectoryCurve
+  snapshot: OrbitPredictionSnapshot
   parent: { id: string; gm: number; radius: number }
+  parentPosNow: number[]
   bodies: Record<string, { id: string; gm: number; radius: number }>
   curves: Record<string, TrajectoryCurve>
-  simTime: number
-  node: import('../sim/maneuverNode').ManeuverNode
+  simTimeNow: number
+  node: ManeuverNode
 }): OverlayState | null {
-  const vehiclePos = evaluateCurve(vehicleCurve, simTime)
-  const parentPos = evaluateCurve(parentCurve, simTime)
-  const vehicleVel = hermiteVelocity(vehicleCurve, simTime)
-  const parentVel = hermiteVelocity(parentCurve, simTime)
-  const relPos: Vec3 = [
-    vehiclePos[0] - parentPos[0],
-    vehiclePos[1] - parentPos[1],
-    vehiclePos[2] - parentPos[2],
-  ]
-  const relVel: Vec3 = [
-    vehicleVel[0] - parentVel[0],
-    vehicleVel[1] - parentVel[1],
-    vehicleVel[2] - parentVel[2],
-  ]
-  const elements = stateToElements(relPos, relVel, parent.gm)
-  if (!Number.isFinite(elements.a) || elements.a <= 0 || elements.e >= 1) return null
-
-  const anomaly = anomalyAtTime(elements, simTime, node.simTime)
+  const { elements, simTime: snapshotSimTime } = snapshot
+  const anomaly = anomalyAtTime(elements, snapshotSimTime, node.simTime)
   if (anomaly === null) return null
   const stateAtNode = stateAtAnomaly(elements, anomaly)
+
   const burnMagnitude = Math.hypot(node.deltaV.prograde, node.deltaV.normal, node.deltaV.radial)
   let previewPoints: [number, number, number][] | null = null
   if (burnMagnitude > 1e-3) {
@@ -156,16 +158,18 @@ function computeOverlay({
         gm: body.gm,
         radius: body.radius,
         soiRadius: undefined,
-        position: evaluateCurve(curve, simTime),
-        velocity: hermiteVelocity(curve, simTime),
+        position: evaluateCurve(curve, simTimeNow),
+        velocity: hermiteVelocity(curve, simTimeNow),
       }]
     })
+    const parentCurve = curves[parent.id]
+    const parentVel = parentCurve ? hermiteVelocity(parentCurve, simTimeNow) : [0, 0, 0]
     const result = predictVehicleOrbit({
       vehicle: {
         position: [
-          stateAtNode.position[0] + parentPos[0],
-          stateAtNode.position[1] + parentPos[1],
-          stateAtNode.position[2] + parentPos[2],
+          stateAtNode.position[0] + parentPosNow[0],
+          stateAtNode.position[1] + parentPosNow[1],
+          stateAtNode.position[2] + parentPosNow[2],
         ],
         velocity: [
           newVelocity[0] + parentVel[0],
@@ -177,8 +181,8 @@ function computeOverlay({
         id: parent.id,
         gm: parent.gm,
         radius: parent.radius,
-        position: parentPos,
-        velocity: parentVel,
+        position: parentPosNow as [number, number, number],
+        velocity: parentVel as [number, number, number],
       },
       bodies: bodyStates,
     })
