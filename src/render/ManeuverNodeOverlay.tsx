@@ -101,24 +101,30 @@ export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
     setOverlay(computed)
   })
 
-  if (!vehicle || !overlay) return null
+  if (!vehicle) return null
 
-  const markerScale = Math.max(Math.hypot(...overlay.nodePosition) * 0.01, 50_000)
+  const markerScale = overlay
+    ? Math.max(Math.hypot(...overlay.nodePosition) * 0.01, 50_000)
+    : 1
 
   return (
     <group ref={groupRef} visible={false}>
-      <mesh ref={markerRef} position={overlay.nodePosition} scale={markerScale}>
-        <sphereGeometry args={[1, 16, 12]} />
-        <meshBasicMaterial color="#ffcc00" transparent opacity={0.85} />
-      </mesh>
-      {overlay.previewPoints && (
-        <Line
-          points={overlay.previewPoints}
-          color="#ffcc00"
-          lineWidth={1.5}
-          opacity={0.75}
-          transparent
-        />
+      {overlay && (
+        <>
+          <mesh ref={markerRef} position={overlay.nodePosition} scale={markerScale}>
+            <sphereGeometry args={[1, 16, 12]} />
+            <meshBasicMaterial color="#ffcc00" transparent opacity={0.85} />
+          </mesh>
+          {overlay.previewPoints && (
+            <Line
+              points={overlay.previewPoints}
+              color="#ffcc00"
+              lineWidth={1.5}
+              opacity={0.75}
+              transparent
+            />
+          )}
+        </>
       )}
     </group>
   )

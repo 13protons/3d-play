@@ -65,11 +65,11 @@ export function OrbitMarkers({ vehicleId }: OrbitMarkersProps) {
     setWaypoints(computeOrbitWaypoints(snapshot.elements, referenceAxis))
   })
 
-  if (!vehicle || !waypoints) return null
+  if (!vehicle) return null
 
   return (
     <group ref={groupRef} visible={false}>
-      {waypoints.apoapsis && (
+      {waypoints?.apoapsis && (
         <WaypointMarker
           vehicleId={vehicleId}
           color={MARKER_COLORS.apoapsis}
@@ -77,7 +77,7 @@ export function OrbitMarkers({ vehicleId }: OrbitMarkersProps) {
           position={waypoints.apoapsis.position}
         />
       )}
-      {waypoints.periapsis && (
+      {waypoints?.periapsis && (
         <WaypointMarker
           vehicleId={vehicleId}
           color={MARKER_COLORS.periapsis}
@@ -85,7 +85,7 @@ export function OrbitMarkers({ vehicleId }: OrbitMarkersProps) {
           position={waypoints.periapsis.position}
         />
       )}
-      {waypoints.ascendingNode && (
+      {waypoints?.ascendingNode && (
         <WaypointMarker
           vehicleId={vehicleId}
           color={MARKER_COLORS.ascendingNode}
@@ -93,7 +93,7 @@ export function OrbitMarkers({ vehicleId }: OrbitMarkersProps) {
           position={waypoints.ascendingNode.position}
         />
       )}
-      {waypoints.descendingNode && (
+      {waypoints?.descendingNode && (
         <WaypointMarker
           vehicleId={vehicleId}
           color={MARKER_COLORS.descendingNode}
