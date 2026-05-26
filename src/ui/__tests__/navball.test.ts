@@ -141,6 +141,20 @@ describe('computeNavballMarkers', () => {
     expect(markers.radialOut).toMatchObject({ x: 50, y: 0, visible: true })
     expect(markers.retrograde.visible).toBe(false)
   })
+
+  it('hides prograde and retrograde when speed is below the threshold', () => {
+    const markers = computeNavballMarkers({
+      orientation: [0, 0, 0, 1],
+      relativePosition: [10, 0, 0],
+      relativeVelocity: [0, 0, 0.005],
+      radius: 50,
+    })
+
+    expect(markers.prograde.visible).toBe(false)
+    expect(markers.retrograde.visible).toBe(false)
+    // Other markers should still render — radial and normal are defined by position.
+    expect(markers.radialOut.visible).toBe(true)
+  })
 })
 
 describe('computeNavballState', () => {

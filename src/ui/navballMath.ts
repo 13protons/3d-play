@@ -96,6 +96,9 @@ export function computeNavballCompassFrame({
   }
 }
 
+/** Below this speed, prograde/retrograde have no meaningful direction — hide them. */
+export const PROGRADE_MARKER_MIN_SPEED = 0.01
+
 export function computeNavballMarkers({
   orientation,
   relativePosition,
@@ -108,9 +111,16 @@ export function computeNavballMarkers({
   radius: number
 }): NavballMarkers {
   const frame = computeNavballFrame({ relativePosition, relativeVelocity })
+  const speed = Math.hypot(relativeVelocity[0], relativeVelocity[1], relativeVelocity[2])
+  const prograde = speed >= PROGRADE_MARKER_MIN_SPEED
+    ? projectNavballVector(worldToCraft(frame.prograde, orientation), radius)
+    : { x: 0, y: 0, visible: false }
+  const retrograde = speed >= PROGRADE_MARKER_MIN_SPEED
+    ? projectNavballVector(worldToCraft(frame.retrograde, orientation), radius)
+    : { x: 0, y: 0, visible: false }
   return {
-    prograde: projectNavballVector(worldToCraft(frame.prograde, orientation), radius),
-    retrograde: projectNavballVector(worldToCraft(frame.retrograde, orientation), radius),
+    prograde,
+    retrograde,
     radialOut: projectNavballVector(worldToCraft(frame.radialOut, orientation), radius),
     radialIn: projectNavballVector(worldToCraft(frame.radialIn, orientation), radius),
     normal: projectNavballVector(worldToCraft(frame.normal, orientation), radius),

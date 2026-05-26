@@ -383,6 +383,7 @@ function VehicleViewControls() {
   const controlsRef = useRef<OrbitControlsImpl>(null)
   const targetUpRef = useRef(new Vector3(0, 1, 0))
   const surfaceCameraInitializedRef = useRef(false)
+  const surfaceRotationSimTimeRef = useRef<number | null>(null)
   const camera = useThree((s) => s.camera)
 
   useFrame((_, delta) => {
@@ -400,6 +401,7 @@ function VehicleViewControls() {
     const vehicleVelocity = evaluateCurveVelocity(vehicleCurve, t) as Vec3
     const parentVelocity = evaluateCurveVelocity(parentCurve, t) as Vec3
     const controls = store.vehicleControls[vehicle.id]
+    const surfaceState = controls?.surfaceState ?? 'flying'
     const relativePosition: Vec3 = [
       vehiclePosition[0] - parentPosition[0],
       vehiclePosition[1] - parentPosition[1],
@@ -410,27 +412,66 @@ function VehicleViewControls() {
       vehicleVelocity[1] - parentVelocity[1],
       vehicleVelocity[2] - parentVelocity[2],
     ]
+    const parentRotationAxis = rotationAxisFromAxialTilt(parent.axialTilt)
     const frame = computeFlightReferenceFrame({
       relativePosition,
       relativeVelocity,
       parentRadius: parent.radius,
       parentGm: parent.gm,
       parentAngularVelocity: parent.angularVelocity,
-      parentRotationAxis: rotationAxisFromAxialTilt(parent.axialTilt),
-      surfaceState: controls?.surfaceState ?? 'flying',
+      parentRotationAxis,
+      surfaceState,
     })
+
+    // While landed/crashed the vehicle co-rotates with the surface (see
+    // worker.ts). Rotate the camera around the same axis by the same per-frame
+    // angle so the planet stays visually fixed and time-warp shows a sunrise
+    // rather than the world tumbling under a stationary camera.
+    if (surfaceState !== 'flying' && Number.isFinite(t)) {
+      const prev = surfaceRotationSimTimeRef.current
+      if (prev !== null) {
+        const simDelta = t - prev
+        const angle = parent.angularVelocity * simDelta
+        if (Number.isFinite(angle) && angle !== 0 && Math.abs(simDelta) < 86400) {
+          const target = controlsRef.current?.target
+          const tx = target?.x ?? 0
+          const ty = target?.y ?? 0
+          const tz = target?.z ?? 0
+          const offset = new Vector3(
+            camera.position.x - tx,
+            camera.position.y - ty,
+            camera.position.z - tz,
+          )
+          offset.applyAxisAngle(
+            new Vector3(parentRotationAxis[0], parentRotationAxis[1], parentRotationAxis[2]),
+            angle,
+          )
+          camera.position.set(tx + offset.x, ty + offset.y, tz + offset.z)
+        }
+      }
+      surfaceRotationSimTimeRef.current = t
+    } else {
+      surfaceRotationSimTimeRef.current = null
+    }
 
     const targetUp = frame.mode === 'surface'
       ? [frame.radialOut[0], frame.radialOut[1], frame.radialOut[2]] as const
       : [0, 1, 0] as const
     targetUpRef.current.set(targetUp[0], targetUp[1], targetUp[2])
-    camera.up.lerp(targetUpRef.current, cameraUpLerpAlpha(delta)).normalize()
+    if (surfaceState !== 'flying') {
+      // Wall-clock-paced lerp can't keep up with sim-time-paced radialOut
+      // rotation under warp, leaving a constant tilt lag. Snap once landed —
+      // smoothing only matters during the orbital↔surface transition.
+      camera.up.copy(targetUpRef.current).normalize()
+    } else {
+      camera.up.lerp(targetUpRef.current, cameraUpLerpAlpha(delta)).normalize()
+    }
     if (frame.mode === 'surface' && !surfaceCameraInitializedRef.current) {
       camera.position.set(...surfaceCameraPosition(frame.radialOut, 30, 10))
       surfaceCameraInitializedRef.current = true
     }
     if (shouldClampCameraAboveLocalSurface({
-      surfaceState: controls?.surfaceState ?? 'flying',
+      surfaceState,
       referenceMode: frame.mode,
     })) {
       camera.position.set(...clampCameraAboveLocalSurface(
