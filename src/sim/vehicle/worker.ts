@@ -15,6 +15,7 @@ import {
   forwardDirectionHoldTorque,
   integrateOrientation,
   manualReactionWheelTorque,
+  rotateOrientationAroundWorldAxis,
   shouldDisableThrottleForWarp,
   shouldEmitAeroForce,
   shouldStabilizeAngularVelocityForWarp,
@@ -253,6 +254,13 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       } else {
         stateVec.set([...landed.position, ...landed.velocity])
         updateAngularState(elapsedSeconds, currentAttitudeTorque())
+        // Co-rotate with the parent so a landed vehicle's orientation tracks
+        // the surface it's glued to instead of drifting in inertial space.
+        orientation = rotateOrientationAroundWorldAxis(
+          orientation,
+          parentSurface.rotationAxis,
+          parentSurface.angularVelocity * elapsedSeconds,
+        )
         simTime = targetTime
         emitCurves(prevTime, prevState)
         emitControls()

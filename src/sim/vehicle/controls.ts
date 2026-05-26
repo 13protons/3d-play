@@ -257,6 +257,25 @@ export function thrustAccelerationForElapsedRotation(
   )
 }
 
+/**
+ * Pre-multiplies orientation by a rotation of `angle` radians around a
+ * world-frame axis. Use when something external to the vehicle (e.g. the
+ * surface a landed vessel is glued to) needs to drag the orientation along.
+ */
+export function rotateOrientationAroundWorldAxis(
+  orientation: Quaternion,
+  axis: Vec3,
+  angle: number,
+): Quaternion {
+  if (angle === 0) return orientation
+  const magnitude = Math.hypot(axis[0], axis[1], axis[2])
+  if (magnitude === 0) return orientation
+  const half = angle / 2
+  const s = Math.sin(half) / magnitude
+  const delta: Quaternion = [axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(half)]
+  return normalizeQuaternion(multiplyQuaternions(delta, orientation))
+}
+
 export function integrateOrientation(
   orientation: Quaternion,
   angularVelocity: Vec3,

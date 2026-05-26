@@ -41,10 +41,16 @@ export function computeFlightReferenceFrame({
 }: FlightReferenceFrameInput): FlightReferenceFrame {
   const distance = magnitude(relativePosition)
   const radialOut = distance > 0 ? scale(relativePosition, 1 / distance) : [1, 0, 0] as Vec3
-  const surfaceVelocity = subtract(
-    relativeVelocity,
-    cross(scale(parentRotationAxis, parentAngularVelocity), relativePosition),
-  )
+  // A landed/crashed vehicle is rigidly attached to the surface, so its velocity
+  // in the surface frame is exactly zero by definition. Force it — otherwise the
+  // ω×r subtraction leaves floating-point noise that makes the navball's
+  // prograde/retrograde markers jitter.
+  const surfaceVelocity: Vec3 = surfaceState === 'flying'
+    ? subtract(
+        relativeVelocity,
+        cross(scale(parentRotationAxis, parentAngularVelocity), relativePosition),
+      )
+    : [0, 0, 0]
   const altitude = distance - parentRadius
   const orbit = computeOrbitSummary({
     relativePosition,

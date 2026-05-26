@@ -7,6 +7,7 @@ import {
   attitudeHoldTorque,
   forwardDirectionHoldTorque,
   manualReactionWheelTorque,
+  rotateOrientationAroundWorldAxis,
   pidStep,
   angularVelocityForReactionWheelKeys,
   reactionWheelTorqueForKeys,
@@ -204,6 +205,36 @@ describe('forwardDirectionHoldTorque', () => {
 
     const magnitude = Math.hypot(torque[0], torque[1], torque[2])
     expect(magnitude).toBeGreaterThan(0)
+  })
+})
+
+describe('rotateOrientationAroundWorldAxis', () => {
+  it('is a no-op for a zero angle', () => {
+    const q: [number, number, number, number] = [0, 0, 0, 1]
+    expect(rotateOrientationAroundWorldAxis(q, [0, 1, 0], 0)).toEqual(q)
+  })
+
+  it('rotates the identity orientation around the world Y axis by 90 degrees', () => {
+    const result = rotateOrientationAroundWorldAxis([0, 0, 0, 1], [0, 1, 0], Math.PI / 2)
+    // Quaternion for 90deg around +Y: (0, sin(45deg), 0, cos(45deg))
+    expect(result[0]).toBeCloseTo(0)
+    expect(result[1]).toBeCloseTo(Math.SQRT1_2)
+    expect(result[2]).toBeCloseTo(0)
+    expect(result[3]).toBeCloseTo(Math.SQRT1_2)
+  })
+
+  it('composes a body-frame rotation with a world-frame drag from the parent', () => {
+    // Start tilted 90deg around +X (body now points "up" if it started "forward").
+    const half = Math.PI / 4
+    const tilted: [number, number, number, number] = [Math.sin(half), 0, 0, Math.cos(half)]
+    // Drag the world frame 180deg around +Y. World-axis rotation pre-multiplies,
+    // so the tilt should still be visible in the result (composed, not lost).
+    const result = rotateOrientationAroundWorldAxis(tilted, [0, 1, 0], Math.PI)
+    const magnitude = Math.hypot(...result)
+    expect(magnitude).toBeCloseTo(1)
+    // q.w for a 90deg rotation has magnitude cos(45deg); composition of two pure
+    // rotations of 90deg and 180deg leaves w = 0 (orthogonal rotations).
+    expect(result[3]).toBeCloseTo(0)
   })
 })
 

@@ -69,7 +69,25 @@ describe('computeAttitudeTarget', () => {
     expect(target.vector[0]).toBeCloseTo(-1)
   })
 
-  it('uses surface velocity for prograde when in surface mode', () => {
+  it('uses surface velocity for prograde when flying in surface mode', () => {
+    // Impacting trajectory forces surface mode while still flying, so
+    // surfaceVelocity = relativeVelocity - ω×r. With relativeVelocity = 0,
+    // that gives -(ω×r) = -((0,1,0) × (R,0,0)) = (0,0,R), normalized to +z.
+    const target = computeAttitudeTarget('prograde', {
+      relativePosition: [earthRadius, 0, 0],
+      relativeVelocity: [-1, 0, 0],
+      parentRadius: earthRadius,
+      parentGm: earthGm,
+      parentAngularVelocity: 1,
+      parentRotationAxis: [0, 1, 0],
+      surfaceState: 'flying',
+    })
+    expect(target.kind).toBe('seek-forward')
+    if (target.kind !== 'seek-forward') return
+    expect(target.vector[2]).toBeCloseTo(1)
+  })
+
+  it('falls back to damp when landed (surface velocity is zero by definition)', () => {
     const target = computeAttitudeTarget('prograde', {
       relativePosition: [earthRadius, 0, 0],
       relativeVelocity: [0, 0, 0],
@@ -79,11 +97,7 @@ describe('computeAttitudeTarget', () => {
       parentRotationAxis: [0, 1, 0],
       surfaceState: 'landed',
     })
-    // omega x r = (0,1,0) x (R,0,0) = (0,0,-R), nav vel - rotation = (0,0,R) - (0,0,-R) = (0,0,0)
-    // surfaceVelocity = relativeVelocity - cross(omega*axis, r) = (0,0,0) - (0,0,-R) = (0,0,R)
-    expect(target.kind).toBe('seek-forward')
-    if (target.kind !== 'seek-forward') return
-    expect(target.vector[2]).toBeCloseTo(1)
+    expect(target).toEqual({ kind: 'damp' })
   })
 
   it('falls back to damp when prograde velocity is zero', () => {

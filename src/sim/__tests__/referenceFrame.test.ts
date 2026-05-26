@@ -124,19 +124,39 @@ describe('computeFlightReferenceFrame', () => {
     }
   })
 
-  it('subtracts rotating surface velocity in surface mode', () => {
+  it('subtracts rotating surface velocity for a flying vehicle in surface mode', () => {
+    // Impacting trajectory forces surface mode while still flying, so we exercise
+    // the ω×r subtraction path (not the landed force-zero path).
     const result = computeFlightReferenceFrame({
       relativePosition: [earthRadius, 0, 0],
-      relativeVelocity: [0, 0, 0],
+      relativeVelocity: [-100, 0, 0],
       parentRadius: earthRadius,
       parentGm: earthGm,
       parentAngularVelocity: 1,
       parentRotationAxis: [0, 1, 0],
-      surfaceState: 'landed',
+      surfaceState: 'flying',
     })
 
+    expect(result.mode).toBe('surface')
     expect(result.surfaceVelocity[2]).toBeCloseTo(earthRadius)
     expect(result.navVelocity).toEqual(result.surfaceVelocity)
+  })
+
+  it('reports zero surface velocity for landed and crashed vehicles', () => {
+    for (const surfaceState of ['landed', 'crashed'] as const) {
+      const result = computeFlightReferenceFrame({
+        relativePosition: [earthRadius, 0, 0],
+        relativeVelocity: [12, 34, 56],
+        parentRadius: earthRadius,
+        parentGm: earthGm,
+        parentAngularVelocity: 1,
+        parentRotationAxis: [0, 1, 0],
+        surfaceState,
+      })
+
+      expect(result.surfaceVelocity).toEqual([0, 0, 0])
+      expect(result.navVelocity).toEqual([0, 0, 0])
+    }
   })
 
   it('reports orbit normal perpendicular to position and velocity', () => {
