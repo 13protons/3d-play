@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
-import { useFrame, type ThreeEvent } from '@react-three/fiber'
-import type { Group } from 'three'
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
+import type { Group, Sprite } from 'three'
 import { useCameraStore } from '../state/camera'
 import { placeManeuverNode } from '../state/maneuverActions'
 import { useModeStore } from '../state/mode'
@@ -9,28 +9,26 @@ import { useTrajectoriesStore } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
 import { computeOrbitWaypoints, type OrbitWaypoints } from '../sim/orbitMarkers'
 import { rotationAxisFromAxialTilt } from '../sim/vehicle/referenceFrame'
+import { spriteWorldSize } from './lod'
+import { WaypointMarker, type WaypointKind } from './WaypointMarker'
 
-const MARKER_SIZE_FACTOR = 0.012
-const MARKER_MIN_SCALE = 40_000
-
-const MARKER_COLORS = {
-  periapsis: '#ff6644',
-  apoapsis: '#88ddff',
-  ascendingNode: '#66ff88',
-  descendingNode: '#ff99cc',
-} as const
+const WAYPOINT_MARKER_SIZE_PX = 18
 
 interface OrbitMarkersProps {
   vehicleId: string
 }
 
+type SpriteRefs = Partial<Record<WaypointKind, Sprite | null>>
+
 export function OrbitMarkers({ vehicleId }: OrbitMarkersProps) {
   const groupRef = useRef<Group>(null)
+  const spriteRefs = useRef<SpriteRefs>({})
   const vehicle = useTrajectoriesStore((s) => s.vehicles[vehicleId])
   const [waypoints, setWaypoints] = useState<OrbitWaypoints | null>(null)
   const lastSnapshotRef = useRef<OrbitPredictionSnapshot | null>(null)
+  const viewport = useThree((s) => s.size)
 
-  useFrame(() => {
+  useFrame(({ camera }) => {
     const group = groupRef.current
     if (!group || !vehicle) return
     const activeView = useModeStore.getState().activeView
@@ -59,74 +57,75 @@ export function OrbitMarkers({ vehicleId }: OrbitMarkersProps) {
       parentPos[2] - targetPos[2],
     )
 
-    if (lastSnapshotRef.current === snapshot) return
-    lastSnapshotRef.current = snapshot
-    const referenceAxis = rotationAxisFromAxialTilt(parent.axialTilt)
-    setWaypoints(computeOrbitWaypoints(snapshot.elements, referenceAxis))
+    if (lastSnapshotRef.current !== snapshot) {
+      lastSnapshotRef.current = snapshot
+      const referenceAxis = rotationAxisFromAxialTilt(parent.axialTilt)
+      setWaypoints(computeOrbitWaypoints(snapshot.elements, referenceAxis))
+    }
+
+    // Screen-space sizing so markers stay readable at any zoom.
+    const fov = 'fov' in camera ? (camera.fov * Math.PI) / 180 : Math.PI / 3
+    const pixelsPerRadian = viewport.height / (2 * Math.tan(fov / 2))
+    for (const sprite of Object.values(spriteRefs.current)) {
+      if (!sprite) continue
+      const wx = group.position.x + sprite.position.x
+      const wy = group.position.y + sprite.position.y
+      const wz = group.position.z + sprite.position.z
+      const dist = Math.hypot(
+        camera.position.x - wx,
+        camera.position.y - wy,
+        camera.position.z - wz,
+      )
+      const size = spriteWorldSize(WAYPOINT_MARKER_SIZE_PX, dist, pixelsPerRadian)
+      sprite.scale.set(size, size, 1)
+    }
   })
 
   if (!vehicle) return null
+
+  const onWaypointClick = (anomaly: number) => (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation()
+    placeManeuverNode(vehicleId, { kind: 'anomaly', anomaly })
+  }
+
+  const setSpriteRef = (kind: WaypointKind) => (sprite: Sprite | null) => {
+    spriteRefs.current[kind] = sprite
+  }
 
   return (
     <group ref={groupRef} visible={false}>
       {waypoints?.apoapsis && (
         <WaypointMarker
-          vehicleId={vehicleId}
-          color={MARKER_COLORS.apoapsis}
-          anomaly={waypoints.apoapsis.anomaly}
+          ref={setSpriteRef('apoapsis')}
+          kind="apoapsis"
           position={waypoints.apoapsis.position}
+          onClick={onWaypointClick(waypoints.apoapsis.anomaly)}
         />
       )}
       {waypoints?.periapsis && (
         <WaypointMarker
-          vehicleId={vehicleId}
-          color={MARKER_COLORS.periapsis}
-          anomaly={waypoints.periapsis.anomaly}
+          ref={setSpriteRef('periapsis')}
+          kind="periapsis"
           position={waypoints.periapsis.position}
+          onClick={onWaypointClick(waypoints.periapsis.anomaly)}
         />
       )}
       {waypoints?.ascendingNode && (
         <WaypointMarker
-          vehicleId={vehicleId}
-          color={MARKER_COLORS.ascendingNode}
-          anomaly={waypoints.ascendingNode.anomaly}
+          ref={setSpriteRef('ascendingNode')}
+          kind="ascendingNode"
           position={waypoints.ascendingNode.position}
+          onClick={onWaypointClick(waypoints.ascendingNode.anomaly)}
         />
       )}
       {waypoints?.descendingNode && (
         <WaypointMarker
-          vehicleId={vehicleId}
-          color={MARKER_COLORS.descendingNode}
-          anomaly={waypoints.descendingNode.anomaly}
+          ref={setSpriteRef('descendingNode')}
+          kind="descendingNode"
           position={waypoints.descendingNode.position}
+          onClick={onWaypointClick(waypoints.descendingNode.anomaly)}
         />
       )}
     </group>
-  )
-}
-
-function WaypointMarker({
-  vehicleId,
-  color,
-  anomaly,
-  position,
-}: {
-  vehicleId: string
-  color: string
-  anomaly: number
-  position: [number, number, number]
-}) {
-  const scale = Math.max(Math.hypot(...position) * MARKER_SIZE_FACTOR, MARKER_MIN_SCALE)
-
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation()
-    placeManeuverNode(vehicleId, { kind: 'anomaly', anomaly })
-  }
-
-  return (
-    <mesh position={position} scale={scale} onClick={handleClick}>
-      <sphereGeometry args={[1, 12, 8]} />
-      <meshBasicMaterial color={color} transparent opacity={0.8} />
-    </mesh>
   )
 }

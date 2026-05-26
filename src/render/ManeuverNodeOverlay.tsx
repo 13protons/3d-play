@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useMemo, useRef, useState } from 'react'
+import { useFrame, useThree } from '@react-three/fiber'
 import { Line } from '@react-three/drei'
-import type { Group, Mesh } from 'three'
+import { CanvasTexture, SpriteMaterial, type Group, type Sprite } from 'three'
 import { useCameraStore } from '../state/camera'
 import { useManeuverStore } from '../state/maneuver'
 import { useModeStore } from '../state/mode'
@@ -20,8 +20,37 @@ import {
   type Vec3,
 } from '../sim/maneuverNode'
 import type { TrajectoryCurve } from '../sim/types'
+import { spriteWorldSize } from './lod'
 
 const RECOMPUTE_INTERVAL_SECONDS = 1
+const MANEUVER_MARKER_SIZE_PX = 20
+
+function makeManeuverNodeTexture(): CanvasTexture {
+  const size = 64
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (ctx) {
+    ctx.clearRect(0, 0, size, size)
+    ctx.fillStyle = 'rgba(255,204,0,0.9)'
+    ctx.strokeStyle = '#6a5400'
+    ctx.lineWidth = 3
+    ctx.beginPath()
+    ctx.arc(size / 2, size / 2, size * 0.42, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+
+    ctx.fillStyle = '#000'
+    ctx.font = `bold ${Math.floor(size * 0.36)}px monospace`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('MAN', size / 2, size / 2 + 1)
+  }
+  const texture = new CanvasTexture(canvas)
+  texture.needsUpdate = true
+  return texture
+}
 
 interface ManeuverNodeOverlayProps {
   vehicleId: string
@@ -34,15 +63,25 @@ interface OverlayState {
 
 export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
   const groupRef = useRef<Group>(null)
-  const markerRef = useRef<Mesh>(null)
+  const markerRef = useRef<Sprite>(null)
   const lastSnapshotRef = useRef<OrbitPredictionSnapshot | null>(null)
   const lastNodeRef = useRef<ManeuverNode | null>(null)
   const lastComputedRef = useRef<number | null>(null)
   const [overlay, setOverlay] = useState<OverlayState | null>(null)
   const node = useManeuverStore((s) => s.nodes[vehicleId])
   const vehicle = useTrajectoriesStore((s) => s.vehicles[vehicleId])
+  const viewport = useThree((s) => s.size)
+  const markerMaterial = useMemo(() => {
+    const texture = makeManeuverNodeTexture()
+    return new SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+    })
+  }, [])
 
-  useFrame(() => {
+  useFrame(({ camera }) => {
     const group = groupRef.current
     if (!group) return
     const activeView = useModeStore.getState().activeView
@@ -84,37 +123,48 @@ export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
       nodeChanged ||
       lastComputedRef.current === null ||
       Math.abs(t - lastComputedRef.current) >= RECOMPUTE_INTERVAL_SECONDS
-    if (!dueForRecompute) return
+    if (dueForRecompute) {
+      const computed = computeOverlay({
+        snapshot,
+        parent,
+        parentPosNow: parentPos,
+        bodies: store.bodies,
+        curves: store.curves,
+        simTimeNow: t,
+        node,
+      })
+      lastSnapshotRef.current = snapshot
+      lastNodeRef.current = node
+      lastComputedRef.current = t
+      setOverlay(computed)
+    }
 
-    const computed = computeOverlay({
-      snapshot,
-      parent,
-      parentPosNow: parentPos,
-      bodies: store.bodies,
-      curves: store.curves,
-      simTimeNow: t,
-      node,
-    })
-    lastSnapshotRef.current = snapshot
-    lastNodeRef.current = node
-    lastComputedRef.current = t
-    setOverlay(computed)
+    // Resize the marker every frame so it stays a fixed pixel size as the user
+    // zooms; uses the most recent overlay state from React.
+    const marker = markerRef.current
+    if (marker && overlay) {
+      const fov = 'fov' in camera ? (camera.fov * Math.PI) / 180 : Math.PI / 3
+      const pixelsPerRadian = viewport.height / (2 * Math.tan(fov / 2))
+      const wx = group.position.x + overlay.nodePosition[0]
+      const wy = group.position.y + overlay.nodePosition[1]
+      const wz = group.position.z + overlay.nodePosition[2]
+      const dist = Math.hypot(
+        camera.position.x - wx,
+        camera.position.y - wy,
+        camera.position.z - wz,
+      )
+      const size = spriteWorldSize(MANEUVER_MARKER_SIZE_PX, dist, pixelsPerRadian)
+      marker.scale.set(size, size, 1)
+    }
   })
 
   if (!vehicle) return null
-
-  const markerScale = overlay
-    ? Math.max(Math.hypot(...overlay.nodePosition) * 0.01, 50_000)
-    : 1
 
   return (
     <group ref={groupRef} visible={false}>
       {overlay && (
         <>
-          <mesh ref={markerRef} position={overlay.nodePosition} scale={markerScale}>
-            <sphereGeometry args={[1, 16, 12]} />
-            <meshBasicMaterial color="#ffcc00" transparent opacity={0.85} />
-          </mesh>
+          <sprite ref={markerRef} material={markerMaterial} position={overlay.nodePosition} />
           {overlay.previewPoints && (
             <Line
               points={overlay.previewPoints}
