@@ -17,6 +17,34 @@ export interface ManeuverNode {
   /** Absolute sim time of the burn. */
   simTime: number
   deltaV: ManeuverDeltaV
+  /** Orbital elements at the moment the node was placed. The marker and
+   * post-burn preview anchor to this frozen orbit so they don't drift while
+   * the engine is firing. */
+  referenceElements: OrbitalElements
+  /** Sim time matching `referenceElements.ta`. */
+  referenceSimTime: number
+}
+
+/**
+ * World-space unit vector of the planned ΔV at the node, computed against the
+ * frozen reference orbit. Returns null when the node has no ΔV or the orbit
+ * is degenerate.
+ */
+export function maneuverBurnDirection(node: ManeuverNode): Vec3 | null {
+  const { prograde, normal, radial } = node.deltaV
+  if (Math.hypot(prograde, normal, radial) < 1e-6) return null
+  const anomaly = anomalyAtTime(node.referenceElements, node.referenceSimTime, node.simTime)
+  if (anomaly === null) return null
+  const stateAtNode = stateAtAnomaly(node.referenceElements, anomaly)
+  const newVelocity = applyManeuverDeltaV(stateAtNode, node.deltaV)
+  const dv: Vec3 = [
+    newVelocity[0] - stateAtNode.velocity[0],
+    newVelocity[1] - stateAtNode.velocity[1],
+    newVelocity[2] - stateAtNode.velocity[2],
+  ]
+  const mag = Math.hypot(dv[0], dv[1], dv[2])
+  if (!(mag > 0)) return null
+  return [dv[0] / mag, dv[1] / mag, dv[2] / mag]
 }
 
 export interface ManeuverState {

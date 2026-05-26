@@ -7,6 +7,7 @@
  * AttitudeTarget shape so the vehicle worker stays a dumb attitude tracker.
  */
 
+import { maneuverBurnDirection, type ManeuverNode } from './maneuverNode'
 import type { Vec3 } from './vehicle/controls'
 import {
   computeFlightReferenceFrame,
@@ -23,13 +24,17 @@ export type AutopilotMode =
   | 'antinormal'
   | 'radial-in'
   | 'radial-out'
+  | 'maneuver'
 
 export type AttitudeTarget =
   | { kind: 'manual' }
   | { kind: 'damp' }
   | { kind: 'seek-forward'; vector: Vec3 }
 
-export type AutopilotInput = FlightReferenceFrameInput
+export interface AutopilotInput extends FlightReferenceFrameInput {
+  /** Active maneuver node — required for 'maneuver' mode. */
+  maneuverNode?: ManeuverNode
+}
 
 export function computeAttitudeTarget(
   mode: AutopilotMode,
@@ -37,6 +42,12 @@ export function computeAttitudeTarget(
 ): AttitudeTarget {
   if (mode === 'off') return { kind: 'manual' }
   if (mode === 'damp') return { kind: 'damp' }
+
+  if (mode === 'maneuver') {
+    const burn = input.maneuverNode ? maneuverBurnDirection(input.maneuverNode) : null
+    if (!burn) return { kind: 'damp' }
+    return { kind: 'seek-forward', vector: burn }
+  }
 
   const frame = computeFlightReferenceFrame(input)
   const vector = directionForMode(mode, frame)

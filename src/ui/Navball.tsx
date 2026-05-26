@@ -17,6 +17,7 @@ interface NavballProps {
   relativeVelocity: Vec3
   parentRotationAxis: Vec3
   mode: FlightReferenceMode
+  maneuverDirection?: Vec3
 }
 
 interface NavballClusterProps extends NavballProps {
@@ -57,15 +58,17 @@ const markerStyles = {
   radialIn: { label: 'RI', color: '#ffcf70' },
   normal: { label: 'N', color: '#d4a4ff' },
   antiNormal: { label: 'AN', color: '#b8b8ff' },
+  maneuver: { label: 'M', color: '#ffcc00' },
 } as const
 
-export function Navball({ orientation, relativePosition, relativeVelocity, parentRotationAxis }: NavballProps) {
+export function Navball({ orientation, relativePosition, relativeVelocity, parentRotationAxis, maneuverDirection }: NavballProps) {
   const state = computeNavballState({
     orientation,
     relativePosition,
     relativeVelocity,
     parentRotationAxis,
     radius: RADIUS,
+    maneuverDirection,
   })
   const horizonPaths = visibleNavballSegments(state.horizon)
     .filter((segment) => segment.length > 1)
@@ -171,6 +174,7 @@ export function NavballCluster({
   forceRatio,
   surfaceState,
   autopilotMode,
+  maneuverDirection,
 }: NavballClusterProps) {
   return (
     <div
@@ -196,6 +200,7 @@ export function NavballCluster({
         forceRatio={forceRatio}
         surfaceState={surfaceState}
         autopilotMode={autopilotMode}
+        maneuverDirection={maneuverDirection}
       />
       <Attitude rows={rows.slice(3)} surfaceState={surfaceState} />
     </div>
@@ -294,6 +299,7 @@ function autopilotModeLabel(mode: AutopilotMode): string {
     case 'antinormal': return 'ANTI'
     case 'radial-out': return 'RAD+'
     case 'radial-in': return 'RAD-'
+    case 'maneuver': return 'MNV'
     default: return 'MAN'
   }
 }

@@ -1,11 +1,11 @@
-import type { CSSProperties } from 'react'
+import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useCameraStore } from '../state/camera'
 import { useInputStore } from '../state/input'
 import { useManeuverStore } from '../state/maneuver'
 import { useModeStore } from '../state/mode'
 import { useAutopilotStore } from '../state/autopilot'
-import type { ManeuverDeltaV } from '../sim/maneuverNode'
+import { maneuverBurnDirection, type ManeuverDeltaV, type ManeuverNode } from '../sim/maneuverNode'
 import { WARP_RATES } from '../sim/warp'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
 import { computeFlightReadout, flightTelemetryRows } from './flightReadout'
@@ -25,6 +25,7 @@ const AUTOPILOT_BUTTONS: { mode: AutopilotMode; label: string }[] = [
   { mode: 'antinormal', label: 'Anti' },
   { mode: 'radial-out', label: 'Rad+' },
   { mode: 'radial-in', label: 'Rad-' },
+  { mode: 'maneuver', label: 'Man' },
 ]
 
 const DELTA_V_AXES: { key: keyof ManeuverDeltaV; positive: string; negative: string }[] = [
@@ -286,6 +287,8 @@ export function HUD() {
           vesselId={firstVehicle.id}
           node={maneuverNodes[firstVehicle.id]}
           simTime={simTime}
+          mass={vehicleControl?.mass}
+          maxThrust={vehicleControl?.maxThrust}
         />
       )}
       {vehicleControl && relativePosition && flightReadout && (
@@ -303,6 +306,11 @@ export function HUD() {
           })}
           surfaceState={vehicleControl.surfaceState}
           autopilotMode={activeAutopilotMode}
+          maneuverDirection={
+            firstVehicle && maneuverNodes[firstVehicle.id]
+              ? maneuverBurnDirection(maneuverNodes[firstVehicle.id]) ?? undefined
+              : undefined
+          }
           rows={flightTelemetryRows({
             readout: flightReadout.readout,
             throttle,
@@ -321,18 +329,28 @@ export function HUD() {
 
 interface ManeuverNodePanelProps {
   vesselId: string
-  node: { simTime: number; deltaV: ManeuverDeltaV }
+  node: ManeuverNode
   simTime: number
+  mass?: number
+  maxThrust?: number
 }
 
-function ManeuverNodePanel({ vesselId, node, simTime }: ManeuverNodePanelProps) {
+function ManeuverNodePanel({ vesselId, node, simTime, mass, maxThrust }: ManeuverNodePanelProps) {
   const updateDeltaV = useManeuverStore((s) => s.updateDeltaV)
   const clearNode = useManeuverStore((s) => s.clearNode)
   const dt = node.simTime - simTime
   const totalDeltaV = Math.hypot(node.deltaV.prograde, node.deltaV.normal, node.deltaV.radial)
+  const burnDuration =
+    totalDeltaV > 0 && mass && maxThrust && maxThrust > 0
+      ? (totalDeltaV * mass) / maxThrust
+      : null
 
-  function adjust(key: keyof ManeuverDeltaV, delta: number) {
-    updateDeltaV(vesselId, { [key]: node.deltaV[key] + delta })
+  // Use refs so the hold-to-repeat callbacks always see the latest deltaV
+  // instead of capturing stale values from when the button was first pressed.
+  const deltaVRef = useRef(node.deltaV)
+  deltaVRef.current = node.deltaV
+  const adjust = (key: keyof ManeuverDeltaV, delta: number) => {
+    updateDeltaV(vesselId, { [key]: deltaVRef.current[key] + delta })
   }
 
   return (
@@ -375,21 +393,82 @@ function ManeuverNodePanel({ vesselId, node, simTime }: ManeuverNodePanelProps) 
       <div style={{ marginTop: 4, fontSize: 11 }}>
         Total ΔV: <span style={{ color: '#ffcc00' }}>{totalDeltaV.toFixed(1)} m/s</span>
       </div>
+      {burnDuration !== null && (
+        <div style={{ marginTop: 2, fontSize: 11 }}>
+          Burn time: <span style={{ color: '#ffcc00' }}>{formatBurnDuration(burnDuration)}</span>
+        </div>
+      )}
       <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         {DELTA_V_AXES.map(({ key, positive, negative }) => (
           <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 56, opacity: 0.7 }}>{positive}/{negative}</div>
-            <button onClick={() => adjust(key, -10)} style={deltaButtonStyle}>−10</button>
-            <button onClick={() => adjust(key, -1)} style={deltaButtonStyle}>−1</button>
+            <HoldButton onAction={() => adjust(key, -10)}>−10</HoldButton>
+            <HoldButton onAction={() => adjust(key, -1)}>−1</HoldButton>
             <div style={{ flex: 1, textAlign: 'center', color: node.deltaV[key] !== 0 ? '#ffcc00' : '#ccc' }}>
               {node.deltaV[key].toFixed(1)}
             </div>
-            <button onClick={() => adjust(key, 1)} style={deltaButtonStyle}>+1</button>
-            <button onClick={() => adjust(key, 10)} style={deltaButtonStyle}>+10</button>
+            <HoldButton onAction={() => adjust(key, 1)}>+1</HoldButton>
+            <HoldButton onAction={() => adjust(key, 10)}>+10</HoldButton>
           </div>
         ))}
       </div>
     </div>
+  )
+}
+
+function formatBurnDuration(seconds: number): string {
+  if (!Number.isFinite(seconds)) return '∞'
+  if (seconds < 60) return `${seconds.toFixed(1)} s`
+  return formatTime(seconds)
+}
+
+const HOLD_DELAY_MS = 250
+const HOLD_INTERVAL_MS = 60
+
+function HoldButton({ onAction, children }: { onAction: () => void; children: ReactNode }) {
+  // Repeat onAction while the pointer is held: one immediate call, then
+  // accelerating repeats after an initial delay.
+  const actionRef = useRef(onAction)
+  actionRef.current = onAction
+  const delayTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const intervalTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const stop = () => {
+    if (delayTimer.current !== null) {
+      clearTimeout(delayTimer.current)
+      delayTimer.current = null
+    }
+    if (intervalTimer.current !== null) {
+      clearInterval(intervalTimer.current)
+      intervalTimer.current = null
+    }
+  }
+
+  const start = () => {
+    stop()
+    actionRef.current()
+    delayTimer.current = setTimeout(() => {
+      intervalTimer.current = setInterval(() => actionRef.current(), HOLD_INTERVAL_MS)
+    }, HOLD_DELAY_MS)
+  }
+
+  useEffect(() => stop, [])
+
+  return (
+    <button
+      onPointerDown={(event) => {
+        event.preventDefault()
+        ;(event.target as HTMLButtonElement).setPointerCapture(event.pointerId)
+        start()
+      }}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+      onPointerLeave={stop}
+      onBlur={stop}
+      style={deltaButtonStyle}
+    >
+      {children}
+    </button>
   )
 }
 

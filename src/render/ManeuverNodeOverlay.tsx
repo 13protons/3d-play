@@ -5,7 +5,6 @@ import { CanvasTexture, SpriteMaterial, type Group, type Sprite } from 'three'
 import { useCameraStore } from '../state/camera'
 import { useManeuverStore } from '../state/maneuver'
 import { useModeStore } from '../state/mode'
-import { useOrbitPredictionStore, type OrbitPredictionSnapshot } from '../state/orbitPrediction'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
 import {
@@ -64,7 +63,6 @@ interface OverlayState {
 export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
   const groupRef = useRef<Group>(null)
   const markerRef = useRef<Sprite>(null)
-  const lastSnapshotRef = useRef<OrbitPredictionSnapshot | null>(null)
   const lastNodeRef = useRef<ManeuverNode | null>(null)
   const lastComputedRef = useRef<number | null>(null)
   const [overlay, setOverlay] = useState<OverlayState | null>(null)
@@ -89,15 +87,8 @@ export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
 
     if (!vehicle || !node) {
       if (overlay !== null) setOverlay(null)
-      lastSnapshotRef.current = null
       lastNodeRef.current = null
       lastComputedRef.current = null
-      return
-    }
-
-    const snapshot = useOrbitPredictionStore.getState().snapshots[vehicleId]
-    if (!snapshot) {
-      if (overlay !== null) setOverlay(null)
       return
     }
 
@@ -116,16 +107,13 @@ export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
       parentPos[2] - targetPos[2],
     )
 
-    const snapshotChanged = lastSnapshotRef.current !== snapshot
     const nodeChanged = lastNodeRef.current !== node
     const dueForRecompute =
-      snapshotChanged ||
       nodeChanged ||
       lastComputedRef.current === null ||
       Math.abs(t - lastComputedRef.current) >= RECOMPUTE_INTERVAL_SECONDS
     if (dueForRecompute) {
       const computed = computeOverlay({
-        snapshot,
         parent,
         parentPosNow: parentPos,
         bodies: store.bodies,
@@ -133,7 +121,6 @@ export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
         simTimeNow: t,
         node,
       })
-      lastSnapshotRef.current = snapshot
       lastNodeRef.current = node
       lastComputedRef.current = t
       setOverlay(computed)
@@ -181,7 +168,6 @@ export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
 }
 
 function computeOverlay({
-  snapshot,
   parent,
   parentPosNow,
   bodies,
@@ -189,7 +175,6 @@ function computeOverlay({
   simTimeNow,
   node,
 }: {
-  snapshot: OrbitPredictionSnapshot
   parent: { id: string; gm: number; radius: number }
   parentPosNow: number[]
   bodies: Record<string, { id: string; gm: number; radius: number }>
@@ -197,10 +182,9 @@ function computeOverlay({
   simTimeNow: number
   node: ManeuverNode
 }): OverlayState | null {
-  const { elements, simTime: snapshotSimTime } = snapshot
-  const anomaly = anomalyAtTime(elements, snapshotSimTime, node.simTime)
+  const anomaly = anomalyAtTime(node.referenceElements, node.referenceSimTime, node.simTime)
   if (anomaly === null) return null
-  const stateAtNode = stateAtAnomaly(elements, anomaly)
+  const stateAtNode = stateAtAnomaly(node.referenceElements, anomaly)
 
   const burnMagnitude = Math.hypot(node.deltaV.prograde, node.deltaV.normal, node.deltaV.radial)
   let previewPoints: [number, number, number][] | null = null

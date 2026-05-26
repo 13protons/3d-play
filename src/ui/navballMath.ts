@@ -23,7 +23,10 @@ export interface ProjectedNavballPoint {
   visible: boolean
 }
 
-export type NavballMarkers = Record<keyof NavballFrame, ProjectedNavballPoint>
+export type NavballMarkers = Record<keyof NavballFrame, ProjectedNavballPoint> & {
+  /** Present only when a maneuver direction was provided to the navball. */
+  maneuver?: ProjectedNavballPoint
+}
 export type NavballCompassMarkers = Record<keyof NavballCompassFrame, ProjectedNavballPoint>
 
 export interface NavballState {
@@ -104,11 +107,13 @@ export function computeNavballMarkers({
   relativePosition,
   relativeVelocity,
   radius,
+  maneuverDirection,
 }: {
   orientation: Quaternion
   relativePosition: Vec3
   relativeVelocity: Vec3
   radius: number
+  maneuverDirection?: Vec3
 }): NavballMarkers {
   const frame = computeNavballFrame({ relativePosition, relativeVelocity })
   const speed = Math.hypot(relativeVelocity[0], relativeVelocity[1], relativeVelocity[2])
@@ -118,7 +123,7 @@ export function computeNavballMarkers({
   const retrograde = speed >= PROGRADE_MARKER_MIN_SPEED
     ? projectNavballVector(worldToCraft(frame.retrograde, orientation), radius)
     : { x: 0, y: 0, visible: false }
-  return {
+  const markers: NavballMarkers = {
     prograde,
     retrograde,
     radialOut: projectNavballVector(worldToCraft(frame.radialOut, orientation), radius),
@@ -126,6 +131,10 @@ export function computeNavballMarkers({
     normal: projectNavballVector(worldToCraft(frame.normal, orientation), radius),
     antiNormal: projectNavballVector(worldToCraft(frame.antiNormal, orientation), radius),
   }
+  if (maneuverDirection) {
+    markers.maneuver = projectNavballVector(worldToCraft(maneuverDirection, orientation), radius)
+  }
+  return markers
 }
 
 export function computeNavballState({
@@ -134,19 +143,27 @@ export function computeNavballState({
   relativeVelocity,
   parentRotationAxis,
   radius,
+  maneuverDirection,
 }: {
   orientation: Quaternion
   relativePosition: Vec3
   relativeVelocity: Vec3
   parentRotationAxis?: Vec3
   radius: number
+  maneuverDirection?: Vec3
 }): NavballState {
   const compassFrame = parentRotationAxis
     ? computeNavballCompassFrame({ relativePosition, parentRotationAxis })
     : null
 
   return {
-    markers: computeNavballMarkers({ orientation, relativePosition, relativeVelocity, radius }),
+    markers: computeNavballMarkers({
+      orientation,
+      relativePosition,
+      relativeVelocity,
+      radius,
+      maneuverDirection,
+    }),
     compass: compassFrame
       ? {
           north: projectNavballVector(worldToCraft(compassFrame.north, orientation), radius),

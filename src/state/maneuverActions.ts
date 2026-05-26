@@ -34,5 +34,7 @@ export function placeManeuverNode(
     vesselId: vehicleId,
     simTime,
     deltaV: { prograde: 0, normal: 0, radial: 0 },
+    referenceElements: snapshot.elements,
+    referenceSimTime: snapshot.simTime,
   })
 }

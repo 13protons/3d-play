@@ -6,6 +6,7 @@
 import { useCameraStore } from './camera'
 import { useTrajectoriesStore } from './trajectories'
 import { useInputStore } from './input'
+import { useManeuverStore } from './maneuver'
 import { useVehicleStore } from './vehicle'
 import { useAutopilotStore } from './autopilot'
 import type { BodyMeta } from './trajectories'
@@ -367,6 +368,7 @@ function dispatchAutopilotTarget(targetTime: number): void {
   const parentPos = evaluateCurve(parentCurve, targetTime)
   const parentVel = evaluateCurveVelocity(parentCurve, targetTime)
 
+  const maneuverNode = useManeuverStore.getState().nodes[activeVehicleId]
   const target = computeAttitudeTarget(mode, {
     relativePosition: [
       vehiclePos[0] - parentPos[0],
@@ -383,6 +385,7 @@ function dispatchAutopilotTarget(targetTime: number): void {
     parentAngularVelocity: surface.angularVelocity,
     parentRotationAxis: surface.rotationAxis,
     surfaceState: control?.surfaceState ?? 'flying',
+    maneuverNode,
   })
 
   vehicleWorker.postMessage({ type: 'set-attitude-target', target })
