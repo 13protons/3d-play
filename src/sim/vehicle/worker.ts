@@ -7,6 +7,7 @@
 
 import type { AttitudeTarget, TrajectoryCurve, VehicleWorkerInbound } from '../types'
 import { toAbsolute } from '../coordinates'
+import { evaluateCurve, evaluateCurveVelocity } from '../curves'
 import { advanceTo } from '../integrator/adaptive'
 import { pointMassDerivatives } from '../integrator/derivatives'
 import {
@@ -148,8 +149,8 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
     const parentSurface = bodySurfaces.get(parentId)
     if (parentCurve && parentSurface) {
-      const parentPosition = sampleCurvePosition(parentCurve, simTime)
-      const parentVelocity = sampleCurveVelocity(parentCurve, simTime)
+      const parentPosition = evaluateCurve(parentCurve, simTime)
+      const parentVelocity = evaluateCurveVelocity(parentCurve, simTime)
       const relativePosition: Vec3 = [
         stateVec[0] - parentPosition[0],
         stateVec[1] - parentPosition[1],
@@ -237,8 +238,8 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     const parentSurface = bodySurfaces.get(parentId)
 
     if (surfaceContact.type !== 'flying' && parentCurve && parentSurface) {
-      const parentPosition = sampleCurvePosition(parentCurve, targetTime)
-      const parentVelocity = sampleCurveVelocity(parentCurve, targetTime)
+      const parentPosition = evaluateCurve(parentCurve, targetTime)
+      const parentVelocity = evaluateCurveVelocity(parentCurve, targetTime)
       const landed = rotatingSurfaceState({
         landedAt,
         simTime: targetTime,
@@ -302,9 +303,9 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     simTime = targetTime
 
     if (surfaceContact.type === 'flying' && parentCurve && parentSurface) {
-      const parentPosition = sampleCurvePosition(parentCurve, simTime)
-      const parentVelocity = sampleCurveVelocity(parentCurve, simTime)
-      const previousParentPosition = sampleCurvePosition(parentCurve, prevTime)
+      const parentPosition = evaluateCurve(parentCurve, simTime)
+      const parentVelocity = evaluateCurveVelocity(parentCurve, simTime)
+      const previousParentPosition = evaluateCurve(parentCurve, prevTime)
       const relativePosition: Vec3 = [
         stateVec[0] - parentPosition[0],
         stateVec[1] - parentPosition[1],
@@ -399,39 +400,6 @@ function computeAttitudeTorque(): Vec3 {
     momentOfInertia: attitude.momentOfInertia,
   })
   return sumAndClampTorque(holdTorque, manualTorque, attitude.reactionWheelTorque)
-}
-
-function sampleCurvePosition(curve: TrajectoryCurve, t: number): Vec3 {
-  const dt = curve.t1 - curve.t0
-  if (dt === 0) return curve.p1
-  const s = (t - curve.t0) / dt
-  const s2 = s * s
-  const s3 = s2 * s
-  const h00 = 2 * s3 - 3 * s2 + 1
-  const h10 = s3 - 2 * s2 + s
-  const h01 = -2 * s3 + 3 * s2
-  const h11 = s3 - s2
-  return [
-    h00 * curve.p0[0] + h10 * dt * curve.v0[0] + h01 * curve.p1[0] + h11 * dt * curve.v1[0],
-    h00 * curve.p0[1] + h10 * dt * curve.v0[1] + h01 * curve.p1[1] + h11 * dt * curve.v1[1],
-    h00 * curve.p0[2] + h10 * dt * curve.v0[2] + h01 * curve.p1[2] + h11 * dt * curve.v1[2],
-  ]
-}
-
-function sampleCurveVelocity(curve: TrajectoryCurve, t: number): Vec3 {
-  const dt = curve.t1 - curve.t0
-  if (dt === 0) return curve.v1
-  const s = (t - curve.t0) / dt
-  const s2 = s * s
-  const dh00 = 6 * s2 - 6 * s
-  const dh10 = 3 * s2 - 4 * s + 1
-  const dh01 = -6 * s2 + 6 * s
-  const dh11 = 3 * s2 - 2 * s
-  return [
-    (dh00 * curve.p0[0] + dh10 * dt * curve.v0[0] + dh01 * curve.p1[0] + dh11 * dt * curve.v1[0]) / dt,
-    (dh00 * curve.p0[1] + dh10 * dt * curve.v0[1] + dh01 * curve.p1[1] + dh11 * dt * curve.v1[1]) / dt,
-    (dh00 * curve.p0[2] + dh10 * dt * curve.v0[2] + dh01 * curve.p1[2] + dh11 * dt * curve.v1[2]) / dt,
-  ]
 }
 
 function dot(a: Vec3, b: Vec3): number {

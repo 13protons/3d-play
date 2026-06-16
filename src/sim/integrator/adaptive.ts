@@ -209,6 +209,11 @@ export function advanceTo(
 
     const errorNorm = rmsNorm(errorVec, scale)
 
+    // A non-finite error (NaN/Inf from a bad derivative) fails `<= 1.0`, takes the
+    // reject branch, and makes h NaN — which the `t + h === t` stagnation check
+    // can't catch, spinning to MAX_STEPS. Bail with the last accepted state instead.
+    if (!Number.isFinite(errorNorm)) break
+
     if (errorNorm <= 1.0) {
       // Accept step
       t += h

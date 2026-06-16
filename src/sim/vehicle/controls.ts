@@ -80,10 +80,6 @@ export interface PidStepInput {
   maxOutput: number
 }
 
-export function angularVelocityForRcsKeys(keys: Set<string>): Vec3 {
-  return angularVelocityForReactionWheelKeys(keys)
-}
-
 export function angularVelocityForReactionWheelKeys(keys: Set<string>): Vec3 {
   const has = (key: string) => keys.has(key.toLowerCase())
   return [

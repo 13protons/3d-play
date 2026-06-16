@@ -49,7 +49,12 @@ function formatTime(seconds: number): string {
 }
 
 export function HUD() {
-  const simTime = useTrajectoriesStore((s) => s.simTime)
+  // Subscribe to the worker clock so the HUD re-renders as the sim advances, but
+  // evaluate curves at the interpolated sim time so readouts/navball line up with
+  // the 3D scene (every render component uses getSimTime(), not raw simTime). The
+  // interpolated clock never runs behind the worker clock.
+  const workerSimTime = useTrajectoriesStore((s) => s.simTime)
+  const simTime = Math.max(workerSimTime, useTrajectoriesStore.getState().getSimTime())
   const warpRate = useTrajectoriesStore((s) => s.warpRate)
   const bodies = useTrajectoriesStore((s) => s.bodies)
   const vehicles = useTrajectoriesStore((s) => s.vehicles)

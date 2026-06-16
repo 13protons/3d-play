@@ -91,6 +91,29 @@ describe('pointMassDerivatives', () => {
     expect(dydt[3]).toBeLessThan(0)
   })
 
+  it('handles zero-length body curves without producing NaN', () => {
+    // The orbital/vehicle workers emit zero-length curves (t0 === t1) on init and
+    // when targetTime <= simTime. A naive (t - t0)/(t1 - t0) divides by zero → NaN,
+    // which then propagates into the integrator and stalls it. The guard must use
+    // the curve's p1 instead.
+    const bodyCurves: TrajectoryCurve[] = [{
+      id: 'earth', parentId: '',
+      p0: [0, 0, 0], v0: [0, 0, 0], t0: 5,
+      p1: [0, 0, 0], v1: [0, 0, 0], t1: 5, // zero duration
+    }]
+    const masses = new Map([['earth', G * 5.972e24]])
+    const deriv = pointMassDerivatives(bodyCurves, masses)
+
+    const y = new Float64Array([6_771_000, 0, 0, 0, 0, 7670])
+    const dydt = new Float64Array(6)
+    deriv(5, y, dydt)
+
+    expect(dydt.every(Number.isFinite)).toBe(true)
+    // Gravity still resolves from the curve's p1 (body at origin) → pulls toward -x.
+    const expectedAcc = G * 5.972e24 / 6_771_000 ** 2
+    expect(Math.abs(dydt[3])).toBeCloseTo(expectedAcc, 5)
+  })
+
   it('silently skips curves with no matching GM entry', () => {
     const bodyCurves: TrajectoryCurve[] = [{
       id: 'unknown-body', parentId: '',
