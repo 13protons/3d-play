@@ -329,6 +329,7 @@ function FlightReadouts() {
           onSelectMode={(mode) => useAutopilotStore.getState().toggleMode(firstVehicle.id, mode)}
           hasManeuverNode={!!node}
           mode={flightReadout.frame.mode}
+          orbit={flightReadout.frame.orbit}
           throttle={throttle}
           forceRatio={computeForceLoadRatio({
             currentThrust: vehicleControl.currentThrust,
@@ -346,7 +347,6 @@ function FlightReadouts() {
             autopilotMode: activeAutopilotMode,
             mass: vehicleControl.mass,
             maxThrust: vehicleControl.currentThrust ?? vehicleControl.maxThrust,
-            orbit: flightReadout.frame.orbit,
           })}
         />
       )}

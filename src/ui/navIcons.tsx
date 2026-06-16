@@ -1,15 +1,24 @@
 import type { AutopilotMode } from '../sim/autopilot'
+import type { OrbitKind } from '../sim/vehicle/referenceFrame'
 import {
   Antinormal,
+  Crashed,
+  Escape,
+  Flying,
   Hold,
+  Impact,
+  Landed,
   Maneuver,
   Normal,
+  OrbitClosed,
   Prograde,
   RadialIn,
   RadialOut,
   Retrograde,
   type NavGlyph,
 } from './navGlyphs'
+
+export type SurfaceState = 'flying' | 'landed' | 'crashed'
 
 /**
  * Maps autopilot modes and navball markers to their glyphs + accent colors.
@@ -53,6 +62,40 @@ export const HOLD_MODE_COLORS: Partial<Record<AutopilotMode, string>> = {
   'radial-out': '#8fd8ff',
   'radial-in': '#ffcf70',
   maneuver: '#ffcc00',
+}
+
+/** Vehicle state → glyph + color (bottom shelf). */
+export const STATE_ICONS: Record<SurfaceState, NavGlyph> = {
+  flying: Flying,
+  landed: Landed,
+  crashed: Crashed,
+}
+export const STATE_COLORS: Record<SurfaceState, string> = {
+  flying: '#9cd8ff',
+  landed: '#9cff8f',
+  crashed: '#ff7a6a',
+}
+export const STATE_LABELS: Record<SurfaceState, string> = {
+  flying: 'Flying',
+  landed: 'Landed',
+  crashed: 'Crashed',
+}
+
+/** Orbital closure → glyph + color (top shelf). */
+export const ORBIT_ICONS: Record<OrbitKind, NavGlyph> = {
+  closed: OrbitClosed,
+  impacting: Impact,
+  open: Escape,
+}
+export const ORBIT_COLORS: Record<OrbitKind, string> = {
+  closed: '#9cff8f',
+  impacting: '#ff7a6a',
+  open: '#ffcf70',
+}
+export const ORBIT_LABELS: Record<OrbitKind, string> = {
+  closed: 'Closed orbit',
+  impacting: 'Impact trajectory',
+  open: 'Escape trajectory',
 }
 
 /** Marker-key → color (keys match navballMath's marker set). */

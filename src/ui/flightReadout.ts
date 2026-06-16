@@ -1,4 +1,3 @@
-import type { OrbitSummary } from '../sim/vehicle/referenceFrame'
 import type { AutopilotMode } from '../sim/autopilot'
 
 type Vec3 = [number, number, number]
@@ -58,7 +57,6 @@ export function formatFlightNumber(value: number, unit: 'm' | 'm/s'): string {
 export function flightTelemetryRows({
   readout,
   mass,
-  orbit,
 }: {
   readout: FlightReadout
   throttle: number
@@ -67,25 +65,15 @@ export function flightTelemetryRows({
   autopilotMode?: AutopilotMode
   mass?: number
   maxThrust?: number
-  orbit?: OrbitSummary
 }): FlightTelemetryRow[] {
+  // ALT/VEL/VERT feed the left card; MASS the right card. Orbital closure +
+  // PE/AP and vehicle state now live on the navball's shelves.
   const rows: FlightTelemetryRow[] = [
     { label: 'ALT', value: formatFlightNumber(readout.altitude, 'm') },
     { label: 'VEL', value: formatFlightNumber(readout.speed, 'm/s') },
     { label: 'VERT', value: formatFlightNumber(readout.radialSpeed, 'm/s') },
   ]
   if (mass !== undefined) rows.push({ label: 'MASS', value: `${mass.toFixed(0)} kg` })
-  if (orbit) {
-    const orbitLabel = orbit.kind === 'impacting' ? 'IMPACT' : orbit.kind.toUpperCase()
-    rows.push(
-      { label: 'ORB', value: orbitLabel },
-      { label: 'PE', value: formatFlightNumber(orbit.periapsisAltitude, 'm') },
-      {
-        label: 'AP',
-        value: orbit.apoapsisAltitude === null ? '--' : formatFlightNumber(orbit.apoapsisAltitude, 'm'),
-      },
-    )
-  }
   return rows
 }
 

@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react'
 import {
   computeNavballState,
   shouldRenderNavballMarker,
@@ -7,9 +6,13 @@ import {
   type Vec3,
 } from './navballMath'
 import { computeArcProgressPath } from './navballInstrumentMath'
-import { MARKER_ICONS, MARKER_COLORS, HOLD_MODE_ICONS, HOLD_MODE_COLORS } from './navIcons'
-import type { FlightTelemetryRow } from './flightReadout'
-import type { FlightReferenceMode } from '../sim/vehicle/referenceFrame'
+import {
+  MARKER_ICONS, MARKER_COLORS, HOLD_MODE_ICONS, HOLD_MODE_COLORS,
+  STATE_ICONS, STATE_COLORS, STATE_LABELS, ORBIT_ICONS, ORBIT_COLORS, ORBIT_LABELS,
+} from './navIcons'
+import type { NavGlyph } from './navGlyphs'
+import { formatFlightNumber, type FlightTelemetryRow } from './flightReadout'
+import type { FlightReferenceMode, OrbitSummary } from '../sim/vehicle/referenceFrame'
 import type { AutopilotMode } from '../sim/autopilot'
 
 interface NavballProps {
@@ -30,6 +33,7 @@ interface NavballClusterProps extends NavballProps {
   forceRatio: number
   surfaceState: SurfaceState
   autopilotMode: AutopilotMode
+  orbit?: OrbitSummary
   onSelectMode?: (mode: AutopilotMode) => void
   hasManeuverNode?: boolean
 }
@@ -91,9 +95,7 @@ function AutopilotColumn({
                   border: `1px solid ${isActive ? color : 'rgba(255,255,255,0.22)'}`,
                 }}
               >
-                <svg width={22} height={22} viewBox="-12 -12 24 24" aria-hidden focusable={false}>
-                  <Glyph color={isActive ? '#0a0e1c' : color} />
-                </svg>
+                <GlyphIcon glyph={Glyph} size={22} color={isActive ? '#0a0e1c' : color} />
               </button>
             )
           })}
@@ -108,6 +110,7 @@ interface NavballInstrumentProps extends NavballProps {
   forceRatio: number
   surfaceState: SurfaceState
   autopilotMode: AutopilotMode
+  orbit?: OrbitSummary
 }
 
 interface ProximityProps {
@@ -116,7 +119,6 @@ interface ProximityProps {
 
 interface AttitudeProps {
   rows: FlightTelemetryRow[]
-  surfaceState?: SurfaceState
 }
 
 type SurfaceState = 'flying' | 'landed' | 'crashed'
@@ -251,6 +253,7 @@ export function NavballCluster({
   autopilotMode,
   maneuverDirection,
   orbitNormal,
+  orbit,
   onSelectMode,
   hasManeuverNode,
 }: NavballClusterProps) {
@@ -283,14 +286,15 @@ export function NavballCluster({
         autopilotMode={autopilotMode}
         maneuverDirection={maneuverDirection}
         orbitNormal={orbitNormal}
+        orbit={orbit}
       />
-      <Attitude rows={rows.slice(3)} surfaceState={surfaceState} />
+      <Attitude rows={rows.slice(3)} />
     </div>
   )
 }
 
 export function NavballInstrument(props: NavballInstrumentProps) {
-  const { mode, throttle, forceRatio, autopilotMode } = props
+  const { mode, throttle, forceRatio, surfaceState, orbit } = props
   const throttleArc = computeArcProgressPath({ value: throttle, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45 })
   const forceArc = computeArcProgressPath({ value: forceRatio, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45, mirror: true })
   return (
@@ -313,14 +317,65 @@ export function NavballInstrument(props: NavballInstrumentProps) {
         <InstrumentArc indicator="force" paths={forceArc} />
         <InstrumentArc indicator="throttle" paths={throttleArc} />
       </svg>
-      <StatusPad label={flightRegimeLabel(mode)} style={{ left: 5, top: 0 }} />
-      <StatusPad label={autopilotModeLabel(autopilotMode)} style={{ right: 5, top: 0 }} />
-      <StatusPad style={{ left: 5, top: 156 }} />
-      <StatusPad style={{ right: 5, top: 156 }} />
       <div style={{ position: 'absolute', left: 10, top: 5 }}>
         <Navball {...props} />
       </div>
+      {/* Top shelf: orbital closure + periapsis/apoapsis. */}
+      {orbit && (
+        <Shelf top={-2}>
+          <GlyphIcon glyph={ORBIT_ICONS[orbit.kind]} size={16} color={ORBIT_COLORS[orbit.kind]} title={ORBIT_LABELS[orbit.kind]} />
+          <ShelfValue label="PE" value={formatFlightNumber(orbit.periapsisAltitude, 'm')} />
+          <ShelfValue label="AP" value={orbit.apoapsisAltitude === null ? '--' : formatFlightNumber(orbit.apoapsisAltitude, 'm')} />
+        </Shelf>
+      )}
+      {/* Bottom shelf: reference frame + vehicle state. */}
+      <Shelf top={176}>
+        <span style={{ color: '#ffc260', fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>{flightRegimeLabel(mode)}</span>
+        <GlyphIcon glyph={STATE_ICONS[surfaceState]} size={16} color={STATE_COLORS[surfaceState]} title={STATE_LABELS[surfaceState]} />
+      </Shelf>
     </div>
+  )
+}
+
+/** Render a navball glyph as a standalone HTML icon. */
+function GlyphIcon({ glyph: Glyph, size, color, title }: { glyph: NavGlyph; size: number; color: string; title?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="-12 -12 24 24" aria-hidden={title ? undefined : true} focusable={false}>
+      {title && <title>{title}</title>}
+      <Glyph color={color} />
+    </svg>
+  )
+}
+
+/** A small panel that slightly overlaps the navball's top or bottom edge. */
+function Shelf({ top, children }: { top: number; children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: '50%',
+        top,
+        transform: 'translateX(-50%)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '2px 9px',
+        background: 'rgba(5,8,18,0.82)',
+        border: '1px solid rgba(210,225,255,0.22)',
+        borderRadius: 10,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function ShelfValue({ label, value }: { label: string; value: string }) {
+  return (
+    <span style={{ fontSize: 9, color: 'rgba(210,250,255,0.62)' }}>
+      {label} <span style={{ color: 'rgba(255,205,112,0.94)' }}>{value}</span>
+    </span>
   )
 }
 
@@ -339,60 +394,16 @@ function InstrumentArc({
   )
 }
 
-function StatusPad({ label, style }: { label?: string; style: CSSProperties }) {
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        width: 24,
-        height: 24,
-        borderRadius: 999,
-        display: 'grid',
-        placeItems: 'center',
-        background: '#406568',
-        color: '#ffc260',
-        fontSize: 7,
-        fontWeight: 700,
-        letterSpacing: 0.4,
-        ...style,
-      }}
-    >
-      {label}
-    </div>
-  )
-}
-
 function flightRegimeLabel(mode: FlightReferenceMode) {
   return mode === 'surface' ? 'SUR' : 'ORB'
-}
-
-function surfaceStateLabel(surfaceState: SurfaceState) {
-  if (surfaceState === 'landed') return 'LAND'
-  if (surfaceState === 'crashed') return 'CRASH'
-  return 'FLY'
-}
-
-function autopilotModeLabel(mode: AutopilotMode): string {
-  switch (mode) {
-    case 'damp': return 'HOLD'
-    case 'prograde': return 'PRO'
-    case 'retrograde': return 'RETRO'
-    case 'normal': return 'NORM'
-    case 'antinormal': return 'ANTI'
-    case 'radial-out': return 'RAD+'
-    case 'radial-in': return 'RAD-'
-    case 'maneuver': return 'MNV'
-    default: return 'MAN'
-  }
 }
 
 export function Proximity({ rows }: ProximityProps) {
   return <TelemetryPanel rows={rows} align="right" />
 }
 
-export function Attitude({ rows, surfaceState }: AttitudeProps) {
-  const stateRows = surfaceState ? [{ label: 'STATE', value: surfaceStateLabel(surfaceState) }, ...rows] : rows
-  return <TelemetryPanel rows={stateRows} align="left" />
+export function Attitude({ rows }: AttitudeProps) {
+  return <TelemetryPanel rows={rows} align="left" />
 }
 
 function TelemetryPanel({ rows, align }: { rows: FlightTelemetryRow[]; align: 'left' | 'right' }) {

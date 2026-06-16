@@ -52,7 +52,7 @@ describe('computeForceLoadRatio', () => {
 })
 
 describe('NavballInstrument', () => {
-  it('renders unified regime, status pads, and arc progress bars', () => {
+  it('renders regime/orbit/state shelves and arc progress bars', () => {
     const markup = renderToStaticMarkup(
       <NavballInstrument
         {...navballProps}
@@ -60,24 +60,26 @@ describe('NavballInstrument', () => {
         forceRatio={0.18}
         surfaceState="flying"
         autopilotMode="damp"
+        orbit={{ kind: 'closed', periapsisAltitude: 100_000, apoapsisAltitude: 250_000 }}
       />
     )
 
-    expect(markup).toContain('ORB')
+    expect(markup).toContain('ORB') // orbital regime label (bottom shelf)
     expect(markup).not.toContain('ORBITAL')
+    // State and orbital closure are icons (titles), not text labels.
     expect(markup).not.toContain('FLY')
-    expect(markup).not.toContain('CRASH')
-    expect(markup).toContain('HOLD')
+    expect(markup).toContain('Flying')
+    expect(markup).toContain('Closed orbit')
+    expect(markup).toContain('PE') // top shelf periapsis
     expect(markup).toContain('data-indicator="throttle"')
     expect(markup).toContain('data-indicator="force"')
     expect(markup).toContain('width="190"')
     expect(markup).toContain('height="180"')
     expect(markup).toContain('M 159 154 A 90 90 0 0 0 159 26')
     expect(markup).toContain('M 31 154 A 90 90 0 0 1 31 26')
-    expect(markup).not.toContain('ORBITAL MODE')
   })
 
-  it('renders surface mode as a short regime pad', () => {
+  it('renders surface regime and a crashed-state icon', () => {
     const markup = renderToStaticMarkup(
       <NavballInstrument
         {...navballProps}
@@ -86,12 +88,15 @@ describe('NavballInstrument', () => {
         forceRatio={0.18}
         surfaceState="crashed"
         autopilotMode="off"
+        orbit={{ kind: 'impacting', periapsisAltitude: -5_000, apoapsisAltitude: null }}
       />
     )
 
     expect(markup).toContain('SUR')
     expect(markup).not.toContain('SURFACE')
-    expect(markup).not.toContain('CRASH')
+    expect(markup).not.toContain('CRASH') // state shown as an icon, not text
+    expect(markup).toContain('Crashed')
+    expect(markup).toContain('Impact trajectory')
   })
 
   it('sizes the raw navball as a 170px drawing', () => {

@@ -101,54 +101,11 @@ describe('flightTelemetryRows', () => {
     expect(rows.map((row) => row.label)).not.toContain('MODE')
   })
 
-  it('formats closed orbit summary rows', () => {
-    const rows = flightTelemetryRows({
-      ...baseRowsInput,
-      orbit: {
-        kind: 'closed',
-        periapsisAltitude: 100_000,
-        apoapsisAltitude: 250_000,
-      },
-    })
-
-    expect(rows.slice(-3)).toEqual([
-      { label: 'ORB', value: 'CLOSED' },
-      { label: 'PE', value: '100.0 km' },
-      { label: 'AP', value: '250.0 km' },
-    ])
-  })
-
-  it('formats open orbit summary rows with unavailable apoapsis', () => {
-    const rows = flightTelemetryRows({
-      ...baseRowsInput,
-      orbit: {
-        kind: 'open',
-        periapsisAltitude: 125_000,
-        apoapsisAltitude: null,
-      },
-    })
-
-    expect(rows.slice(-3)).toEqual([
-      { label: 'ORB', value: 'OPEN' },
-      { label: 'PE', value: '125.0 km' },
-      { label: 'AP', value: '--' },
-    ])
-  })
-
-  it('formats impacting orbit summary as impact', () => {
-    const rows = flightTelemetryRows({
-      ...baseRowsInput,
-      orbit: {
-        kind: 'impacting',
-        periapsisAltitude: -5_000,
-        apoapsisAltitude: 250_000,
-      },
-    })
-
-    expect(rows.slice(-3)).toEqual([
-      { label: 'ORB', value: 'IMPACT' },
-      { label: 'PE', value: '-5000 m' },
-      { label: 'AP', value: '250.0 km' },
-    ])
+  it('no longer emits orbit rows (ORB/PE/AP moved to the navball shelf)', () => {
+    const rows = flightTelemetryRows(baseRowsInput)
+    const labels = rows.map((row) => row.label)
+    expect(labels).not.toContain('ORB')
+    expect(labels).not.toContain('PE')
+    expect(labels).not.toContain('AP')
   })
 })

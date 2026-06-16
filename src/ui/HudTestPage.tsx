@@ -124,6 +124,7 @@ export function HudTestPage() {
               })}
               surfaceState={params.surfaceState}
               autopilotMode={params.autopilotMode}
+              orbit={orbitFromParams(params)}
             />
           </Centered>
         )}
@@ -189,12 +190,15 @@ function hudRows(params: HudPlaygroundParams) {
     autopilotMode: params.autopilotMode,
     mass: params.massKg,
     maxThrust: params.thrustNewtons,
-    orbit: {
-      kind: params.orbitKind,
-      periapsisAltitude: params.periapsisAltitudeMeters,
-      apoapsisAltitude: params.showApoapsis ? params.apoapsisAltitudeMeters : null,
-    },
   })
+}
+
+function orbitFromParams(params: HudPlaygroundParams) {
+  return {
+    kind: params.orbitKind,
+    periapsisAltitude: params.periapsisAltitudeMeters,
+    apoapsisAltitude: params.showApoapsis ? params.apoapsisAltitudeMeters : null,
+  }
 }
 
 function orientationFromParams(params: HudPlaygroundParams): Quaternion {

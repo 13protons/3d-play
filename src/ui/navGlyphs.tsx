@@ -79,3 +79,58 @@ export const Maneuver: NavGlyph = ({ color }) => (
     <path d="M 0 -9.5 L 3.8 -4.6 L -3.8 -4.6 Z" fill={color} stroke="none" />
   </g>
 )
+
+// --- Vehicle-state glyphs ------------------------------------------------
+
+/** Airborne: an ascending craft above the ground gap. */
+export const Flying: NavGlyph = ({ color }) => (
+  <g {...stroke(color)}>
+    <path d="M -6 2 L 0 -7 L 6 2" />
+    <line x1={-7} y1={8} x2={7} y2={8} strokeDasharray="2 2" />
+  </g>
+)
+
+/** Landed: a craft resting on the surface line. */
+export const Landed: NavGlyph = ({ color }) => (
+  <g {...stroke(color)}>
+    <line x1={-8} y1={7} x2={8} y2={7} />
+    <path d="M -5 7 L 0 -3 L 5 7" />
+  </g>
+)
+
+/** Crashed: a burst. */
+export const Crashed: NavGlyph = ({ color }) => (
+  <g {...stroke(color)}>
+    <line x1={-8} y1={0} x2={8} y2={0} />
+    <line x1={0} y1={-8} x2={0} y2={8} />
+    <line x1={-5.5} y1={-5.5} x2={5.5} y2={5.5} />
+    <line x1={5.5} y1={-5.5} x2={-5.5} y2={5.5} />
+  </g>
+)
+
+// --- Orbital-closure glyphs ----------------------------------------------
+
+/** Closed orbit: an ellipse around the body. */
+export const OrbitClosed: NavGlyph = ({ color }) => (
+  <g {...stroke(color)}>
+    <ellipse cx={0} cy={0} rx={9} ry={5.5} />
+    <circle cx={0} cy={0} r={1.6} fill={color} stroke="none" />
+  </g>
+)
+
+/** Impact: a trajectory dropping into the ground. */
+export const Impact: NavGlyph = ({ color }) => (
+  <g {...stroke(color)}>
+    <line x1={-9} y1={7} x2={9} y2={7} />
+    <line x1={0} y1={-8} x2={0} y2={4} />
+    <path d="M -3.5 0.5 L 0 4.5 L 3.5 0.5" />
+  </g>
+)
+
+/** Escape: an open (hyperbolic) trajectory. */
+export const Escape: NavGlyph = ({ color }) => (
+  <g {...stroke(color)}>
+    <path d="M -8 7 Q 0 -11 8 7" />
+    <circle cx={0} cy={4} r={1.6} fill={color} stroke="none" />
+  </g>
+)
