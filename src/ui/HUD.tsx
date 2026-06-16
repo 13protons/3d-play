@@ -7,6 +7,7 @@ import { useModeStore } from '../state/mode'
 import { useAutopilotStore } from '../state/autopilot'
 import { maneuverBurnDirection, type ManeuverDeltaV, type ManeuverNode } from '../sim/maneuverNode'
 import { attitudeDiagnostics, type AttitudeAxisDiagnostic } from './attitudeDiagnostics'
+import { countRender } from '../render/perfCounters'
 import type { VehicleControlMeta } from '../state/trajectories'
 import { WARP_RATES } from '../sim/warp'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
@@ -49,6 +50,7 @@ function formatTime(seconds: number): string {
 }
 
 export function HUD() {
+  countRender('HUD')
   // Subscribe to the worker clock so the HUD re-renders as the sim advances, but
   // evaluate curves at the interpolated sim time so readouts/navball line up with
   // the 3D scene (every render component uses getSimTime(), not raw simTime). The

@@ -38,6 +38,8 @@ import { RENDER_LAYERS, TERRAIN_RENDER_PASSES } from './renderLayers'
 import { PlanetTerrainTiles } from './terrain/PlanetTerrainTiles'
 import { vehiclePlanetSurfaceRenderDecision } from './terrain/terrainLodPolicy'
 import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
+import { PerfLogger } from './PerfLogger'
+import { countRender } from './perfCounters'
 
 const SUN_RENDER_DISTANCE = 5e8
 
@@ -285,6 +287,7 @@ function VehicleAmbientLight() {
 }
 
 function VehicleMesh() {
+  countRender('VehicleMesh')
   const groupRef = useRef<Group>(null)
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
   const vehicleControls = useTrajectoriesStore((s) => s.vehicleControls)
@@ -509,6 +512,7 @@ export function VehicleScene() {
         gl={{ autoClear: false }}
         style={{ width: '100%', height: '100%' }}
       >
+        <PerfLogger view="vehicle" />
         <VehicleSceneContent />
       </Canvas>
     </div>

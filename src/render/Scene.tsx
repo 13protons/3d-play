@@ -9,9 +9,12 @@ import { VehicleMarker } from './VehicleMarker'
 import { VehicleOrbitPrediction } from './VehicleOrbitPrediction'
 import { CameraRig } from './CameraRig'
 import { RENDER_LAYERS } from './renderLayers'
+import { PerfLogger } from './PerfLogger'
+import { countRender } from './perfCounters'
 import { PlanetTerrainTiles } from './terrain/PlanetTerrainTiles'
 
 export function Scene() {
+  countRender('Scene')
   const bodies = useTrajectoriesStore((s) => s.bodies)
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
   const bodyIds = Object.keys(bodies)
@@ -32,6 +35,7 @@ export function Scene() {
         height: '100%',
       }}
     >
+      <PerfLogger view="orbital" />
       <ambientLight intensity={0.04} />
       <Stars radius={1e14} depth={1e14} count={3000} factor={1e12} fade />
       <CameraRig />
