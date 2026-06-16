@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Stars, OrbitControls } from '@react-three/drei'
 import { Vector3 } from 'three'
@@ -276,10 +276,10 @@ function VehicleSunLight({
 function VehicleAmbientLight() {
   const lightRef = useRef<AmbientLight>(null)
 
-  useFrame(() => {
-    const light = lightRef.current
-    if (light) enableRenderableLayers(light.layers)
-  })
+  // Render layers don't change after mount — set them once instead of per frame.
+  useEffect(() => {
+    if (lightRef.current) enableRenderableLayers(lightRef.current.layers)
+  }, [])
 
   return <ambientLight ref={lightRef} intensity={0.04} />
 }

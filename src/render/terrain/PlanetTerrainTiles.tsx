@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import type { Group, Mesh } from 'three'
 import { useCameraStore } from '../../state/camera'
@@ -130,9 +130,11 @@ function TerrainTileBatchMesh({
   }, [cache, tileIds, version])
   const meshRef = useRef<Mesh>(null)
 
-  useFrame(() => {
+  // The batch mesh's render layer only changes with renderLayer (or when the
+  // mesh first mounts as geometry arrives) — set it then, not every frame.
+  useEffect(() => {
     meshRef.current?.layers.set(renderLayer)
-  })
+  }, [renderLayer, geometry])
 
   if (!geometry) return null
 
