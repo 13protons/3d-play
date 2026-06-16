@@ -36,6 +36,8 @@ export interface NavballState {
   /** Great-circle meridians through the up/down poles (N-S and E-W), rotating
    * with the sphere — the moving grid that replaces the old static cross. */
   meridians: ProjectedNavballPoint[][]
+  /** "Sky" hemisphere polygon (toward radialOut) for attitude-indicator shading. */
+  sky: ScreenPoint[]
 }
 
 export function eulerDegreesToQuaternion({
@@ -192,6 +194,7 @@ export function computeNavballState({
     meridians: horizontals.map((horizontal) =>
       computeMeridian({ orientation, radialOut, horizontal, radius }),
     ),
+    sky: computeHorizonFill({ orientation, radialOut, radius }),
   }
 }
 
@@ -283,6 +286,81 @@ function fallbackMeridianAxes(radialOut: Vec3): [Vec3, Vec3] {
   const a = normalize(cross(radialOut, Math.abs(radialOut[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]), [1, 0, 0])
   const b = normalize(cross(radialOut, a), [0, 0, 1])
   return [a, b]
+}
+
+export interface ScreenPoint {
+  x: number
+  y: number
+}
+
+/**
+ * The "sky" hemisphere polygon (the half toward radialOut), in screen offsets
+ * from the navball center. Bounded by the visible horizon great-circle arc and
+ * the sky-side silhouette arc, so it follows the *curved* horizon like a real
+ * attitude indicator. The rest of the disc is "ground". Empty = all ground;
+ * a full circle = all sky.
+ */
+export function computeHorizonFill({
+  orientation,
+  radialOut,
+  radius,
+}: {
+  orientation: Quaternion
+  radialOut: Vec3
+  radius: number
+}): ScreenPoint[] {
+  const up = worldToCraft(radialOut, orientation)
+  const segments = 96
+  const basisA = normalize(cross(up, Math.abs(up[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]), [1, 0, 0])
+  const basisB = normalize(cross(up, basisA), [0, 0, 1])
+
+  // Horizon great-circle samples: screen point + whether it faces the viewer.
+  const samples = Array.from({ length: segments }, (_unused, i) => {
+    const angle = (2 * Math.PI * i) / segments
+    const point = add(scale(basisA, Math.cos(angle)), scale(basisB, Math.sin(angle)))
+    return { x: point[0] * radius, y: -point[1] * radius, front: point[2] >= 0 }
+  })
+  const frontCount = samples.filter((s) => s.front).length
+  if (frontCount === 0) return up[2] > 0 ? circlePoints(radius, segments) : []
+  if (frontCount === segments) return up[2] > 0 ? circlePoints(radius, segments) : []
+
+  // Rotate to the back→front transition so the visible arc is contiguous.
+  let start = 0
+  for (let i = 0; i < segments; i++) {
+    if (samples[i].front && !samples[(i - 1 + segments) % segments].front) {
+      start = i
+      break
+    }
+  }
+  const polygon: ScreenPoint[] = []
+  for (let k = 0; k < segments; k++) {
+    const sample = samples[(start + k) % segments]
+    if (!sample.front) break
+    polygon.push({ x: sample.x, y: sample.y })
+  }
+
+  // Close along the silhouette from B back to A on the sky side (dot(·, up) > 0).
+  const a = polygon[0]
+  const b = polygon[polygon.length - 1]
+  const angleA = Math.atan2(a.y, a.x)
+  const angleB = Math.atan2(b.y, b.x)
+  const skyDot = (angle: number) => Math.cos(angle) * up[0] - Math.sin(angle) * up[1]
+  const direction = skyDot(angleB + 0.02) >= skyDot(angleB - 0.02) ? 1 : -1
+  let span = direction * (angleA - angleB)
+  span = ((span % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
+  const edgeSteps = 48
+  for (let k = 1; k <= edgeSteps; k++) {
+    const angle = angleB + direction * span * (k / edgeSteps)
+    polygon.push({ x: radius * Math.cos(angle), y: radius * Math.sin(angle) })
+  }
+  return polygon
+}
+
+function circlePoints(radius: number, count: number): ScreenPoint[] {
+  return Array.from({ length: count }, (_unused, i) => {
+    const angle = (2 * Math.PI * i) / count
+    return { x: radius * Math.cos(angle), y: radius * Math.sin(angle) }
+  })
 }
 
 function worldToCraft(vector: Vec3, orientation: Quaternion): Vec3 {

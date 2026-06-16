@@ -145,6 +145,7 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
   const meridianPaths = state.meridians.flatMap((meridian) =>
     visibleNavballSegments(meridian).filter((segment) => segment.length > 1).map(toPath),
   )
+  const skyPath = state.sky.length > 1 ? `${toPath(state.sky)} Z` : null
 
   return (
     <div
@@ -167,7 +168,10 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
         </defs>
         <circle cx={CENTER} cy={CENTER} r={VISIBLE_RADIUS} fill="url(#navball-shade)" stroke="#d9e3ff" strokeWidth="2" />
         <g clipPath="url(#navball-clip)">
-          <circle cx={CENTER} cy={CENTER} r={RADIUS} fill="rgba(70,95,140,0.35)" />
+          {/* Attitude-indicator shading: brown ground base, blue sky hemisphere
+              following the curved horizon (toward radial-out). */}
+          <circle cx={CENTER} cy={CENTER} r={RADIUS} fill="rgba(120,80,46,0.5)" />
+          {skyPath && <path d={skyPath} fill="rgba(60,116,170,0.5)" />}
           {horizonPaths.map((path, index) => (
             <path key={index} d={path} fill="none" stroke="#f3f0d0" strokeWidth="2" strokeDasharray="6 5" opacity="0.8" />
           ))}
