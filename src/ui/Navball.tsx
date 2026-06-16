@@ -7,6 +7,7 @@ import {
   type Vec3,
 } from './navballMath'
 import { computeArcProgressPath } from './navballInstrumentMath'
+import { MARKER_ICONS, MARKER_COLORS, HOLD_MODE_ICONS, HOLD_MODE_COLORS } from './navIcons'
 import type { FlightTelemetryRow } from './flightReadout'
 import type { FlightReferenceMode } from '../sim/vehicle/referenceFrame'
 import type { AutopilotMode } from '../sim/autopilot'
@@ -26,6 +27,76 @@ interface NavballClusterProps extends NavballProps {
   forceRatio: number
   surfaceState: SurfaceState
   autopilotMode: AutopilotMode
+  onSelectMode?: (mode: AutopilotMode) => void
+  hasManeuverNode?: boolean
+}
+
+/** Autopilot modes as matched +/- pairs (top to bottom), Hold and Man as singles. */
+const AUTOPILOT_GROUPS: AutopilotMode[][] = [
+  ['damp'],
+  ['prograde', 'retrograde'],
+  ['normal', 'antinormal'],
+  ['radial-out', 'radial-in'],
+  ['maneuver'],
+]
+
+const MODE_TITLES: Record<string, string> = {
+  damp: 'Hold (kill rotation)',
+  prograde: 'Prograde',
+  retrograde: 'Retrograde',
+  normal: 'Normal',
+  antinormal: 'Anti-normal',
+  'radial-out': 'Radial out',
+  'radial-in': 'Radial in',
+  maneuver: 'Maneuver',
+}
+
+function AutopilotColumn({
+  active,
+  hasNode,
+  onSelect,
+}: {
+  active: AutopilotMode
+  hasNode: boolean
+  onSelect: (mode: AutopilotMode) => void
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 9, alignItems: 'center', pointerEvents: 'auto' }}>
+      {AUTOPILOT_GROUPS.map((group, index) => (
+        <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {group.map((mode) => {
+            if (mode === 'maneuver' && !hasNode) return null
+            const Glyph = HOLD_MODE_ICONS[mode]
+            if (!Glyph) return null
+            const color = HOLD_MODE_COLORS[mode] ?? '#cfe0ff'
+            const isActive = active === mode
+            return (
+              <button
+                key={mode}
+                onClick={() => onSelect(mode)}
+                title={MODE_TITLES[mode] ?? mode}
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: '50%',
+                  display: 'grid',
+                  placeItems: 'center',
+                  padding: 0,
+                  cursor: 'pointer',
+                  background: isActive ? color : 'rgba(10,16,28,0.78)',
+                  border: `1px solid ${isActive ? color : 'rgba(255,255,255,0.22)'}`,
+                }}
+              >
+                <svg width={20} height={20} viewBox="-12 -12 24 24" aria-hidden focusable={false}>
+                  <Glyph color={isActive ? '#0a0e1c' : color} />
+                </svg>
+              </button>
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 interface NavballInstrumentProps extends NavballProps {
@@ -50,16 +121,6 @@ const RADIUS = 85
 const VISIBLE_RADIUS = 83.5
 const SIZE = 170
 const CENTER = SIZE / 2
-
-const markerStyles = {
-  prograde: { label: 'P', color: '#9cff8f' },
-  retrograde: { label: 'R', color: '#ff9a8f' },
-  radialOut: { label: 'RO', color: '#8fd8ff' },
-  radialIn: { label: 'RI', color: '#ffcf70' },
-  normal: { label: 'N', color: '#d4a4ff' },
-  antiNormal: { label: 'AN', color: '#b8b8ff' },
-  maneuver: { label: 'M', color: '#ffcc00' },
-} as const
 
 export function Navball({ orientation, relativePosition, relativeVelocity, parentRotationAxis, maneuverDirection }: NavballProps) {
   const state = computeNavballState({
@@ -136,17 +197,17 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
             )
           })}
           {Object.entries(state.markers).map(([key, point]) => {
-            const style = markerStyles[key as keyof typeof markerStyles]
             if (!shouldRenderNavballMarker(point)) return null
+            const Glyph = MARKER_ICONS[key]
+            if (!Glyph) return null
+            const color = MARKER_COLORS[key] ?? '#d9e3ff'
             return (
               <g
                 key={key}
-                transform={`translate(${CENTER + point.x} ${CENTER + point.y})`}
+                transform={`translate(${CENTER + point.x} ${CENTER + point.y}) scale(0.85)`}
               >
-                <circle r={key === 'prograde' || key === 'retrograde' ? 8 : 6} fill="rgba(0,0,0,0.65)" stroke={style.color} strokeWidth="2" />
-                <text y="3" textAnchor="middle" fontFamily="monospace" fontSize="8" fill={style.color}>
-                  {style.label}
-                </text>
+                <circle r={11} fill="rgba(0,0,0,0.55)" />
+                <Glyph color={color} />
               </g>
             )
           })}
@@ -175,6 +236,8 @@ export function NavballCluster({
   surfaceState,
   autopilotMode,
   maneuverDirection,
+  onSelectMode,
+  hasManeuverNode,
 }: NavballClusterProps) {
   return (
     <div
@@ -184,12 +247,15 @@ export function NavballCluster({
         bottom: 18,
         transform: 'translateX(-50%)',
         display: 'flex',
-        alignItems: 'flex-end',
+        alignItems: 'center',
         gap: 12,
         pointerEvents: 'none',
       }}
     >
       <Proximity rows={rows.slice(0, 3)} />
+      {onSelectMode && (
+        <AutopilotColumn active={autopilotMode} hasNode={!!hasManeuverNode} onSelect={onSelectMode} />
+      )}
       <NavballInstrument
         orientation={orientation}
         relativePosition={relativePosition}

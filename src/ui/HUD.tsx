@@ -19,18 +19,6 @@ import {
   computeFlightReferenceFrame,
   rotationAxisFromAxialTilt,
 } from '../sim/vehicle/referenceFrame'
-import type { AutopilotMode } from '../sim/autopilot'
-
-const AUTOPILOT_BUTTONS: { mode: AutopilotMode; label: string }[] = [
-  { mode: 'damp', label: 'Hold' },
-  { mode: 'prograde', label: 'Pro' },
-  { mode: 'retrograde', label: 'Retro' },
-  { mode: 'normal', label: 'Nor' },
-  { mode: 'antinormal', label: 'Anti' },
-  { mode: 'radial-out', label: 'Rad+' },
-  { mode: 'radial-in', label: 'Rad-' },
-  { mode: 'maneuver', label: 'Man' },
-]
 
 const DELTA_V_AXES: { key: keyof ManeuverDeltaV; positive: string; negative: string }[] = [
   { key: 'prograde', positive: 'Pro', negative: 'Retro' },
@@ -240,56 +228,6 @@ export function HUD() {
         &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
       <FlightReadouts />
-      <AutopilotCluster />
-    </div>
-  )
-}
-
-/**
- * Autopilot / SAS mode buttons, docked just above the navball so the flight
- * controls sit with the instrument you fly by. Subscribes only to the (low
- * frequency) autopilot mode, so it renders on user action, not per tick.
- */
-function AutopilotCluster() {
-  const vehicles = useTrajectoriesStore((s) => s.vehicles)
-  const autopilotModes = useAutopilotStore((s) => s.modes)
-  const firstVehicle = Object.values(vehicles)[0]
-  if (!firstVehicle) return null
-  const active = autopilotModes[firstVehicle.id] ?? 'off'
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        left: '50%',
-        bottom: 228,
-        transform: 'translateX(-50%)',
-        display: 'flex',
-        gap: 4,
-        padding: 6,
-        background: 'rgba(0,0,0,0.55)',
-        border: '1px solid rgba(255,255,255,0.12)',
-        borderRadius: 6,
-        pointerEvents: 'auto',
-      }}
-    >
-      {AUTOPILOT_BUTTONS.map(({ mode, label }) => (
-        <button
-          key={mode}
-          onClick={() => useAutopilotStore.getState().toggleMode(firstVehicle.id, mode)}
-          style={{
-            background: active === mode ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
-            color: '#ccc',
-            border: '1px solid #333',
-            borderRadius: 3,
-            padding: '3px 8px',
-            cursor: 'pointer',
-            fontFamily: 'monospace',
-            fontSize: 11,
-          }}
-        >
-          {label}
-        </button>
-      ))}
     </div>
   )
 }
@@ -387,6 +325,8 @@ function FlightReadouts() {
           relativePosition={relativePosition}
           relativeVelocity={flightReadout.frame.navVelocity}
           parentRotationAxis={flightReadout.parentRotationAxis}
+          onSelectMode={(mode) => useAutopilotStore.getState().toggleMode(firstVehicle.id, mode)}
+          hasManeuverNode={!!node}
           mode={flightReadout.frame.mode}
           throttle={throttle}
           forceRatio={computeForceLoadRatio({
