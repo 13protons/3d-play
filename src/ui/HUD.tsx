@@ -66,6 +66,8 @@ export function HUD() {
   const toggleView = useModeStore((s) => s.toggleView)
   const toggleRotationAxes = useModeStore((s) => s.toggleRotationAxes)
   const toggleAttitudeDiagnostics = useModeStore((s) => s.toggleAttitudeDiagnostics)
+  const perfLogging = useModeStore((s) => s.perfLogging)
+  const togglePerfLogging = useModeStore((s) => s.togglePerfLogging)
   const autopilotModes = useAutopilotStore((s) => s.modes)
   const targetName = bodies[followTargetId]?.name ?? vehicles[followTargetId]?.name ?? followTargetId
   const firstVehicle = Object.values(vehicles)[0]
@@ -194,6 +196,20 @@ export function HUD() {
           }}
         >
           Attitude Diag: {showAttitudeDiagnostics ? 'On' : 'Off'}
+        </button>
+        <button
+          onClick={togglePerfLogging}
+          style={{
+            background: perfLogging ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
+            color: '#ccc',
+            border: '1px solid #333',
+            padding: '4px 8px',
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            fontSize: 12,
+          }}
+        >
+          Perf Log: {perfLogging ? 'On' : 'Off'}
         </button>
         {firstVehicle && (
           <>

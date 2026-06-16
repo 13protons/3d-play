@@ -14,17 +14,25 @@ import { drainRenderCounts } from './perfCounters'
 export function PerfLogger({ view }: { view: 'orbital' | 'vehicle' }) {
   const gl = useThree((s) => s.gl)
   const activeView = useModeStore((s) => s.activeView)
+  const enabled = useModeStore((s) => s.perfLogging)
   const start = useRef(0)
   const frames = useRef(0)
   const frameMsMax = useRef(0)
   const windowStart = useRef(0)
 
   useFrame((_, delta) => {
-    if (activeView !== view) return
+    if (!enabled || activeView !== view) {
+      // Idle: restart the window so re-enabling logs a clean first sample.
+      windowStart.current = 0
+      frames.current = 0
+      frameMsMax.current = 0
+      return
+    }
     const now = performance.now()
     if (windowStart.current === 0) {
       start.current = now
       windowStart.current = now
+      drainRenderCounts() // discard the backlog accumulated while logging was off
       return
     }
     frames.current += 1
