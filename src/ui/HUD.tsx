@@ -68,9 +68,7 @@ export function HUD() {
   const toggleAttitudeDiagnostics = useModeStore((s) => s.toggleAttitudeDiagnostics)
   const perfLogging = useModeStore((s) => s.perfLogging)
   const togglePerfLogging = useModeStore((s) => s.togglePerfLogging)
-  const autopilotModes = useAutopilotStore((s) => s.modes)
   const targetName = bodies[followTargetId]?.name ?? vehicles[followTargetId]?.name ?? followTargetId
-  const firstVehicle = Object.values(vehicles)[0]
 
   function setWarp(rate: number) {
     useInputStore
@@ -78,14 +76,6 @@ export function HUD() {
       .push({ type: 'set-warp', rate, simTime: useTrajectoriesStore.getState().getSimTime() })
   }
 
-  const activeAutopilotMode: AutopilotMode = firstVehicle
-    ? (autopilotModes[firstVehicle.id] ?? 'off')
-    : 'off'
-
-  function toggleAutopilotMode(mode: AutopilotMode) {
-    if (!firstVehicle) return
-    useAutopilotStore.getState().toggleMode(firstVehicle.id, mode)
-  }
 
   return (
     <div
@@ -211,27 +201,6 @@ export function HUD() {
         >
           Perf Log: {perfLogging ? 'On' : 'Off'}
         </button>
-        {firstVehicle && (
-          <>
-            {AUTOPILOT_BUTTONS.map(({ mode, label }) => (
-              <button
-                key={mode}
-                onClick={() => toggleAutopilotMode(mode)}
-                style={{
-                  background: activeAutopilotMode === mode ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
-                  color: '#ccc',
-                  border: '1px solid #333',
-                  padding: '4px 8px',
-                  cursor: 'pointer',
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </>
-        )}
       </div>
 
       <div
@@ -271,6 +240,56 @@ export function HUD() {
         &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
       <FlightReadouts />
+      <AutopilotCluster />
+    </div>
+  )
+}
+
+/**
+ * Autopilot / SAS mode buttons, docked just above the navball so the flight
+ * controls sit with the instrument you fly by. Subscribes only to the (low
+ * frequency) autopilot mode, so it renders on user action, not per tick.
+ */
+function AutopilotCluster() {
+  const vehicles = useTrajectoriesStore((s) => s.vehicles)
+  const autopilotModes = useAutopilotStore((s) => s.modes)
+  const firstVehicle = Object.values(vehicles)[0]
+  if (!firstVehicle) return null
+  const active = autopilotModes[firstVehicle.id] ?? 'off'
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        left: '50%',
+        bottom: 228,
+        transform: 'translateX(-50%)',
+        display: 'flex',
+        gap: 4,
+        padding: 6,
+        background: 'rgba(0,0,0,0.55)',
+        border: '1px solid rgba(255,255,255,0.12)',
+        borderRadius: 6,
+        pointerEvents: 'auto',
+      }}
+    >
+      {AUTOPILOT_BUTTONS.map(({ mode, label }) => (
+        <button
+          key={mode}
+          onClick={() => useAutopilotStore.getState().toggleMode(firstVehicle.id, mode)}
+          style={{
+            background: active === mode ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
+            color: '#ccc',
+            border: '1px solid #333',
+            borderRadius: 3,
+            padding: '3px 8px',
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            fontSize: 11,
+          }}
+        >
+          {label}
+        </button>
+      ))}
     </div>
   )
 }
