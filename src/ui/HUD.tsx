@@ -6,6 +6,8 @@ import { useManeuverStore } from '../state/maneuver'
 import { useModeStore } from '../state/mode'
 import { useAutopilotStore } from '../state/autopilot'
 import { maneuverBurnDirection, type ManeuverDeltaV, type ManeuverNode } from '../sim/maneuverNode'
+import { attitudeDiagnostics, type AttitudeAxisDiagnostic } from './attitudeDiagnostics'
+import type { VehicleControlMeta } from '../state/trajectories'
 import { WARP_RATES } from '../sim/warp'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
 import { computeFlightReadout, flightTelemetryRows } from './flightReadout'
@@ -57,8 +59,10 @@ export function HUD() {
   const setFollowTarget = useCameraStore((s) => s.setFollowTarget)
   const activeView = useModeStore((s) => s.activeView)
   const showRotationAxes = useModeStore((s) => s.showRotationAxes)
+  const showAttitudeDiagnostics = useModeStore((s) => s.showAttitudeDiagnostics)
   const toggleView = useModeStore((s) => s.toggleView)
   const toggleRotationAxes = useModeStore((s) => s.toggleRotationAxes)
+  const toggleAttitudeDiagnostics = useModeStore((s) => s.toggleAttitudeDiagnostics)
   const autopilotModes = useAutopilotStore((s) => s.modes)
   const maneuverNodes = useManeuverStore((s) => s.nodes)
   const targetName = bodies[followTargetId]?.name ?? vehicles[followTargetId]?.name ?? followTargetId
@@ -223,6 +227,20 @@ export function HUD() {
         >
           Rotation Axis: {showRotationAxes ? 'On' : 'Off'}
         </button>
+        <button
+          onClick={toggleAttitudeDiagnostics}
+          style={{
+            background: showAttitudeDiagnostics ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
+            color: '#ccc',
+            border: '1px solid #333',
+            padding: '4px 8px',
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            fontSize: 12,
+          }}
+        >
+          Attitude Diag: {showAttitudeDiagnostics ? 'On' : 'Off'}
+        </button>
         {vehicleControl && firstVehicle && (
           <>
             {AUTOPILOT_BUTTONS.map(({ mode, label }) => (
@@ -282,6 +300,9 @@ export function HUD() {
         &nbsp; WASD/QE reaction wheel
         &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
+      {showAttitudeDiagnostics && vehicleControl && (
+        <AttitudeDiagnosticsPanel control={vehicleControl} />
+      )}
       {firstVehicle && maneuverNodes[firstVehicle.id] && (
         <ManeuverNodePanel
           vesselId={firstVehicle.id}
@@ -323,6 +344,63 @@ export function HUD() {
           })}
         />
       )}
+    </div>
+  )
+}
+
+function AttitudeDiagnosticsPanel({ control }: { control: VehicleControlMeta }) {
+  const rows = attitudeDiagnostics(control)
+  if (!rows) return null
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: 16,
+        bottom: 16,
+        width: 220,
+        padding: 12,
+        background: 'rgba(0,0,0,0.6)',
+        border: '1px solid rgba(120,200,255,0.4)',
+        borderRadius: 4,
+        color: 'white',
+        fontFamily: 'monospace',
+        fontSize: 12,
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{ color: '#78c8ff', fontWeight: 'bold', marginBottom: 8 }}>ATTITUDE CONTROL</div>
+      {rows.map((row) => (
+        <AttitudeAxisRow key={row.label} row={row} />
+      ))}
+      <div style={{ marginTop: 6, opacity: 0.5, fontSize: 10 }}>
+        bar = commanded / max torque &nbsp; ω in °/s
+      </div>
+    </div>
+  )
+}
+
+function AttitudeAxisRow({ row }: { row: AttitudeAxisDiagnostic }) {
+  // Bar turns amber→red as the wheel approaches saturation.
+  const hue = 140 - row.saturation * 140
+  const rateDegPerSec = (row.angularRate * 180) / Math.PI
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+        <span>{row.label}</span>
+        <span style={{ opacity: 0.7 }}>
+          {(row.saturation * 100).toFixed(0)}% &nbsp; {rateDegPerSec >= 0 ? '+' : ''}
+          {rateDegPerSec.toFixed(1)}°/s
+        </span>
+      </div>
+      <div style={{ height: 6, background: 'rgba(255,255,255,0.12)', borderRadius: 3, overflow: 'hidden' }}>
+        <div
+          style={{
+            width: `${row.saturation * 100}%`,
+            height: '100%',
+            background: `hsl(${hue}, 80%, 55%)`,
+          }}
+        />
+      </div>
     </div>
   )
 }

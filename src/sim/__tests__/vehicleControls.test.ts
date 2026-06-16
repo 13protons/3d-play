@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MANUAL_TORQUE_MIN_SCALE,
+  MAX_AUTOPILOT_ANGULAR_RATE,
+  MAX_MANUAL_ANGULAR_RATE,
   REACTION_WHEEL_ANGULAR_RATE,
   adjustThrottle,
+  advanceManualHoldTime,
   angularVelocityAfterTorque,
   angularVelocityDampingTorque,
   attitudeHoldTorque,
   forwardDirectionHoldTorque,
+  integrateOrientation,
+  limitTorqueToAngularRate,
   manualReactionWheelTorque,
+  manualTorqueRampScale,
+  rampManualTorque,
   rotateOrientationAroundWorldAxis,
   pidStep,
+  slewAxisTorque,
   angularVelocityForReactionWheelKeys,
   reactionWheelTorqueForKeys,
   sumAndClampTorque,
@@ -75,6 +84,59 @@ describe('manualReactionWheelTorque', () => {
     })
 
     expect(torque).toEqual([0, 0, 0])
+  })
+})
+
+describe('manualTorqueRampScale', () => {
+  it('applies only the minimum scale on a quick tap', () => {
+    expect(manualTorqueRampScale(0)).toBe(MANUAL_TORQUE_MIN_SCALE)
+    expect(manualTorqueRampScale(0.05)).toBeGreaterThan(MANUAL_TORQUE_MIN_SCALE)
+    expect(manualTorqueRampScale(0.05)).toBeLessThan(0.3)
+  })
+
+  it('ramps to full authority after holding through the ramp window', () => {
+    expect(manualTorqueRampScale(1)).toBeCloseTo(1)
+    expect(manualTorqueRampScale(5)).toBe(1)
+  })
+
+  it('increases monotonically with hold time', () => {
+    expect(manualTorqueRampScale(0.5)).toBeGreaterThan(manualTorqueRampScale(0.2))
+  })
+})
+
+describe('rampManualTorque', () => {
+  it('scales each axis by its own hold time', () => {
+    const ramped = rampManualTorque([4800, 4800, 3200], [0, 1, 5])
+    expect(ramped[0]).toBeCloseTo(4800 * MANUAL_TORQUE_MIN_SCALE)
+    expect(ramped[1]).toBeCloseTo(4800)
+    expect(ramped[2]).toBeCloseTo(3200)
+  })
+})
+
+describe('limitTorqueToAngularRate', () => {
+  it('cuts torque that would accelerate past the rate cap', () => {
+    const limited = limitTorqueToAngularRate([4800, 4800, 0], [MAX_MANUAL_ANGULAR_RATE, 0, 0], MAX_MANUAL_ANGULAR_RATE)
+    expect(limited[0]).toBe(0)
+    expect(limited[1]).toBe(4800)
+  })
+
+  it('still allows braking torque against an over-speed axis', () => {
+    const limited = limitTorqueToAngularRate([-4800, 0, 0], [MAX_MANUAL_ANGULAR_RATE + 0.5, 0, 0], MAX_MANUAL_ANGULAR_RATE)
+    expect(limited[0]).toBe(-4800)
+  })
+
+  it('leaves released (zero) input untouched — no auto-braking', () => {
+    expect(limitTorqueToAngularRate([0, 0, 0], [1, -1, 0.5], MAX_MANUAL_ANGULAR_RATE)).toEqual([0, 0, 0])
+  })
+})
+
+describe('advanceManualHoldTime', () => {
+  it('accumulates hold time on active axes and resets idle ones', () => {
+    const next = advanceManualHoldTime([0.2, 0, 1.0], [4800, 0, 0], 0.1)
+    expect(next[0]).toBeCloseTo(0.3)
+    expect(next[1]).toBe(0)
+    // Axis 2 had no current input → resets even though it had accumulated time.
+    expect(next[2]).toBe(0)
   })
 })
 
@@ -205,6 +267,117 @@ describe('forwardDirectionHoldTorque', () => {
 
     const magnitude = Math.hypot(torque[0], torque[1], torque[2])
     expect(magnitude).toBeGreaterThan(0)
+  })
+})
+
+describe('slewAxisTorque', () => {
+  const I = 12_000
+  const maxTorque = 8_000
+
+  it('commands torque toward a positive error and brakes against a positive rate near target', () => {
+    // Far from target, at rest → accelerate toward the target (positive torque).
+    expect(slewAxisTorque(1, 0, maxTorque, I, 1)).toBeGreaterThan(0)
+    // Essentially at the target but still spinning → brake (negative torque).
+    expect(slewAxisTorque(1e-4, 0.5, maxTorque, I, 1)).toBeLessThan(0)
+  })
+
+  it('never commands more than the available reaction-wheel torque', () => {
+    expect(Math.abs(slewAxisTorque(Math.PI, 0, maxTorque, I, 10))).toBeLessThanOrEqual(maxTorque)
+    expect(Math.abs(slewAxisTorque(-Math.PI, 0, maxTorque, I, 10))).toBeLessThanOrEqual(maxTorque)
+  })
+
+  it('returns zero with no torque authority or inertia', () => {
+    expect(slewAxisTorque(1, 0, 0, I, 1)).toBe(0)
+    expect(slewAxisTorque(1, 0, maxTorque, 0, 1)).toBe(0)
+  })
+})
+
+describe('forwardDirectionHoldTorque convergence', () => {
+  // Closed-loop simulation using the real integration the worker performs:
+  // torque -> angular velocity -> orientation, one constant-torque tick at a time.
+  function rotate(v: [number, number, number], q: [number, number, number, number]): [number, number, number] {
+    const [x, y, z] = v
+    const [qx, qy, qz, qw] = q
+    const ix = qw * x + qy * z - qz * y
+    const iy = qw * y + qz * x - qx * z
+    const iz = qw * z + qx * y - qy * x
+    const iw = -qx * x - qy * y - qz * z
+    return [
+      ix * qw + iw * -qx + iy * -qz - iz * -qy,
+      iy * qw + iw * -qy + iz * -qx - ix * -qz,
+      iz * qw + iw * -qz + ix * -qy - iy * -qx,
+    ]
+  }
+
+  function angleTo(forward: [number, number, number], target: [number, number, number]): number {
+    const tm = Math.hypot(...target)
+    const t: [number, number, number] = [target[0] / tm, target[1] / tm, target[2] / tm]
+    const dot = forward[0] * t[0] + forward[1] * t[1] + forward[2] * t[2]
+    return Math.acos(Math.max(-1, Math.min(1, dot)))
+  }
+
+  function simulate(opts: {
+    target: [number, number, number]
+    momentOfInertia: [number, number, number]
+    maxTorque: [number, number, number]
+    dt?: number
+    steps?: number
+  }): { finalAngle: number; peakAngularRate: number; overshoot: number } {
+    const { target, momentOfInertia, maxTorque, dt = 1 / 60, steps = 4000 } = opts
+    let orientation: [number, number, number, number] = [0, 0, 0, 1]
+    let angularVelocity: [number, number, number] = [0, 0, 0]
+    let peakAngularRate = 0
+    let minAngle = Infinity
+    let overshoot = 0
+    for (let i = 0; i < steps; i++) {
+      const torque = forwardDirectionHoldTorque({
+        currentOrientation: orientation,
+        targetForward: target,
+        angularVelocity,
+        maxTorque,
+        momentOfInertia,
+      })
+      angularVelocity = angularVelocityAfterTorque(angularVelocity, torque, momentOfInertia, dt)
+      orientation = integrateOrientation(orientation, angularVelocity, dt)
+      const angle = angleTo(rotate([0, 0, 1], orientation), target)
+      peakAngularRate = Math.max(peakAngularRate, Math.hypot(...angularVelocity))
+      minAngle = Math.min(minAngle, angle)
+      // Once it has first reached the target, any later growth in angle is overshoot/oscillation.
+      if (minAngle < 0.02) overshoot = Math.max(overshoot, angle - minAngle)
+    }
+    const finalForward = rotate([0, 0, 1], orientation)
+    return { finalAngle: angleTo(finalForward, target), peakAngularRate, overshoot }
+  }
+
+  it('converges to a 90° target without overshoot at high inertia / low wheel torque', () => {
+    const result = simulate({
+      target: [1, 0, 0],
+      momentOfInertia: [12_000, 12_000, 8_000],
+      maxTorque: [8_000, 8_000, 5_000],
+    })
+    expect(result.finalAngle).toBeLessThan(0.01)
+    expect(result.overshoot).toBeLessThan(0.02)
+  })
+
+  it('converges on a near-180° flip without overshoot', () => {
+    const result = simulate({
+      target: [0, 0.05, -0.998],
+      momentOfInertia: [9_000, 9_000, 6_000],
+      maxTorque: [6_000, 6_000, 4_000],
+    })
+    expect(result.finalAngle).toBeLessThan(0.01)
+    expect(result.overshoot).toBeLessThan(0.03)
+  })
+
+  it('caps slew rate so high-torque craft do not slam the target', () => {
+    const result = simulate({
+      target: [1, 0, 0],
+      momentOfInertia: [500, 500, 300],
+      maxTorque: [400_000, 400_000, 250_000],
+    })
+    expect(result.peakAngularRate).toBeLessThanOrEqual(MAX_AUTOPILOT_ANGULAR_RATE * 1.05)
+    expect(result.finalAngle).toBeLessThan(0.01)
+    expect(result.overshoot).toBeLessThan(0.02)
   })
 })
 

@@ -36,7 +36,7 @@
       },
       "attitude": {
         "momentOfInertia": [12000, 12000, 8000],
-        "reactionWheelTorque": [400000, 400000, 250000]
+        "reactionWheelTorque": [4800, 4800, 3200]
       },
       "aero": {
         "model": "simple-drag",

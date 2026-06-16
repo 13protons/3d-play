@@ -10,11 +10,15 @@ import { toAbsolute } from '../coordinates'
 import { advanceTo } from '../integrator/adaptive'
 import { pointMassDerivatives } from '../integrator/derivatives'
 import {
+  MAX_MANUAL_ANGULAR_RATE,
+  advanceManualHoldTime,
   angularVelocityAfterTorque,
   angularVelocityDampingTorque,
   forwardDirectionHoldTorque,
   integrateOrientation,
+  limitTorqueToAngularRate,
   manualReactionWheelTorque,
+  rampManualTorque,
   rotateOrientationAroundWorldAxis,
   shouldDisableThrottleForWarp,
   shouldEmitAeroForce,
@@ -60,6 +64,10 @@ let throttle = 0
 let orientation: Quaternion = [0, 0, 0, 1]
 let angularVelocity: Vec3 = [0, 0, 0]
 let manualTorque: Vec3 = [0, 0, 0]
+/** Per-axis continuous hold time for manual input, driving the torque ramp. */
+let manualHoldTime: Vec3 = [0, 0, 0]
+/** Last reaction-wheel torque actually commanded — published for diagnostics. */
+let commandedTorque: Vec3 = [0, 0, 0]
 let attitudeTarget: AttitudeTarget = { kind: 'manual' }
 let surfaceContact: SurfaceContact = { type: 'flying' }
 let landedAt = 0
@@ -77,6 +85,7 @@ function emitControls(): void {
     attitudeTargetKind: attitudeTarget.kind,
     surfaceState: surfaceContact.type,
     reactionWheelTorque: attitude?.reactionWheelTorque,
+    commandedTorque,
     mass: resources?.mass,
     maxThrust: engine?.maxThrust,
     currentThrust: engine ? engine.maxThrust * throttle : undefined,
@@ -130,6 +139,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     orientation = [0, 0, 0, 1]
     angularVelocity = [0, 0, 0]
     manualTorque = [0, 0, 0]
+    manualHoldTime = [0, 0, 0]
     attitudeTarget = { kind: 'manual' }
     surfaceContact = { type: 'flying' }
     landedAt = 0
@@ -198,6 +208,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     if (shouldStabilizeAngularVelocityForWarp(msg.rate)) {
       angularVelocity = [0, 0, 0]
       manualTorque = [0, 0, 0]
+      manualHoldTime = [0, 0, 0]
       attitudeTarget = { kind: 'manual' }
       changedControls = true
     }
@@ -219,6 +230,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     const prevTime = simTime
     const prevState = new Float64Array(stateVec)
     const elapsedSeconds = targetTime - simTime
+    manualHoldTime = advanceManualHoldTime(manualHoldTime, manualTorque, elapsedSeconds)
     aeroForceWorld = [0, 0, 0]
 
     const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
@@ -356,12 +368,20 @@ function updateAngularState(elapsedSeconds: number, torque: Vec3): void {
 }
 
 function currentAttitudeTorque(): Vec3 {
+  commandedTorque = computeAttitudeTorque()
+  return commandedTorque
+}
+
+function computeAttitudeTorque(): Vec3 {
   if (!attitude) return manualTorque
   if (attitudeTarget.kind === 'manual') {
-    return manualReactionWheelTorque({
+    const base = manualReactionWheelTorque({
       commandTorque: manualTorque,
       angularVelocity,
     })
+    // Tap = gentle, hold = ramps up; then cap the resulting slew rate.
+    const ramped = rampManualTorque(base, manualHoldTime)
+    return limitTorqueToAngularRate(ramped, angularVelocity, MAX_MANUAL_ANGULAR_RATE)
   }
   if (attitudeTarget.kind === 'damp') {
     const dampingTorque = angularVelocityDampingTorque({

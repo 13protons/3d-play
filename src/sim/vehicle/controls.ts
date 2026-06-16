@@ -2,6 +2,36 @@ export const RCS_ANGULAR_RATE = 0.25
 export const REACTION_WHEEL_ANGULAR_RATE = RCS_ANGULAR_RATE
 export const THROTTLE_RAMP_RATE = 0.5
 
+/** Default cap on autopilot slew rate (rad/s) so high-torque craft don't slam the target. */
+export const MAX_AUTOPILOT_ANGULAR_RATE = 0.6
+/** Cap on manual reaction-wheel slew rate (rad/s, ≈26°/s) so held keys can't spin up forever. */
+export const MAX_MANUAL_ANGULAR_RATE = 0.45
+/** Continuous hold time (s) for manual torque to ramp from its floor up to full authority. */
+export const MANUAL_TORQUE_RAMP_SECONDS = 1.0
+/** Torque fraction applied the instant a key is pressed — a quick tap is gentle, holding builds up. */
+export const MANUAL_TORQUE_MIN_SCALE = 0.15
+/**
+ * Fraction of available angular acceleration the brake curve assumes. < 1 so
+ * commanding full torque always decelerates *faster* than the planned curve,
+ * which guarantees the craft stops short of the target instead of overshooting.
+ */
+const SLEW_BRAKE_SAFETY = 0.9
+/**
+ * Rate-error → torque stiffness. The controller commands a target angular rate,
+ * then drives the actual rate toward it; this gain saturates to max torque
+ * outside a thin boundary layer (half-width ≈ αmax / gain), so the approach is
+ * effectively bang-bang far out and critically damped near the target.
+ */
+const SLEW_RATE_GAIN = 6
+/**
+ * Rate-per-radian gain used inside a small region around the target, where the
+ * sqrt brake curve's near-infinite slope would otherwise chatter in discrete
+ * time. Set to SLEW_RATE_GAIN / 4 so the combined outer (angle) + inner (rate)
+ * loop is critically damped (ζ = 1) in this linear region — no overshoot, no
+ * creep. Far from the target the sqrt brake curve dominates instead.
+ */
+const SLEW_LINEAR_RATE_GAIN = SLEW_RATE_GAIN / 4
+
 export type Quaternion = [number, number, number, number]
 export type Vec3 = [number, number, number]
 export interface ThrustModel {
@@ -32,7 +62,7 @@ export interface ForwardDirectionHoldInput {
   angularVelocity: Vec3
   maxTorque: Vec3
   momentOfInertia: Vec3
-  naturalFrequency?: number
+  maxAngularRate?: number
 }
 
 export interface ManualReactionWheelInput {
@@ -94,6 +124,68 @@ export function manualReactionWheelTorque({
   return commandTorque
 }
 
+/**
+ * Ramp factor (minScale..1) for manual reaction-wheel torque given how long the
+ * input has been held continuously. A quick tap applies only `minScale` of the
+ * torque; holding for `rampSeconds` builds up to full authority — like pointer
+ * acceleration, so fine nudges and large slews share one key.
+ */
+export function manualTorqueRampScale(
+  holdSeconds: number,
+  rampSeconds = MANUAL_TORQUE_RAMP_SECONDS,
+  minScale = MANUAL_TORQUE_MIN_SCALE,
+): number {
+  if (!(holdSeconds > 0)) return minScale
+  if (!(rampSeconds > 0)) return 1
+  return clamp(minScale + (1 - minScale) * (holdSeconds / rampSeconds), minScale, 1)
+}
+
+/** Apply each axis's hold-duration ramp to a manual torque command. */
+export function rampManualTorque(torque: Vec3, holdSeconds: Vec3): Vec3 {
+  return [
+    torque[0] * manualTorqueRampScale(holdSeconds[0]),
+    torque[1] * manualTorqueRampScale(holdSeconds[1]),
+    torque[2] * manualTorqueRampScale(holdSeconds[2]),
+  ]
+}
+
+/**
+ * Zero any torque component that would push an axis past ±maxRate in the
+ * direction it is already spinning. Torque opposing the current spin (braking)
+ * always passes through, and releasing input (zero torque) is untouched — so
+ * this caps manual slew rate without adding auto-braking on release.
+ */
+export function limitTorqueToAngularRate(
+  torque: Vec3,
+  angularVelocity: Vec3,
+  maxRate: number,
+): Vec3 {
+  const limit = (axis: number): number => {
+    const t = torque[axis]
+    const w = angularVelocity[axis]
+    if (t > 0 && w >= maxRate) return 0
+    if (t < 0 && w <= -maxRate) return 0
+    return t
+  }
+  return [limit(0), limit(1), limit(2)]
+}
+
+/**
+ * Advance per-axis manual-hold timers by `elapsedSeconds`: an axis with active
+ * manual torque accumulates hold time (driving the ramp), an idle axis resets.
+ */
+export function advanceManualHoldTime(
+  holdSeconds: Vec3,
+  manualTorque: Vec3,
+  elapsedSeconds: number,
+): Vec3 {
+  return [
+    manualTorque[0] !== 0 ? holdSeconds[0] + elapsedSeconds : 0,
+    manualTorque[1] !== 0 ? holdSeconds[1] + elapsedSeconds : 0,
+    manualTorque[2] !== 0 ? holdSeconds[2] + elapsedSeconds : 0,
+  ]
+}
+
 export function sumAndClampTorque(a: Vec3, b: Vec3, maxTorque: Vec3): Vec3 {
   return [
     clamp(a[0] + b[0], -maxTorque[0], maxTorque[0]),
@@ -126,15 +218,47 @@ export function forwardDirectionHoldTorque({
   angularVelocity,
   maxTorque,
   momentOfInertia,
-  naturalFrequency = 2,
+  maxAngularRate = MAX_AUTOPILOT_ANGULAR_RATE,
 }: ForwardDirectionHoldInput): Vec3 {
   const targetLocal = rotateVectorByQuaternion(normalizeVec3(targetForward, [0, 0, 1]), conjugateQuaternion(currentOrientation))
   const error = forwardAlignmentError(targetLocal)
   return [
-    cleanZero(pidStep({ error: error[0], integral: 0, derivative: -angularVelocity[0], kp: momentOfInertia[0] * naturalFrequency * naturalFrequency, ki: 0, kd: 2 * momentOfInertia[0] * naturalFrequency, maxOutput: maxTorque[0] })),
-    cleanZero(pidStep({ error: error[1], integral: 0, derivative: -angularVelocity[1], kp: momentOfInertia[1] * naturalFrequency * naturalFrequency, ki: 0, kd: 2 * momentOfInertia[1] * naturalFrequency, maxOutput: maxTorque[1] })),
-    cleanZero(pidStep({ error: 0, integral: 0, derivative: -angularVelocity[2], kp: 0, ki: 0, kd: 2 * momentOfInertia[2] * naturalFrequency, maxOutput: maxTorque[2] })),
+    slewAxisTorque(error[0], angularVelocity[0], maxTorque[0], momentOfInertia[0], maxAngularRate),
+    slewAxisTorque(error[1], angularVelocity[1], maxTorque[1], momentOfInertia[1], maxAngularRate),
+    // Roll has no orientation target (zero error) — damp the rate only.
+    slewAxisTorque(0, angularVelocity[2], maxTorque[2], momentOfInertia[2], maxAngularRate),
   ]
+}
+
+/**
+ * Slew-rate-limited reaction-wheel torque for a single axis.
+ *
+ * Instead of a linear PD law (which saturates on large slews and overshoots
+ * because it can't brake in time at high inertia), this commands a target
+ * angular rate from a "brake curve" — the fastest rate from which the axis can
+ * still decelerate to a stop within the remaining `error`, given the available
+ * angular acceleration. The rate is clamped to `maxAngularRate`, then a stiff
+ * inner loop drives the actual rate toward it. With a sub-unity safety factor
+ * on the brake curve, commanding full torque always over-brakes the plan, so
+ * the axis converges without overshoot regardless of inertia or wheel torque.
+ */
+export function slewAxisTorque(
+  error: number,
+  angularVelocity: number,
+  maxTorque: number,
+  momentOfInertia: number,
+  maxAngularRate: number,
+): number {
+  if (!(maxTorque > 0) || !(momentOfInertia > 0)) return 0
+  const angularAccelMax = maxTorque / momentOfInertia
+  const magnitude = Math.abs(error)
+  // Brake curve far out; linear ramp near the target; never exceed the rate cap.
+  const brakeRate = Math.sqrt(2 * angularAccelMax * SLEW_BRAKE_SAFETY * magnitude)
+  const linearRate = SLEW_LINEAR_RATE_GAIN * magnitude
+  const speed = Math.min(maxAngularRate, brakeRate, linearRate)
+  const desiredRate = Math.sign(error) * speed
+  const torque = momentOfInertia * SLEW_RATE_GAIN * (desiredRate - angularVelocity)
+  return cleanZero(clamp(torque, -maxTorque, maxTorque))
 }
 
 /**

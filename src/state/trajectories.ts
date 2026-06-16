@@ -15,6 +15,7 @@ export interface VehicleControlMeta {
   attitudeTargetKind: AttitudeTarget['kind']
   surfaceState: 'flying' | 'landed' | 'crashed'
   reactionWheelTorque?: [number, number, number]
+  commandedTorque?: [number, number, number]
   mass?: number
   maxThrust?: number
   currentThrust?: number
