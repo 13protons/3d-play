@@ -11,6 +11,14 @@ export const MANUAL_TORQUE_RAMP_SECONDS = 1.0
 /** Torque fraction applied the instant a key is pressed — a quick tap is gentle, holding builds up. */
 export const MANUAL_TORQUE_MIN_SCALE = 0.15
 /**
+ * Max attitude integration step (s). The attitude controller re-evaluates each
+ * sub-step, so covering a long frame (a stall, or a catch-up after the worker
+ * fell behind) in small slices keeps it from applying a stale torque across a
+ * big step and overshooting. Also the natural inner-loop dt for a future stiff
+ * multi-body vehicle. Only ever runs at 1× warp (attitude is frozen above).
+ */
+export const MAX_ATTITUDE_SUBSTEP = 1 / 60
+/**
  * Fraction of available angular acceleration the brake curve assumes. < 1 so
  * commanding full torque always decelerates *faster* than the planned curve,
  * which guarantees the craft stops short of the target instead of overshooting.
@@ -112,6 +120,55 @@ export function angularVelocityAfterTorque(
     current[1] + (torque[1] / momentOfInertia[1]) * dt,
     current[2] + (torque[2] / momentOfInertia[2]) * dt,
   ]
+}
+
+export interface AttitudeStepInput {
+  orientation: Quaternion
+  angularVelocity: Vec3
+  momentOfInertia: Vec3
+  /** Total time to advance attitude over (s). */
+  elapsedSeconds: number
+  /** Reaction-wheel torque for the current (orientation, angularVelocity). Re-evaluated per sub-step. */
+  torqueFor: (orientation: Quaternion, angularVelocity: Vec3) => Vec3
+  /** Largest single integration slice (s). Defaults to MAX_ATTITUDE_SUBSTEP. */
+  maxSubstep?: number
+}
+
+export interface AttitudeStepResult {
+  orientation: Quaternion
+  angularVelocity: Vec3
+  /** Torque commanded on the final sub-step — published for diagnostics. */
+  lastTorque: Vec3
+}
+
+/**
+ * Advance attitude over `elapsedSeconds` in slices no larger than `maxSubstep`,
+ * re-evaluating the controller torque each slice. Re-evaluation is what prevents
+ * overshoot: a single large explicit step would hold the start-of-step torque/ω
+ * across the whole interval and sail past the target, whereas small slices let
+ * the controller brake as it approaches. A no-op for `elapsedSeconds <= 0`.
+ */
+export function integrateAttitudeOverStep({
+  orientation,
+  angularVelocity,
+  momentOfInertia,
+  elapsedSeconds,
+  torqueFor,
+  maxSubstep = MAX_ATTITUDE_SUBSTEP,
+}: AttitudeStepInput): AttitudeStepResult {
+  let o = orientation
+  let w = angularVelocity
+  let lastTorque: Vec3 = [0, 0, 0]
+  const step = maxSubstep > 0 ? maxSubstep : elapsedSeconds
+  let remaining = elapsedSeconds
+  while (remaining > 1e-9) {
+    const dt = Math.min(remaining, step)
+    lastTorque = torqueFor(o, w)
+    w = angularVelocityAfterTorque(w, lastTorque, momentOfInertia, dt)
+    o = integrateOrientation(o, w, dt)
+    remaining -= dt
+  }
+  return { orientation: o, angularVelocity: w, lastTorque }
 }
 
 export function manualReactionWheelTorque({

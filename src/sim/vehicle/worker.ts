@@ -13,9 +13,9 @@ import { pointMassDerivatives } from '../integrator/derivatives'
 import {
   MAX_MANUAL_ANGULAR_RATE,
   advanceManualHoldTime,
-  angularVelocityAfterTorque,
   angularVelocityDampingTorque,
   forwardDirectionHoldTorque,
+  integrateAttitudeOverStep,
   integrateOrientation,
   limitTorqueToAngularRate,
   manualReactionWheelTorque,
@@ -61,6 +61,7 @@ let engine: VehicleEngine | undefined
 let attitude: VehicleAttitude | undefined
 let aero: VehicleAero | undefined
 let simTime = 0
+let warpRate = 1
 let throttle = 0
 let orientation: Quaternion = [0, 0, 0, 1]
 let angularVelocity: Vec3 = [0, 0, 0]
@@ -136,6 +137,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     attitude = msg.attitude
     aero = msg.aero
     simTime = 0
+    warpRate = 1
     throttle = 0
     orientation = [0, 0, 0, 1]
     angularVelocity = [0, 0, 0]
@@ -205,6 +207,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
   }
 
   if (msg.type === 'set-warp') {
+    warpRate = msg.rate
     let changedControls = false
     if (shouldStabilizeAngularVelocityForWarp(msg.rate)) {
       angularVelocity = [0, 0, 0]
@@ -266,7 +269,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         surfaceContact = { type: 'flying' }
       } else {
         stateVec.set([...landed.position, ...landed.velocity])
-        updateAngularState(elapsedSeconds, currentAttitudeTorque())
+        advanceAttitude(elapsedSeconds)
         // Co-rotate with the parent so a landed vehicle's orientation tracks
         // the surface it's glued to instead of drifting in inertial space.
         orientation = rotateOrientationAroundWorldAxis(
@@ -299,7 +302,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     })
 
     advanceTo(stateVec, simTime, targetTime, deriv, 1e-10)
-    updateAngularState(elapsedSeconds, currentAttitudeTorque())
+    advanceAttitude(elapsedSeconds)
     simTime = targetTime
 
     if (surfaceContact.type === 'flying' && parentCurve && parentSurface) {
@@ -355,47 +358,64 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
   }
 }
 
-function updateAngularState(elapsedSeconds: number, torque: Vec3): void {
+/**
+ * Advance vehicle attitude (reaction-wheel control) over `elapsedSeconds`.
+ *
+ * Frozen above 1× warp: only translation, planet spin (analytic), and landed
+ * co-rotation continue then — the vehicle's controlled attitude holds. At 1×
+ * the integration is substepped so a long frame (stall or scheduler catch-up)
+ * re-evaluates the controller per slice instead of taking one overshooting step.
+ */
+function advanceAttitude(elapsedSeconds: number): void {
   if (elapsedSeconds <= 0) return
-  angularVelocity = attitude
-    ? angularVelocityAfterTorque(
-        angularVelocity,
-        torque,
-        attitude.momentOfInertia,
-        elapsedSeconds,
-      )
-    : torque
-  orientation = integrateOrientation(orientation, angularVelocity, elapsedSeconds)
+  if (shouldStabilizeAngularVelocityForWarp(warpRate)) {
+    commandedTorque = [0, 0, 0]
+    return
+  }
+  if (!attitude) {
+    // Degenerate path (no attitude model): treat manual torque as a direct rate.
+    const torque = computeAttitudeTorque(orientation, angularVelocity)
+    commandedTorque = torque
+    angularVelocity = torque
+    orientation = integrateOrientation(orientation, angularVelocity, elapsedSeconds)
+    return
+  }
+  const result = integrateAttitudeOverStep({
+    orientation,
+    angularVelocity,
+    momentOfInertia: attitude.momentOfInertia,
+    elapsedSeconds,
+    torqueFor: computeAttitudeTorque,
+  })
+  orientation = result.orientation
+  angularVelocity = result.angularVelocity
+  commandedTorque = result.lastTorque
 }
 
-function currentAttitudeTorque(): Vec3 {
-  commandedTorque = computeAttitudeTorque()
-  return commandedTorque
-}
-
-function computeAttitudeTorque(): Vec3 {
+/** Reaction-wheel torque for a candidate (orientation, angularVelocity). Pure w.r.t. the args. */
+function computeAttitudeTorque(currentOrientation: Quaternion, currentAngularVelocity: Vec3): Vec3 {
   if (!attitude) return manualTorque
   if (attitudeTarget.kind === 'manual') {
     const base = manualReactionWheelTorque({
       commandTorque: manualTorque,
-      angularVelocity,
+      angularVelocity: currentAngularVelocity,
     })
     // Tap = gentle, hold = ramps up; then cap the resulting slew rate.
     const ramped = rampManualTorque(base, manualHoldTime)
-    return limitTorqueToAngularRate(ramped, angularVelocity, MAX_MANUAL_ANGULAR_RATE)
+    return limitTorqueToAngularRate(ramped, currentAngularVelocity, MAX_MANUAL_ANGULAR_RATE)
   }
   if (attitudeTarget.kind === 'damp') {
     const dampingTorque = angularVelocityDampingTorque({
-      angularVelocity,
+      angularVelocity: currentAngularVelocity,
       maxTorque: attitude.reactionWheelTorque,
       momentOfInertia: attitude.momentOfInertia,
     })
     return sumAndClampTorque(dampingTorque, manualTorque, attitude.reactionWheelTorque)
   }
   const holdTorque = forwardDirectionHoldTorque({
-    currentOrientation: orientation,
+    currentOrientation,
     targetForward: attitudeTarget.vector,
-    angularVelocity,
+    angularVelocity: currentAngularVelocity,
     maxTorque: attitude.reactionWheelTorque,
     momentOfInertia: attitude.momentOfInertia,
   })

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   MANUAL_TORQUE_MIN_SCALE,
+  MAX_ATTITUDE_SUBSTEP,
   MAX_AUTOPILOT_ANGULAR_RATE,
   MAX_MANUAL_ANGULAR_RATE,
   REACTION_WHEEL_ANGULAR_RATE,
@@ -10,6 +11,7 @@ import {
   angularVelocityDampingTorque,
   attitudeHoldTorque,
   forwardDirectionHoldTorque,
+  integrateAttitudeOverStep,
   integrateOrientation,
   limitTorqueToAngularRate,
   manualReactionWheelTorque,
@@ -378,6 +380,92 @@ describe('forwardDirectionHoldTorque convergence', () => {
     expect(result.peakAngularRate).toBeLessThanOrEqual(MAX_AUTOPILOT_ANGULAR_RATE * 1.05)
     expect(result.finalAngle).toBeLessThan(0.01)
     expect(result.overshoot).toBeLessThan(0.02)
+  })
+})
+
+describe('integrateAttitudeOverStep', () => {
+  function rotate(v: [number, number, number], q: [number, number, number, number]): [number, number, number] {
+    const [x, y, z] = v
+    const [qx, qy, qz, qw] = q
+    const ix = qw * x + qy * z - qz * y
+    const iy = qw * y + qz * x - qx * z
+    const iz = qw * z + qx * y - qy * x
+    const iw = -qx * x - qy * y - qz * z
+    return [
+      ix * qw + iw * -qx + iy * -qz - iz * -qy,
+      iy * qw + iw * -qy + iz * -qx - ix * -qz,
+      iz * qw + iw * -qz + ix * -qy - iy * -qx,
+    ]
+  }
+  function angleTo(forward: [number, number, number], target: [number, number, number]): number {
+    const tm = Math.hypot(...target)
+    const t: [number, number, number] = [target[0] / tm, target[1] / tm, target[2] / tm]
+    return Math.acos(Math.max(-1, Math.min(1, forward[0] * t[0] + forward[1] * t[1] + forward[2] * t[2])))
+  }
+
+  const I: [number, number, number] = [12_000, 12_000, 8_000]
+  const maxTorque: [number, number, number] = [8_000, 8_000, 5_000]
+  const target: [number, number, number] = [1, 0, 0]
+  const seek = (o: [number, number, number, number], w: [number, number, number]) =>
+    forwardDirectionHoldTorque({ currentOrientation: o, targetForward: target, angularVelocity: w, maxTorque, momentOfInertia: I })
+
+  // Drive the controller through many coarse frames at the given sub-step cap.
+  function run(frameDt: number, maxSubstep: number, frames: number) {
+    let orientation: [number, number, number, number] = [0, 0, 0, 1]
+    let angularVelocity: [number, number, number] = [0, 0, 0]
+    let minAngle = Infinity
+    let overshoot = 0
+    let peakRate = 0
+    for (let i = 0; i < frames; i++) {
+      const r = integrateAttitudeOverStep({ orientation, angularVelocity, momentOfInertia: I, elapsedSeconds: frameDt, maxSubstep, torqueFor: seek })
+      orientation = r.orientation
+      angularVelocity = r.angularVelocity
+      const angle = angleTo(rotate([0, 0, 1], orientation), target)
+      peakRate = Math.max(peakRate, Math.hypot(...angularVelocity))
+      minAngle = Math.min(minAngle, angle)
+      if (minAngle < 0.05) overshoot = Math.max(overshoot, angle - minAngle)
+    }
+    return { finalAngle: angleTo(rotate([0, 0, 1], orientation), target), overshoot, peakRate }
+  }
+
+  it('is a no-op for non-positive elapsed time', () => {
+    const r = integrateAttitudeOverStep({
+      orientation: [0, 0, 0, 1], angularVelocity: [0.1, 0, 0], momentOfInertia: I,
+      elapsedSeconds: 0, torqueFor: seek,
+    })
+    expect(r.orientation).toEqual([0, 0, 0, 1])
+    expect(r.angularVelocity).toEqual([0.1, 0, 0])
+    expect(r.lastTorque).toEqual([0, 0, 0])
+  })
+
+  it('slices the elapsed time into sub-steps no larger than maxSubstep', () => {
+    let calls = 0
+    const countingTorque = () => { calls++; return [0, 0, 0] as [number, number, number] }
+    const base = { orientation: [0, 0, 0, 1] as [number, number, number, number], angularVelocity: [0, 0, 0] as [number, number, number], momentOfInertia: I, torqueFor: countingTorque }
+    integrateAttitudeOverStep({ ...base, elapsedSeconds: 0.02, maxSubstep: 0.02 })
+    expect(calls).toBe(1)
+    calls = 0
+    integrateAttitudeOverStep({ ...base, elapsedSeconds: 0.025, maxSubstep: 0.02 })
+    expect(calls).toBe(2)
+    calls = 0
+    integrateAttitudeOverStep({ ...base, elapsedSeconds: 0.05, maxSubstep: 0.02 })
+    expect(calls).toBe(3)
+  })
+
+  it('converges a coarse-frame slew without overshoot when sub-stepped', () => {
+    // ~5 fps frames (0.2s) — a stall/catch-up regime.
+    const r = run(0.2, MAX_ATTITUDE_SUBSTEP, 200)
+    expect(r.finalAngle).toBeLessThan(0.02)
+    expect(r.overshoot).toBeLessThan(0.03)
+    expect(r.peakRate).toBeLessThanOrEqual(MAX_AUTOPILOT_ANGULAR_RATE * 1.05)
+  })
+
+  it('overshoots far more without sub-stepping (one big step per coarse frame)', () => {
+    const subStepped = run(0.2, MAX_ATTITUDE_SUBSTEP, 200)
+    const oneStep = run(0.2, 0.2, 200) // maxSubstep == frame → a single explicit step
+    // The whole point of sub-stepping: re-evaluating mid-frame avoids the overshoot
+    // a single stale-torque step incurs.
+    expect(oneStep.overshoot).toBeGreaterThan(subStepped.overshoot)
   })
 })
 

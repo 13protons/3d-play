@@ -16,6 +16,7 @@ import { G } from '../sim/constants'
 import { computeAttitudeTarget } from '../sim/autopilot'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
 import { rotationAxisFromAxialTilt } from '../sim/vehicle/referenceFrame'
+import { shouldStabilizeAngularVelocityForWarp } from '../sim/vehicle/controls'
 import {
   jplEclipticToAppYUpVector,
   vectorToSectorPosition,
@@ -38,6 +39,9 @@ let vehicleState: WorkerState = 'idle'
 
 // Pending vehicle dispatch (waiting for orbital to finish)
 let pendingTargetTime: number | null = null
+// Latest vehicle target requested while the vehicle worker was still busy.
+// Dispatched the moment it goes idle so a slow worker never drops an interval.
+let pendingVehicleTarget: number | null = null
 
 // Body metadata for computing G*M
 let bodyGMs: [string, number][] = []
@@ -269,6 +273,12 @@ export async function startSim(scenarioId: string): Promise<void> {
       if (msg.type === 'vehicle-trajectories') {
         useTrajectoriesStore.getState().mergeCurves(msg.curves)
         vehicleState = 'idle'
+        // Flush a target queued while the worker was busy (C1: never drop one).
+        if (pendingVehicleTarget !== null) {
+          const next = pendingVehicleTarget
+          pendingVehicleTarget = null
+          dispatchVehicle(next)
+        }
       }
       if (msg.type === 'vehicle-controls') {
         useTrajectoriesStore.getState().setVehicleControl(msg.id, {
@@ -339,7 +349,13 @@ export async function startSim(scenarioId: string): Promise<void> {
 }
 
 function dispatchVehicle(targetTime: number): void {
-  if (!vehicleWorker || vehicleState !== 'idle') return
+  if (!vehicleWorker) return
+  if (vehicleState !== 'idle') {
+    // Worker still busy — remember the most recent target and dispatch it when
+    // it goes idle, rather than dropping this interval (latest wins).
+    pendingVehicleTarget = targetTime
+    return
+  }
   vehicleState = 'busy'
   dispatchAutopilotTarget(targetTime)
   vehicleWorker.postMessage({
@@ -351,6 +367,12 @@ function dispatchVehicle(targetTime: number): void {
 
 function dispatchAutopilotTarget(targetTime: number): void {
   if (!vehicleWorker || !activeVehicleId || !activeVehicleParentId) return
+
+  // Under warp the worker freezes vehicle attitude, so don't recompute or post
+  // seek targets. The autopilot *mode* persists in its store; when warp returns
+  // to 1× this resumes and re-derives the live target (e.g. current prograde),
+  // rather than restoring a stale pre-warp orientation.
+  if (shouldStabilizeAngularVelocityForWarp(warpRate)) return
 
   const mode = useAutopilotStore.getState().modes[activeVehicleId] ?? 'off'
   const state = useTrajectoriesStore.getState()

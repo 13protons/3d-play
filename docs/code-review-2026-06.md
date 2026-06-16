@@ -12,22 +12,22 @@ agent's rating given mitigating context (noted inline).
 
 ## Correctness
 
-### C1 — Vehicle advance dropped when the worker is busy *(OPEN, high)*
-`bridge.ts` `dispatchVehicle` early-returns if `vehicleState !== 'idle'`; when the
-orbital worker finishes and dispatches the vehicle while it's still busy, that
-`targetTime` is dropped. Not a *permanent* desync (the vehicle worker integrates
-straight to the next target), but it produces a larger next step — which feeds C2.
-Separately, under sustained load `lastWallTime` resets every frame while `simTime`
-only advances on dispatching frames, so wall-time is silently *lost* (sim runs slow).
-*Direction:* keep a `pendingVehicleTargetTime` that survives until the worker goes idle;
-decide a backpressure policy for the lost wall-time.
+### C1 — Vehicle advance dropped when the worker is busy *(DONE)*
+`bridge.ts` `dispatchVehicle` dropped the target if the worker was busy. Now it stores
+the latest target in `pendingVehicleTarget` and dispatches it the moment the worker goes
+idle (latest wins), so no interval is dropped. Under sustained load the sim slows
+gracefully (no real-time chasing, no jumps) — accepted by design.
 
-### C2 — Angular state integrated in one big step over the whole frame *(OPEN, med — high on paper)*
-`vehicle/worker.ts` does a single `integrateOrientation` + `angularVelocityAfterTorque`
-over the full `elapsedSeconds`, and thrust direction extrapolates orientation by frozen
-ω (`dynamics.ts`). Mitigated because warp >1× zeroes angular velocity, so it only bites
-on long frames / the C1 larger-step path. *Direction:* substep or cap the attitude dt;
-keep attitude + thrust on the same dt.
+### C2 — Angular step / warp-attitude model *(DONE)*
+Decided model: vehicle attitude/thrust/autopilot simulate **only at warp == 1×**; frozen
+above (planets keep spinning analytically; landed co-rotation continues). The worker now
+gates attitude integration on warp (authoritative) and the bridge stops posting seek
+targets at warp; the autopilot *mode* persists and re-derives a live target on return to
+1× (no stale orientation restore). At 1× the attitude integration is **sub-stepped**
+(`integrateAttitudeOverStep`, cap `MAX_ATTITUDE_SUBSTEP`), re-evaluating the controller
+per slice so a stall/catch-up can't overshoot. Sub-stepping is also the inner-loop
+foundation for a future stiff multi-body ("wet-noodle"-resistant) vehicle. Covered by new
+`integrateAttitudeOverStep` tests; freeze/resume behavior still to be verified in-app.
 
 ### C3 — NaN → infinite-reject hang path *(DONE)*
 `pointMassDerivatives` inlined Hermite without the `dt===0` guard the other copies have;
