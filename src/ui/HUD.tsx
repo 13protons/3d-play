@@ -324,6 +324,7 @@ function FlightReadouts() {
           orientation={vehicleControl.orientation}
           relativePosition={relativePosition}
           relativeVelocity={flightReadout.frame.navVelocity}
+          orbitNormal={flightReadout.frame.orbitNormal}
           parentRotationAxis={flightReadout.parentRotationAxis}
           onSelectMode={(mode) => useAutopilotStore.getState().toggleMode(firstVehicle.id, mode)}
           hasManeuverNode={!!node}

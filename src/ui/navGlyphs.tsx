@@ -38,15 +38,17 @@ export const Retrograde: NavGlyph = ({ color }) => (
   </g>
 )
 
+// Triangles are bounding-box-centered on the origin (y symmetric about 0) so the
+// marker point sits in the middle of the glyph, like the circle-based icons.
 export const Normal: NavGlyph = ({ color }) => (
   <g {...stroke(color)}>
-    <path d="M 0 -8.5 L 7.4 5 L -7.4 5 Z" />
+    <path d="M 0 -6.75 L 7.4 6.75 L -7.4 6.75 Z" />
   </g>
 )
 
 export const Antinormal: NavGlyph = ({ color }) => (
   <g {...stroke(color)}>
-    <path d="M 0 8.5 L 7.4 -5 L -7.4 -5 Z" />
+    <path d="M 0 6.75 L 7.4 -6.75 L -7.4 -6.75 Z" />
   </g>
 )
 

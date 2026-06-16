@@ -19,6 +19,9 @@ interface NavballProps {
   parentRotationAxis: Vec3
   mode: FlightReferenceMode
   maneuverDirection?: Vec3
+  /** True orbital-plane normal (inertial). Used for the normal markers so they
+   * stay correct near the surface where the surface-relative velocity ≈ 0. */
+  orbitNormal?: Vec3
 }
 
 interface NavballClusterProps extends NavballProps {
@@ -123,7 +126,7 @@ const VISIBLE_RADIUS = 83.5
 const SIZE = 170
 const CENTER = SIZE / 2
 
-export function Navball({ orientation, relativePosition, relativeVelocity, parentRotationAxis, maneuverDirection }: NavballProps) {
+export function Navball({ orientation, relativePosition, relativeVelocity, parentRotationAxis, maneuverDirection, orbitNormal }: NavballProps) {
   const state = computeNavballState({
     orientation,
     relativePosition,
@@ -131,12 +134,17 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
     parentRotationAxis,
     radius: RADIUS,
     maneuverDirection,
+    orbitNormal,
   })
+  const toPath = (segment: { x: number; y: number }[]) => segment
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${CENTER + point.x} ${CENTER + point.y}`)
+    .join(' ')
   const horizonPaths = visibleNavballSegments(state.horizon)
     .filter((segment) => segment.length > 1)
-    .map((segment) => segment
-      .map((point, index) => `${index === 0 ? 'M' : 'L'} ${CENTER + point.x} ${CENTER + point.y}`)
-      .join(' '))
+    .map(toPath)
+  const meridianPaths = state.meridians.flatMap((meridian) =>
+    visibleNavballSegments(meridian).filter((segment) => segment.length > 1).map(toPath),
+  )
 
   return (
     <div
@@ -163,8 +171,9 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
           {horizonPaths.map((path, index) => (
             <path key={index} d={path} fill="none" stroke="#f3f0d0" strokeWidth="2" strokeDasharray="6 5" opacity="0.8" />
           ))}
-          <line x1={CENTER - RADIUS} y1={CENTER} x2={CENTER + RADIUS} y2={CENTER} stroke="rgba(255,255,255,0.14)" />
-          <line x1={CENTER} y1={CENTER - RADIUS} x2={CENTER} y2={CENTER + RADIUS} stroke="rgba(255,255,255,0.14)" />
+          {meridianPaths.map((path, index) => (
+            <path key={`meridian-${index}`} d={path} fill="none" stroke="rgba(217,227,255,0.18)" strokeWidth="1" />
+          ))}
           {state.compass && Object.entries(state.compass).map(([key, point]) => {
             if (!point.visible) return null
             const label = key[0].toUpperCase()
@@ -237,6 +246,7 @@ export function NavballCluster({
   surfaceState,
   autopilotMode,
   maneuverDirection,
+  orbitNormal,
   onSelectMode,
   hasManeuverNode,
 }: NavballClusterProps) {
@@ -268,6 +278,7 @@ export function NavballCluster({
         surfaceState={surfaceState}
         autopilotMode={autopilotMode}
         maneuverDirection={maneuverDirection}
+        orbitNormal={orbitNormal}
       />
       <Attitude rows={rows.slice(3)} surfaceState={surfaceState} />
     </div>

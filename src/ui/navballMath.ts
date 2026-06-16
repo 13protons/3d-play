@@ -33,6 +33,9 @@ export interface NavballState {
   markers: NavballMarkers
   compass: NavballCompassMarkers | null
   horizon: ProjectedNavballPoint[]
+  /** Great-circle meridians through the up/down poles (N-S and E-W), rotating
+   * with the sphere — the moving grid that replaces the old static cross. */
+  meridians: ProjectedNavballPoint[][]
 }
 
 export function eulerDegreesToQuaternion({
@@ -108,12 +111,14 @@ export function computeNavballMarkers({
   relativeVelocity,
   radius,
   maneuverDirection,
+  orbitNormal,
 }: {
   orientation: Quaternion
   relativePosition: Vec3
   relativeVelocity: Vec3
   radius: number
   maneuverDirection?: Vec3
+  orbitNormal?: Vec3
 }): NavballMarkers {
   const frame = computeNavballFrame({ relativePosition, relativeVelocity })
   const speed = Math.hypot(relativeVelocity[0], relativeVelocity[1], relativeVelocity[2])
@@ -123,13 +128,17 @@ export function computeNavballMarkers({
   const retrograde = speed >= PROGRADE_MARKER_MIN_SPEED
     ? projectNavballVector(worldToCraft(frame.retrograde, orientation), radius)
     : { x: 0, y: 0, visible: false }
+  // Prefer the true orbital normal (inertial, from the reference frame) so the
+  // normal markers stay correct near the surface, where the surface-relative
+  // velocity ≈ 0 makes cross(r, v) degenerate to an arbitrary axis.
+  const normalVec = orbitNormal ?? frame.normal
   const markers: NavballMarkers = {
     prograde,
     retrograde,
     radialOut: projectNavballVector(worldToCraft(frame.radialOut, orientation), radius),
     radialIn: projectNavballVector(worldToCraft(frame.radialIn, orientation), radius),
-    normal: projectNavballVector(worldToCraft(frame.normal, orientation), radius),
-    antiNormal: projectNavballVector(worldToCraft(frame.antiNormal, orientation), radius),
+    normal: projectNavballVector(worldToCraft(normalVec, orientation), radius),
+    antiNormal: projectNavballVector(worldToCraft(scale(normalVec, -1), orientation), radius),
   }
   if (maneuverDirection) {
     markers.maneuver = projectNavballVector(worldToCraft(maneuverDirection, orientation), radius)
@@ -144,6 +153,7 @@ export function computeNavballState({
   parentRotationAxis,
   radius,
   maneuverDirection,
+  orbitNormal,
 }: {
   orientation: Quaternion
   relativePosition: Vec3
@@ -151,10 +161,15 @@ export function computeNavballState({
   parentRotationAxis?: Vec3
   radius: number
   maneuverDirection?: Vec3
+  orbitNormal?: Vec3
 }): NavballState {
   const compassFrame = parentRotationAxis
     ? computeNavballCompassFrame({ relativePosition, parentRotationAxis })
     : null
+  const radialOut = normalize(relativePosition, [0, 1, 0])
+  const horizontals = compassFrame
+    ? [compassFrame.north, compassFrame.east]
+    : fallbackMeridianAxes(radialOut)
 
   return {
     markers: computeNavballMarkers({
@@ -163,6 +178,7 @@ export function computeNavballState({
       relativeVelocity,
       radius,
       maneuverDirection,
+      orbitNormal,
     }),
     compass: compassFrame
       ? {
@@ -172,7 +188,10 @@ export function computeNavballState({
           west: projectNavballVector(worldToCraft(compassFrame.west, orientation), radius),
         }
       : null,
-    horizon: computeHorizon({ orientation, radialOut: normalize(relativePosition, [0, 1, 0]), radius }),
+    horizon: computeHorizon({ orientation, radialOut, radius }),
+    meridians: horizontals.map((horizontal) =>
+      computeMeridian({ orientation, radialOut, horizontal, radius }),
+    ),
   }
 }
 
@@ -229,6 +248,41 @@ function computeHorizon({
   }
 
   return points
+}
+
+/**
+ * A meridian great circle: passes through the up/down poles (radialOut/In) and
+ * a horizontal axis (north or east). Traced in craft frame so it rotates with
+ * the sphere as the craft reorients.
+ */
+function computeMeridian({
+  orientation,
+  radialOut,
+  horizontal,
+  radius,
+}: {
+  orientation: Quaternion
+  radialOut: Vec3
+  horizontal: Vec3
+  radius: number
+}): ProjectedNavballPoint[] {
+  const up = worldToCraft(radialOut, orientation)
+  const side = worldToCraft(horizontal, orientation)
+  const points: ProjectedNavballPoint[] = []
+  for (let i = 0; i <= 64; i++) {
+    const angle = (Math.PI * 2 * i) / 64
+    const point = add(scale(up, Math.cos(angle)), scale(side, Math.sin(angle)))
+    points.push(projectNavballVector(point, radius))
+  }
+  return points
+}
+
+/** Two world-frame axes perpendicular to radialOut, for meridians when there's
+ * no compass frame (no parent rotation axis). */
+function fallbackMeridianAxes(radialOut: Vec3): [Vec3, Vec3] {
+  const a = normalize(cross(radialOut, Math.abs(radialOut[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]), [1, 0, 0])
+  const b = normalize(cross(radialOut, a), [0, 0, 1])
+  return [a, b]
 }
 
 function worldToCraft(vector: Vec3, orientation: Quaternion): Vec3 {
