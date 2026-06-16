@@ -8,6 +8,7 @@ import { useAutopilotStore } from '../state/autopilot'
 import { maneuverBurnDirection, type ManeuverDeltaV, type ManeuverNode } from '../sim/maneuverNode'
 import { attitudeDiagnostics, type AttitudeAxisDiagnostic } from './attitudeDiagnostics'
 import { countRender } from '../render/perfCounters'
+import { useThrottledRender } from './useThrottledRender'
 import type { VehicleControlMeta } from '../state/trajectories'
 import { WARP_RATES } from '../sim/warp'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
@@ -51,17 +52,12 @@ function formatTime(seconds: number): string {
 
 export function HUD() {
   countRender('HUD')
-  // Subscribe to the worker clock so the HUD re-renders as the sim advances, but
-  // evaluate curves at the interpolated sim time so readouts/navball line up with
-  // the 3D scene (every render component uses getSimTime(), not raw simTime). The
-  // interpolated clock never runs behind the worker clock.
-  const workerSimTime = useTrajectoriesStore((s) => s.simTime)
-  const simTime = Math.max(workerSimTime, useTrajectoriesStore.getState().getSimTime())
+  // Chrome only — low-frequency state. The high-frequency readouts live in
+  // <FlightReadouts/>, which runs on its own throttled cadence (see below) so
+  // per-tick sim writes don't re-render this whole component ~300x/s.
   const warpRate = useTrajectoriesStore((s) => s.warpRate)
   const bodies = useTrajectoriesStore((s) => s.bodies)
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
-  const curves = useTrajectoriesStore((s) => s.curves)
-  const vehicleControls = useTrajectoriesStore((s) => s.vehicleControls)
   const followTargetId = useCameraStore((s) => s.followTargetId)
   const setFollowTarget = useCameraStore((s) => s.setFollowTarget)
   const activeView = useModeStore((s) => s.activeView)
@@ -71,62 +67,13 @@ export function HUD() {
   const toggleRotationAxes = useModeStore((s) => s.toggleRotationAxes)
   const toggleAttitudeDiagnostics = useModeStore((s) => s.toggleAttitudeDiagnostics)
   const autopilotModes = useAutopilotStore((s) => s.modes)
-  const maneuverNodes = useManeuverStore((s) => s.nodes)
   const targetName = bodies[followTargetId]?.name ?? vehicles[followTargetId]?.name ?? followTargetId
   const firstVehicle = Object.values(vehicles)[0]
-  const throttle = firstVehicle ? (vehicleControls[firstVehicle.id]?.throttle ?? 0) : 0
-  const vehicleCurve = firstVehicle ? curves[firstVehicle.id] : undefined
-  const parent = firstVehicle ? bodies[firstVehicle.parentId] : undefined
-  const parentCurve = firstVehicle ? curves[firstVehicle.parentId] : undefined
-  const vehiclePosition = vehicleCurve ? evaluateCurve(vehicleCurve, simTime) : null
-  const parentPosition = parentCurve ? evaluateCurve(parentCurve, simTime) : null
-  const vehicleVelocity = vehicleCurve ? evaluateCurveVelocity(vehicleCurve, simTime) : null
-  const parentVelocity = parentCurve ? evaluateCurveVelocity(parentCurve, simTime) : null
-  const relativePosition = vehiclePosition && parentPosition
-    ? [
-        vehiclePosition[0] - parentPosition[0],
-        vehiclePosition[1] - parentPosition[1],
-        vehiclePosition[2] - parentPosition[2],
-      ] as [number, number, number]
-    : null
-  const vehicleControl = firstVehicle ? vehicleControls[firstVehicle.id] : undefined
-  const flightReadout = firstVehicle && parent && vehicleCurve && parentCurve
-    ? (() => {
-        const vPos = vehiclePosition ?? evaluateCurve(vehicleCurve, simTime)
-        const vVel = vehicleVelocity ?? vehicleCurve.v1
-        const pPos = parentPosition ?? evaluateCurve(parentCurve, simTime)
-        const pVel = parentVelocity ?? parentCurve.v1
-        const relPos = [vPos[0] - pPos[0], vPos[1] - pPos[1], vPos[2] - pPos[2]] as [number, number, number]
-        const relVel = [vVel[0] - pVel[0], vVel[1] - pVel[1], vVel[2] - pVel[2]] as [number, number, number]
-        const parentRotationAxis = rotationAxisFromAxialTilt(parent.axialTilt)
-        const frame = computeFlightReferenceFrame({
-          relativePosition: relPos,
-          relativeVelocity: relVel,
-          parentRadius: parent.radius,
-          parentGm: parent.gm,
-          parentAngularVelocity: parent.angularVelocity,
-          parentRotationAxis,
-          surfaceState: vehicleControl?.surfaceState ?? 'flying',
-        })
-        return {
-          readout: computeFlightReadout({
-            vehiclePosition: vPos,
-            vehicleVelocity: vVel,
-            parentPosition: pPos,
-            parentVelocity: pVel,
-            parentRadius: parent.radius,
-            referenceVelocity: frame.navVelocity,
-          }),
-          frame,
-          parentRotationAxis,
-        }
-      })()
-    : null
 
   function setWarp(rate: number) {
     useInputStore
       .getState()
-      .push({ type: 'set-warp', rate, simTime })
+      .push({ type: 'set-warp', rate, simTime: useTrajectoriesStore.getState().getSimTime() })
   }
 
   const activeAutopilotMode: AutopilotMode = firstVehicle
@@ -156,7 +103,7 @@ export function HUD() {
       <div style={{ display: 'flex', gap: 32 }}>
         <div>
           <div style={{ opacity: 0.6, fontSize: 11 }}>SIM TIME</div>
-          <div>T+ {formatTime(simTime)}</div>
+          <SimClock />
         </div>
         <div>
           <div style={{ opacity: 0.6, fontSize: 11 }}>WARP</div>
@@ -248,7 +195,7 @@ export function HUD() {
         >
           Attitude Diag: {showAttitudeDiagnostics ? 'On' : 'Off'}
         </button>
-        {vehicleControl && firstVehicle && (
+        {firstVehicle && (
           <>
             {AUTOPILOT_BUTTONS.map(({ mode, label }) => (
               <button
@@ -307,13 +254,93 @@ export function HUD() {
         &nbsp; WASD/QE reaction wheel
         &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
+      <FlightReadouts />
+    </div>
+  )
+}
+
+/** Sim-time readout on its own low-rate cadence (text needs no more). */
+function SimClock() {
+  useThrottledRender(8)
+  return <div>T+ {formatTime(useTrajectoriesStore.getState().getSimTime())}</div>
+}
+
+/**
+ * High-frequency flight readouts (navball, telemetry, maneuver, attitude diag)
+ * on their own ~30Hz render cadence. Reads sim state via getState() instead of
+ * subscribing, so per-tick worker writes don't re-render the HUD — the same
+ * decoupling the 3D scene gets from useFrame.
+ */
+function FlightReadouts() {
+  countRender('FlightReadouts')
+  useThrottledRender(30)
+
+  const traj = useTrajectoriesStore.getState()
+  const simTime = traj.getSimTime()
+  const { curves, bodies, vehicles, vehicleControls } = traj
+  const firstVehicle = Object.values(vehicles)[0]
+  if (!firstVehicle) return null
+
+  const vehicleControl = vehicleControls[firstVehicle.id]
+  const throttle = vehicleControl?.throttle ?? 0
+  const vehicleCurve = curves[firstVehicle.id]
+  const parent = bodies[firstVehicle.parentId]
+  const parentCurve = curves[firstVehicle.parentId]
+  const maneuverNodes = useManeuverStore.getState().nodes
+  const node = maneuverNodes[firstVehicle.id]
+  const activeAutopilotMode = useAutopilotStore.getState().modes[firstVehicle.id] ?? 'off'
+  const showAttitudeDiagnostics = useModeStore.getState().showAttitudeDiagnostics
+
+  const vehiclePosition = vehicleCurve ? evaluateCurve(vehicleCurve, simTime) : null
+  const parentPosition = parentCurve ? evaluateCurve(parentCurve, simTime) : null
+  const relativePosition = vehiclePosition && parentPosition
+    ? [
+        vehiclePosition[0] - parentPosition[0],
+        vehiclePosition[1] - parentPosition[1],
+        vehiclePosition[2] - parentPosition[2],
+      ] as [number, number, number]
+    : null
+  const flightReadout = parent && vehicleCurve && parentCurve
+    ? (() => {
+        const vPos = vehiclePosition ?? evaluateCurve(vehicleCurve, simTime)
+        const vVel = evaluateCurveVelocity(vehicleCurve, simTime)
+        const pPos = parentPosition ?? evaluateCurve(parentCurve, simTime)
+        const pVel = evaluateCurveVelocity(parentCurve, simTime)
+        const relVel = [vVel[0] - pVel[0], vVel[1] - pVel[1], vVel[2] - pVel[2]] as [number, number, number]
+        const parentRotationAxis = rotationAxisFromAxialTilt(parent.axialTilt)
+        const frame = computeFlightReferenceFrame({
+          relativePosition: [vPos[0] - pPos[0], vPos[1] - pPos[1], vPos[2] - pPos[2]],
+          relativeVelocity: relVel,
+          parentRadius: parent.radius,
+          parentGm: parent.gm,
+          parentAngularVelocity: parent.angularVelocity,
+          parentRotationAxis,
+          surfaceState: vehicleControl?.surfaceState ?? 'flying',
+        })
+        return {
+          readout: computeFlightReadout({
+            vehiclePosition: vPos,
+            vehicleVelocity: vVel,
+            parentPosition: pPos,
+            parentVelocity: pVel,
+            parentRadius: parent.radius,
+            referenceVelocity: frame.navVelocity,
+          }),
+          frame,
+          parentRotationAxis,
+        }
+      })()
+    : null
+
+  return (
+    <>
       {showAttitudeDiagnostics && vehicleControl && (
         <AttitudeDiagnosticsPanel control={vehicleControl} />
       )}
-      {firstVehicle && maneuverNodes[firstVehicle.id] && (
+      {node && (
         <ManeuverNodePanel
           vesselId={firstVehicle.id}
-          node={maneuverNodes[firstVehicle.id]}
+          node={node}
           simTime={simTime}
           mass={vehicleControl?.mass}
           maxThrust={vehicleControl?.maxThrust}
@@ -334,11 +361,7 @@ export function HUD() {
           })}
           surfaceState={vehicleControl.surfaceState}
           autopilotMode={activeAutopilotMode}
-          maneuverDirection={
-            firstVehicle && maneuverNodes[firstVehicle.id]
-              ? maneuverBurnDirection(maneuverNodes[firstVehicle.id]) ?? undefined
-              : undefined
-          }
+          maneuverDirection={node ? maneuverBurnDirection(node) ?? undefined : undefined}
           rows={flightTelemetryRows({
             readout: flightReadout.readout,
             throttle,
@@ -351,7 +374,7 @@ export function HUD() {
           })}
         />
       )}
-    </div>
+    </>
   )
 }
 

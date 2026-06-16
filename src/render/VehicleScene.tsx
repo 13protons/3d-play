@@ -289,36 +289,52 @@ function VehicleAmbientLight() {
 function VehicleMesh() {
   countRender('VehicleMesh')
   const groupRef = useRef<Group>(null)
+  const flameRef = useRef<Mesh>(null)
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
-  const vehicleControls = useTrajectoriesStore((s) => s.vehicleControls)
   const showRotationAxes = useModeStore((s) => s.showRotationAxes)
   const firstVehicle = Object.values(vehicles)[0]
-  const controls = firstVehicle ? vehicleControls[firstVehicle.id] : undefined
+  const vehicleId = firstVehicle?.id
 
+  // Read the high-frequency control state imperatively each frame instead of
+  // subscribing to it (which would re-render this tree ~100x/s). Same pattern
+  // the orbital Body uses to keep itself off React's render path.
   useFrame(() => {
-    if (groupRef.current) setLayerRecursively(groupRef.current, RENDER_LAYERS.vehicle)
+    const group = groupRef.current
+    if (!group) return
+    setLayerRecursively(group, RENDER_LAYERS.vehicle)
+    if (!vehicleId) return
+    const controls = useTrajectoriesStore.getState().vehicleControls[vehicleId]
+    if (!controls) return
+    const [x, y, z, w] = controls.orientation
+    group.quaternion.set(x, y, z, w)
+    if (flameRef.current) flameRef.current.visible = controls.throttle > 0
   })
 
   return (
-    <group ref={groupRef} quaternion={controls?.orientation}>
+    <group ref={groupRef}>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[1, 1.5, 4, 8]} />
         <meshStandardMaterial color="#cccccc" />
       </mesh>
-      {controls && controls.throttle > 0 && (
-        <mesh position={[0, 0, -3]}>
-          <sphereGeometry args={[0.7, 12, 8]} />
-          <meshBasicMaterial color="#ff8a18" />
-        </mesh>
-      )}
-      {showRotationAxes && (
-        <CraftDebugAxes
-          length={3}
-          aeroForceWorld={controls?.aeroForceWorld}
-          orientation={controls?.orientation}
-        />
-      )}
+      <mesh ref={flameRef} position={[0, 0, -3]} visible={false}>
+        <sphereGeometry args={[0.7, 12, 8]} />
+        <meshBasicMaterial color="#ff8a18" />
+      </mesh>
+      {showRotationAxes && vehicleId && <VehicleDebugAxes vehicleId={vehicleId} />}
     </group>
+  )
+}
+
+/** Debug-only; isolated so its per-tick control subscription re-renders just the
+ * axes, not the whole VehicleMesh tree. Not mounted during normal play. */
+function VehicleDebugAxes({ vehicleId }: { vehicleId: string }) {
+  const controls = useTrajectoriesStore((s) => s.vehicleControls[vehicleId])
+  return (
+    <CraftDebugAxes
+      length={3}
+      aeroForceWorld={controls?.aeroForceWorld}
+      orientation={controls?.orientation}
+    />
   )
 }
 
