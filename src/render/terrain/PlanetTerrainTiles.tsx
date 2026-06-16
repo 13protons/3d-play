@@ -124,6 +124,9 @@ function TerrainTileBatchMesh({
     })
     if (tiles.length === 0) return null
     return bufferGeometryFromTerrainTileData(mergeTerrainTileData(tiles))
+    // `version` bumps when async tile loads land in the cache; it is a deliberate
+    // cache-bust so the geometry rebuilds even though it isn't referenced directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cache, tileIds, version])
   const meshRef = useRef<Mesh>(null)
 

@@ -426,7 +426,9 @@ function ManeuverNodePanel({ vesselId, node, simTime, mass, maxThrust }: Maneuve
   // Use refs so the hold-to-repeat callbacks always see the latest deltaV
   // instead of capturing stale values from when the button was first pressed.
   const deltaVRef = useRef(node.deltaV)
-  deltaVRef.current = node.deltaV
+  useEffect(() => {
+    deltaVRef.current = node.deltaV
+  })
   const adjust = (key: keyof ManeuverDeltaV, delta: number) => {
     updateDeltaV(vesselId, { [key]: deltaVRef.current[key] + delta })
   }
@@ -507,7 +509,9 @@ function HoldButton({ onAction, children }: { onAction: () => void; children: Re
   // Repeat onAction while the pointer is held: one immediate call, then
   // accelerating repeats after an initial delay.
   const actionRef = useRef(onAction)
-  actionRef.current = onAction
+  useEffect(() => {
+    actionRef.current = onAction
+  })
   const delayTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const intervalTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 

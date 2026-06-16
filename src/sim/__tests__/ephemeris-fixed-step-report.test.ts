@@ -10,7 +10,7 @@ const ONE_MINUTE_SECONDS = 60
 const ONE_YEAR_MINUTE_STEPS = ONE_YEAR_SECONDS / ONE_MINUTE_SECONDS
 
 const GM_BY_ID = new Map([
-  ['sun', 132712440041.93938e9],
+  ['sun', 1.3271244004193939e20],
   ['mercury', 22031.86855e9],
   ['venus', 324858.592e9],
   ['earth', 398600.435436e9],

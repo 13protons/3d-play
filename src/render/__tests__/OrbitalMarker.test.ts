@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { markerStyleForBody } from '../OrbitalMarker'
+import { markerStyleForBody } from '../markerStyle'
 
 describe('markerStyleForBody', () => {
   it('uses saturated feature colors for planet sprites', () => {

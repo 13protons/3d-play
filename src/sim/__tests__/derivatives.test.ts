@@ -31,7 +31,7 @@ describe('nBodyDerivatives', () => {
 
   it('computes acceleration directly from GM values', () => {
     const earthGM = 398600.435436e9
-    const sunGM = 132712440041.93938e9
+    const sunGM = 1.3271244004193939e20
     const deriv = nBodyDerivativesFromGMs([earthGM, sunGM])
 
     const y = new Float64Array([

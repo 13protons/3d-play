@@ -1,4 +1,5 @@
 import { forwardRef, useMemo } from 'react'
+import { type ThreeEvent } from '@react-three/fiber'
 import { CanvasTexture, SpriteMaterial, type Sprite } from 'three'
 
 export type WaypointKind = 'apoapsis' | 'periapsis' | 'ascendingNode' | 'descendingNode'
@@ -41,7 +42,7 @@ function makeWaypointTexture(kind: WaypointKind): CanvasTexture {
 interface WaypointMarkerProps {
   kind: WaypointKind
   position: [number, number, number]
-  onClick?: (event: any) => void
+  onClick?: (event: ThreeEvent<MouseEvent>) => void
 }
 
 export const WaypointMarker = forwardRef<Sprite, WaypointMarkerProps>(

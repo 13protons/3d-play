@@ -88,9 +88,10 @@ function VehicleBody({
   const camera = useThree((s) => s.camera)
   const viewport = useThree((s) => s.size)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
+  const radius = body?.radius
   const surfaceGeometry = useMemo(
-    () => body ? createBodySurfaceGeometry(body.radius) : undefined,
-    [body?.radius],
+    () => radius != null ? createBodySurfaceGeometry(radius) : undefined,
+    [radius],
   )
 
   useFrame(() => {
