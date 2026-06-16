@@ -27,7 +27,7 @@ targets at warp; the autopilot *mode* persists and re-derives a live target on r
 (`integrateAttitudeOverStep`, cap `MAX_ATTITUDE_SUBSTEP`), re-evaluating the controller
 per slice so a stall/catch-up can't overshoot. Sub-stepping is also the inner-loop
 foundation for a future stiff multi-body ("wet-noodle"-resistant) vehicle. Covered by new
-`integrateAttitudeOverStep` tests; freeze/resume behavior still to be verified in-app.
+`integrateAttitudeOverStep` tests; freeze/resume behavior verified in-app.
 
 ### C3 — NaN → infinite-reject hang path *(DONE)*
 `pointMassDerivatives` inlined Hermite without the `dt===0` guard the other copies have;
