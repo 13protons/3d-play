@@ -12,6 +12,7 @@ import { evaluateCurveVelocity } from '../sim/curves'
 import {
   computeFlightReferenceFrame,
   rotationAxisFromAxialTilt,
+  surfaceFrame,
 } from '../sim/vehicle/referenceFrame'
 import {
   isSunOccluded,
@@ -487,7 +488,10 @@ function VehicleViewControls() {
       camera.up.lerp(targetUpRef.current, cameraUpLerpAlpha(delta)).normalize()
     }
     if (frame.mode === 'surface' && !surfaceCameraInitializedRef.current) {
-      camera.position.set(...surfaceCameraPosition(frame.radialOut, 30, 10))
+      // Default to an elevated view from the south (north toward screen-top).
+      const tangent = surfaceFrame(relativePosition, parentRotationAxis)
+      const south: Vec3 = tangent ? [-tangent.north[0], -tangent.north[1], -tangent.north[2]] : [0, 0, 0]
+      camera.position.set(...surfaceCameraPosition(frame.radialOut, south, 18, 22))
       surfaceCameraInitializedRef.current = true
     }
     if (shouldClampCameraAboveLocalSurface({

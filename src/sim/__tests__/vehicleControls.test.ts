@@ -16,6 +16,7 @@ import {
   limitTorqueToAngularRate,
   manualReactionWheelTorque,
   manualTorqueRampScale,
+  quaternionFromBasis,
   rampManualTorque,
   rotateOrientationAroundWorldAxis,
   pidStep,
@@ -467,6 +468,39 @@ describe('integrateAttitudeOverStep', () => {
     // a single stale-torque step incurs.
     expect(oneStep.overshoot).toBeGreaterThan(subStepped.overshoot)
   })
+})
+
+describe('quaternionFromBasis', () => {
+  function rotate(v: [number, number, number], q: [number, number, number, number]): [number, number, number] {
+    const [x, y, z] = v
+    const [qx, qy, qz, qw] = q
+    const ix = qw * x + qy * z - qz * y
+    const iy = qw * y + qz * x - qx * z
+    const iz = qw * z + qx * y - qy * x
+    const iw = -qx * x - qy * y - qz * z
+    return [
+      ix * qw + iw * -qx + iy * -qz - iz * -qy,
+      iy * qw + iw * -qy + iz * -qx - ix * -qz,
+      iz * qw + iw * -qz + ix * -qy - iy * -qx,
+    ]
+  }
+  const close = (a: number[], b: number[]) => a.forEach((v, i) => expect(v).toBeCloseTo(b[i], 5))
+
+  it('returns identity for the identity basis', () => {
+    expect(quaternionFromBasis([1, 0, 0], [0, 1, 0], [0, 0, 1])).toEqual([0, 0, 0, 1])
+  })
+
+  it('maps the body axes onto the given world basis', () => {
+    // body +X -> east, +Y -> north, +Z -> up
+    const east: [number, number, number] = [0, 0, -1]
+    const north: [number, number, number] = [0, 1, 0]
+    const up: [number, number, number] = [1, 0, 0]
+    const q = quaternionFromBasis(east, north, up)
+    close(rotate([1, 0, 0], q), east)
+    close(rotate([0, 1, 0], q), north)
+    close(rotate([0, 0, 1], q), up)
+  })
+
 })
 
 describe('rotateOrientationAroundWorldAxis', () => {

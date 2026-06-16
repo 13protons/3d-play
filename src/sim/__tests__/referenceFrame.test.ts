@@ -1,8 +1,33 @@
 import { describe, expect, it } from 'vitest'
-import { computeFlightReferenceFrame } from '../vehicle/referenceFrame'
+import { computeFlightReferenceFrame, surfaceFrame } from '../vehicle/referenceFrame'
 
 const earthRadius = 6_371_000
 const earthGm = 3.98600435436e14
+
+describe('surfaceFrame', () => {
+  const close = (a: readonly number[], b: readonly number[]) =>
+    a.forEach((v, i) => expect(v).toBeCloseTo(b[i], 6))
+
+  it('builds a right-handed up/north/east frame from position and spin axis', () => {
+    // On the equator at +X, with the spin axis along +Y.
+    const frame = surfaceFrame([earthRadius, 0, 0], [0, 1, 0])
+    expect(frame).not.toBeNull()
+    close(frame!.up, [1, 0, 0])
+    close(frame!.north, [0, 1, 0]) // toward the spin axis
+    close(frame!.east, [0, 0, -1]) // north × up
+    // right-handed: east × north = up
+    const exn: [number, number, number] = [
+      frame!.east[1] * frame!.north[2] - frame!.east[2] * frame!.north[1],
+      frame!.east[2] * frame!.north[0] - frame!.east[0] * frame!.north[2],
+      frame!.east[0] * frame!.north[1] - frame!.east[1] * frame!.north[0],
+    ]
+    close(exn, frame!.up)
+  })
+
+  it('returns null at a pole (up parallel to the spin axis)', () => {
+    expect(surfaceFrame([0, earthRadius, 0], [0, 1, 0])).toBeNull()
+  })
+})
 
 describe('computeFlightReferenceFrame', () => {
   it('selects surface for an impacting trajectory below 1.1 radii', () => {

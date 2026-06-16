@@ -75,6 +75,36 @@ export function computeFlightReferenceFrame({
   }
 }
 
+export interface SurfaceFrame {
+  /** Radial-out (local vertical). */
+  up: Vec3
+  /** Toward the spin axis, projected onto the surface tangent plane. */
+  north: Vec3
+  /** north × up. */
+  east: Vec3
+}
+
+/**
+ * Local surface tangent frame at a point — the single source for the navball
+ * compass and the vehicle's default "stand up" orientation. Null when degenerate
+ * (zero position, or up parallel to the spin axis, i.e. at a pole).
+ */
+export function surfaceFrame(relativePosition: Vec3, spinAxis: Vec3): SurfaceFrame | null {
+  const posMag = magnitude(relativePosition)
+  const axisMag = magnitude(spinAxis)
+  if (posMag <= 0 || axisMag <= 0) return null
+  const up = scale(relativePosition, 1 / posMag)
+  const axis = scale(spinAxis, 1 / axisMag)
+  const northRaw = subtract(axis, scale(up, dot(axis, up)))
+  const northMag = magnitude(northRaw)
+  if (northMag < 1e-6) return null
+  const north = scale(northRaw, 1 / northMag)
+  const eastRaw = cross(north, up)
+  const eastMag = magnitude(eastRaw)
+  if (eastMag < 1e-6) return null
+  return { up, north, east: scale(eastRaw, 1 / eastMag) }
+}
+
 export function rotationAxisFromAxialTilt(axialTiltDegrees: number): Vec3 {
   const tilt = (axialTiltDegrees * Math.PI) / 180
   return normalize([-Math.sin(tilt), Math.cos(tilt), 0], [0, 1, 0])

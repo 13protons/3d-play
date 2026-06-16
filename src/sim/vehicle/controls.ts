@@ -525,6 +525,45 @@ export function normalizeQuaternion(q: Quaternion): Quaternion {
   return m > 0 ? [q[0] / m, q[1] / m, q[2] / m, q[3] / m] : [0, 0, 0, 1]
 }
 
+/**
+ * Orientation quaternion from an orthonormal body frame, where `x`/`y`/`z` are
+ * the world-space directions the body's +X/+Y/+Z axes should point. (Standard
+ * rotation-matrix → quaternion, columns = the basis vectors.)
+ */
+export function quaternionFromBasis(x: Vec3, y: Vec3, z: Vec3): Quaternion {
+  const m00 = x[0], m10 = x[1], m20 = x[2]
+  const m01 = y[0], m11 = y[1], m21 = y[2]
+  const m02 = z[0], m12 = z[1], m22 = z[2]
+  const trace = m00 + m11 + m22
+  let qx: number, qy: number, qz: number, qw: number
+  if (trace > 0) {
+    const s = 0.5 / Math.sqrt(trace + 1)
+    qw = 0.25 / s
+    qx = (m21 - m12) * s
+    qy = (m02 - m20) * s
+    qz = (m10 - m01) * s
+  } else if (m00 > m11 && m00 > m22) {
+    const s = 2 * Math.sqrt(1 + m00 - m11 - m22)
+    qw = (m21 - m12) / s
+    qx = 0.25 * s
+    qy = (m01 + m10) / s
+    qz = (m02 + m20) / s
+  } else if (m11 > m22) {
+    const s = 2 * Math.sqrt(1 + m11 - m00 - m22)
+    qw = (m02 - m20) / s
+    qx = (m01 + m10) / s
+    qy = 0.25 * s
+    qz = (m12 + m21) / s
+  } else {
+    const s = 2 * Math.sqrt(1 + m22 - m00 - m11)
+    qw = (m10 - m01) / s
+    qx = (m02 + m20) / s
+    qy = (m12 + m21) / s
+    qz = 0.25 * s
+  }
+  return normalizeQuaternion([qx, qy, qz, qw])
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }

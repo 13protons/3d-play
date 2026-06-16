@@ -19,6 +19,7 @@ import {
   integrateOrientation,
   limitTorqueToAngularRate,
   manualReactionWheelTorque,
+  quaternionFromBasis,
   rampManualTorque,
   rotateOrientationAroundWorldAxis,
   shouldDisableThrottleForWarp,
@@ -30,6 +31,7 @@ import {
   type Vec3,
 } from './controls'
 import { vehicleDerivatives, type VehicleAero, type VehicleEngine, type VehicleResources } from './dynamics'
+import { surfaceFrame } from './referenceFrame'
 import type { VehicleAttitude } from '../types'
 import {
   classifySurfaceContact,
@@ -163,6 +165,12 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         stateVec[4] - parentVelocity[1],
         stateVec[5] - parentVelocity[2],
       ]
+      // Stand the vehicle up: forward (+Z) radial-out, pitch (+X) along East,
+      // yaw (+Y) along North — so the controls map to compass directions.
+      const launchFrame = surfaceFrame(relativePosition, parentSurface.rotationAxis)
+      if (launchFrame) {
+        orientation = quaternionFromBasis(launchFrame.east, launchFrame.north, launchFrame.up)
+      }
       surfaceContact = classifySurfaceContact({
         relativePosition,
         relativeVelocity,

@@ -1,3 +1,5 @@
+import { surfaceFrame } from '../sim/vehicle/referenceFrame'
+
 export type Vec3 = [number, number, number]
 export type Quaternion = [number, number, number, number]
 
@@ -86,15 +88,11 @@ export function computeNavballCompassFrame({
   relativePosition: Vec3
   parentRotationAxis: Vec3
 }): NavballCompassFrame | null {
-  const up = normalizeStrict(relativePosition)
-  const axis = normalizeStrict(parentRotationAxis)
-  if (!up || !axis) return null
-
-  const north = normalizeStrict(subtract(axis, scale(up, dot(axis, up))))
-  if (!north) return null
-
-  const east = normalizeStrict(cross(north, up))
-  if (!east) return null
+  // Single source of truth for the surface frame (also drives the vehicle's
+  // default orientation in the worker).
+  const frame = surfaceFrame(relativePosition, parentRotationAxis)
+  if (!frame) return null
+  const { north, east } = frame
 
   return {
     north,
@@ -420,22 +418,8 @@ function normalize(vector: Vec3, fallback: Vec3): Vec3 {
   ]
 }
 
-function normalizeStrict(vector: Vec3): Vec3 | null {
-  const magnitude = Math.hypot(vector[0], vector[1], vector[2])
-  if (magnitude <= 0 || !Number.isFinite(magnitude)) return null
-  return [
-    cleanNumber(vector[0] / magnitude),
-    cleanNumber(vector[1] / magnitude),
-    cleanNumber(vector[2] / magnitude),
-  ]
-}
-
 function add(a: Vec3, b: Vec3): Vec3 {
   return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-}
-
-function subtract(a: Vec3, b: Vec3): Vec3 {
-  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
 function scale(vector: Vec3, scalar: number): Vec3 {
@@ -452,10 +436,6 @@ function cross(a: Vec3, b: Vec3): Vec3 {
     a[2] * b[0] - a[0] * b[2],
     a[0] * b[1] - a[1] * b[0],
   ]
-}
-
-function dot(a: Vec3, b: Vec3): number {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
 function cleanNumber(value: number): number {
