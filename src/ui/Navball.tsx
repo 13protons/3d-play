@@ -61,9 +61,9 @@ function AutopilotColumn({
   onSelect: (mode: AutopilotMode) => void
 }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 9, alignItems: 'center', pointerEvents: 'auto' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center', pointerEvents: 'auto' }}>
       {AUTOPILOT_GROUPS.map((group, index) => (
-        <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <div key={index} style={{ display: 'flex', gap: 4 }}>
           {group.map((mode) => {
             if (mode === 'maneuver' && !hasNode) return null
             const Glyph = HOLD_MODE_ICONS[mode]
@@ -76,8 +76,9 @@ function AutopilotColumn({
                 onClick={() => onSelect(mode)}
                 title={MODE_TITLES[mode] ?? mode}
                 style={{
-                  width: 30,
-                  height: 30,
+                  width: 24,
+                  height: 24,
+                  boxSizing: 'border-box',
                   borderRadius: '50%',
                   display: 'grid',
                   placeItems: 'center',
@@ -87,7 +88,7 @@ function AutopilotColumn({
                   border: `1px solid ${isActive ? color : 'rgba(255,255,255,0.22)'}`,
                 }}
               >
-                <svg width={20} height={20} viewBox="-12 -12 24 24" aria-hidden focusable={false}>
+                <svg width={22} height={22} viewBox="-12 -12 24 24" aria-hidden focusable={false}>
                   <Glyph color={isActive ? '#0a0e1c' : color} />
                 </svg>
               </button>
