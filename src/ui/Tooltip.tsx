@@ -7,12 +7,18 @@ export function TooltipOverlay() {
   const x = useTooltipStore((s) => s.x)
   const y = useTooltipStore((s) => s.y)
   if (!content) return null
+  // Flip above / to the left of the cursor near the viewport edges so the
+  // tooltip (e.g. for the bottom-of-navball items) stays on screen.
+  const vw = typeof window === 'undefined' ? 1920 : window.innerWidth
+  const vh = typeof window === 'undefined' ? 1080 : window.innerHeight
+  const flipUp = y > vh - 64
+  const flipLeft = x > vw - 220
   return (
     <div
       style={{
         position: 'fixed',
-        left: x + 14,
-        top: y + 16,
+        ...(flipLeft ? { right: vw - x + 14 } : { left: x + 14 }),
+        ...(flipUp ? { bottom: vh - y + 16 } : { top: y + 16 }),
         zIndex: 200,
         pointerEvents: 'none',
         background: 'rgba(8,12,22,0.95)',
