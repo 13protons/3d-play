@@ -81,7 +81,7 @@
           "dryMass": 5000,
           "inertia": [200000, 0, 0, 0, 200000, 0, 0, 0, 10000],
           "modules": [
-            { "kind": "engine", "maxThrust": 2100000, "isp": 300, "gimbalRange": 5 },
+            { "kind": "engine", "maxThrust": 2100000, "isp": 300, "thrustSeaLevel": 1850000, "ispSeaLevel": 265, "gimbalRange": 5 },
             { "kind": "tank", "capacity": 90000 }
           ],
           "render": { "shape": "cylinder", "radius": 2, "length": 12, "color": "#b8bcc4" }
@@ -91,7 +91,7 @@
           "dryMass": 2000,
           "inertia": [60000, 0, 0, 0, 60000, 0, 0, 0, 4000],
           "modules": [
-            { "kind": "engine", "maxThrust": 600000, "isp": 340, "gimbalRange": 4 },
+            { "kind": "engine", "maxThrust": 600000, "isp": 340, "thrustSeaLevel": 480000, "ispSeaLevel": 270, "gimbalRange": 4 },
             { "kind": "tank", "capacity": 30000 }
           ],
           "render": { "shape": "cylinder", "radius": 1.6, "length": 8, "color": "#d8dce4" }

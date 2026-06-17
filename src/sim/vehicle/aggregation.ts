@@ -62,8 +62,12 @@ export interface EngineTerm {
   position: Vec3
   /** Unit thrust direction in the body frame (nominal, un-gimbaled). */
   direction: Vec3
+  /** Vacuum thrust (N) and Isp (s). */
   maxThrust: number
   isp: number
+  /** Sea-level thrust/Isp; absent = no atmospheric dependence (constant). */
+  thrustSeaLevel?: number
+  ispSeaLevel?: number
   stage: number
   /** Max gimbal deflection from nominal (radians). 0 = fixed. */
   gimbalRange: number
@@ -102,6 +106,24 @@ export interface ThrustResult {
 }
 
 const DEFAULT_THRUST_DIRECTION: Vec3 = [0, 0, 1]
+
+const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x)
+
+/**
+ * Engine thrust at a given ambient pressure ratio (0 = vacuum, 1 = sea level),
+ * interpolating between the vacuum `maxThrust` and `thrustSeaLevel`. Constant
+ * (= vacuum) when no sea-level value is set.
+ */
+export function effectiveThrust(engine: EngineTerm, pressureRatio: number): number {
+  const sl = engine.thrustSeaLevel ?? engine.maxThrust
+  return engine.maxThrust + (sl - engine.maxThrust) * clamp01(pressureRatio)
+}
+
+/** Engine Isp at a given ambient pressure ratio (0 = vacuum, 1 = sea level). */
+export function effectiveIsp(engine: EngineTerm, pressureRatio: number): number {
+  const sl = engine.ispSeaLevel ?? engine.isp
+  return engine.isp + (sl - engine.isp) * clamp01(pressureRatio)
+}
 
 function normalizeOrDefault(v: Vec3, fallback: Vec3): Vec3 {
   const m = Math.hypot(v[0], v[1], v[2])
@@ -188,6 +210,8 @@ export function buildSkeleton(
           direction: mat3MulVec(rotation, normalizeOrDefault(mod.thrustDirection ?? DEFAULT_THRUST_DIRECTION, DEFAULT_THRUST_DIRECTION)),
           maxThrust: mod.maxThrust,
           isp: mod.isp,
+          thrustSeaLevel: mod.thrustSeaLevel,
+          ispSeaLevel: mod.ispSeaLevel,
           stage: part.stage,
           gimbalRange: mod.gimbalRange !== undefined ? (mod.gimbalRange * Math.PI) / 180 : 0,
         })
@@ -236,8 +260,13 @@ export function aggregate(
  * gimballed layouts get the right couple. Engine directions are fixed here
  * (gimbal steering is a later slice). Callers filter `engines` to the firing set.
  */
-export function netThrust(engines: EngineTerm[], centerOfMass: Vec3, throttle: number): ThrustResult {
-  return netThrustGimbaled(engines, centerOfMass, throttle, 0, 0)
+export function netThrust(
+  engines: EngineTerm[],
+  centerOfMass: Vec3,
+  throttle: number,
+  pressureRatio = 0,
+): ThrustResult {
+  return netThrustGimbaled(engines, centerOfMass, throttle, 0, 0, pressureRatio)
 }
 
 /**
@@ -273,6 +302,7 @@ export function netThrustGimbaled(
   throttle: number,
   gx: number,
   gy: number,
+  pressureRatio = 0,
 ): ThrustResult {
   if (throttle <= 0) return { force: [0, 0, 0], torque: [0, 0, 0] }
   let force: Vec3 = [0, 0, 0]
@@ -283,7 +313,7 @@ export function netThrustGimbaled(
       const [cgx, cgy] = clampGimbal(gx, gy, engine.gimbalRange)
       dir = deflectDirection(engine.direction, cgx, cgy)
     }
-    const f = vec3Scale(dir, engine.maxThrust * throttle)
+    const f = vec3Scale(dir, effectiveThrust(engine, pressureRatio) * throttle)
     force = vec3Add(force, f)
     torque = vec3Add(torque, vec3Cross(vec3Sub(engine.position, centerOfMass), f))
   }
@@ -309,13 +339,14 @@ export function solveGimbalForTorque(
   throttle: number,
   desiredX: number,
   desiredY: number,
+  pressureRatio = 0,
 ): { gx: number, gy: number } {
   const range = MAX_GIMBAL(engines)
   if (range <= 0 || throttle <= 0) return { gx: 0, gy: 0 }
   const eps = Math.min(range, 0.01)
-  const t0 = netThrustGimbaled(engines, centerOfMass, throttle, 0, 0).torque
-  const tx = netThrustGimbaled(engines, centerOfMass, throttle, eps, 0).torque
-  const ty = netThrustGimbaled(engines, centerOfMass, throttle, 0, eps).torque
+  const t0 = netThrustGimbaled(engines, centerOfMass, throttle, 0, 0, pressureRatio).torque
+  const tx = netThrustGimbaled(engines, centerOfMass, throttle, eps, 0, pressureRatio).torque
+  const ty = netThrustGimbaled(engines, centerOfMass, throttle, 0, eps, pressureRatio).torque
   // J = ∂(τx, τy)/∂(gx, gy)
   const m00 = (tx[0] - t0[0]) / eps, m10 = (tx[1] - t0[1]) / eps
   const m01 = (ty[0] - t0[0]) / eps, m11 = (ty[1] - t0[1]) / eps

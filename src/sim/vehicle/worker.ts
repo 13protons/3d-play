@@ -30,6 +30,7 @@ import {
   type Vec3,
 } from './controls'
 import { vehicleDerivatives, type VehicleAero, type VehicleEngine, type VehicleResources } from './dynamics'
+import { exponentialAtmosphereDensity } from './aero'
 import { fuelBurned, fuelLimitedThrottle } from './thrust'
 import { surfaceFrame } from './referenceFrame'
 import { VehicleStructure } from './structure'
@@ -76,6 +77,8 @@ let thrustForceBody: Vec3 = [0, 0, 0]
 let thrustTorqueBody: Vec3 = [0, 0, 0]
 let inertiaTensorStep: Mat3 | undefined
 let inertiaInverseStep: Mat3 | null | undefined
+/** Ambient pressure ratio (0 = vacuum, 1 = sea level) from the last advance. */
+let lastPressureRatio = 0
 let simTime = 0
 let warpRate = 1
 let throttle = 0
@@ -106,11 +109,11 @@ function emitControls(): void {
     commandedTorque,
     mass: resources?.mass,
     fuelMass: resources?.fuelMass,
-    maxThrust: structure ? structure.totalMaxThrust() : engine?.maxThrust,
-    isp: structure ? structure.isp() : engine?.isp,
+    maxThrust: structure ? structure.totalMaxThrust(lastPressureRatio) : engine?.maxThrust,
+    isp: structure ? structure.isp(lastPressureRatio) : engine?.isp,
     currentThrust: structure
       ? structure.stageFuel() > 0
-        ? structure.totalMaxThrust() * throttle
+        ? structure.totalMaxThrust(lastPressureRatio) * throttle
         : 0
       : undefined,
     aeroForceWorld: shouldEmitAeroForce(aeroForceWorld) ? aeroForceWorld : undefined,
@@ -196,6 +199,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     thrustTorqueBody = [0, 0, 0]
     inertiaTensorStep = undefined
     inertiaInverseStep = undefined
+    lastPressureRatio = 0
 
     simTime = 0
     warpRate = 1
@@ -325,6 +329,25 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     // scaled down on the step that empties the tank, zero when dry. Net thrust
     // (force + torque about the CoM) and the inertia tensor are stashed for the
     // derivative and the attitude integrator below.
+    const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
+    const parentSurface = bodySurfaces.get(parentId)
+
+    // Ambient pressure ratio (0 = vacuum, 1 = sea level) for atmospheric engine
+    // performance. For an isothermal exponential atmosphere pressure tracks
+    // density, so the ratio is just density / surface density at this altitude.
+    let pressureRatio = 0
+    if (parentCurve && parentSurface?.atmosphere) {
+      const parentPosition = evaluateCurve(parentCurve, simTime)
+      const altitude = Math.hypot(
+        stateVec[0] - parentPosition[0],
+        stateVec[1] - parentPosition[1],
+        stateVec[2] - parentPosition[2],
+      ) - parentSurface.radius
+      const density = exponentialAtmosphereDensity(parentSurface.atmosphere, altitude)
+      pressureRatio = Math.min(1, Math.max(0, density / parentSurface.atmosphere.surfaceDensity))
+    }
+    lastPressureRatio = pressureRatio
+
     let effectiveThrottle = throttle
     thrustForceBody = [0, 0, 0]
     thrustTorqueBody = [0, 0, 0]
@@ -334,8 +357,8 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       const agg = structure.aggregate()
       if (resources) resources = { dryMass: resources.dryMass, fuelMass: structure.totalFuel(), mass: agg.mass }
       effectiveThrottle = fuelLimitedThrottle({
-        maxThrust: structure.totalMaxThrust(),
-        isp: structure.isp(),
+        maxThrust: structure.totalMaxThrust(pressureRatio),
+        isp: structure.isp(pressureRatio),
         throttle,
         fuelMass: structure.stageFuel(),
         elapsedSeconds,
@@ -356,14 +379,11 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       const desired = attitude
         ? desiredControlTorque(orientation, angularVelocity, [Infinity, Infinity, Infinity])
         : ([0, 0, 0] as Vec3)
-      const { gx, gy } = structure.solveGimbal(agg.centerOfMass, effectiveThrottle, desired[0], desired[1])
-      const thrust = structure.netThrustBodyGimbaled(effectiveThrottle, agg.centerOfMass, gx, gy)
+      const { gx, gy } = structure.solveGimbal(agg.centerOfMass, effectiveThrottle, desired[0], desired[1], pressureRatio)
+      const thrust = structure.netThrustBodyGimbaled(effectiveThrottle, agg.centerOfMass, gx, gy, pressureRatio)
       thrustForceBody = thrust.force
       thrustTorqueBody = thrust.torque
     }
-
-    const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
-    const parentSurface = bodySurfaces.get(parentId)
 
     if (surfaceContact.type !== 'flying' && parentCurve && parentSurface) {
       const parentPosition = evaluateCurve(parentCurve, targetTime)
@@ -437,8 +457,8 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     // match (the rocket equation in action).
     if (structure && effectiveThrottle > 0) {
       const burned = fuelBurned({
-        maxThrust: structure.totalMaxThrust(),
-        isp: structure.isp(),
+        maxThrust: structure.totalMaxThrust(lastPressureRatio),
+        isp: structure.isp(lastPressureRatio),
         throttle: effectiveThrottle,
         fuelMass: structure.stageFuel(),
         elapsedSeconds,

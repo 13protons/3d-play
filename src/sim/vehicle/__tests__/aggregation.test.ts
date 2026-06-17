@@ -3,6 +3,8 @@ import {
   aggregate,
   buildSkeleton,
   deflectDirection,
+  effectiveIsp,
+  effectiveThrust,
   netThrust,
   netThrustGimbaled,
   resolvePartTransforms,
@@ -248,5 +250,46 @@ describe('gimbal', () => {
     const { gx, gy } = solveGimbalForTorque([fixed], [0, 0, 0], 1, 500, 0)
     expect(gx).toBe(0)
     expect(gy).toBe(0)
+  })
+})
+
+describe('atmospheric engine performance', () => {
+  const atmo: EngineTerm = {
+    instanceId: 'e',
+    position: [0, 0, 0],
+    direction: [0, 0, 1],
+    maxThrust: 2000, // vacuum
+    isp: 320, // vacuum
+    thrustSeaLevel: 1600,
+    ispSeaLevel: 280,
+    stage: 0,
+    gimbalRange: 0,
+  }
+
+  it('interpolates thrust and Isp between vacuum and sea level', () => {
+    expect(effectiveThrust(atmo, 0)).toBe(2000) // vacuum
+    expect(effectiveThrust(atmo, 1)).toBe(1600) // sea level
+    expect(effectiveThrust(atmo, 0.5)).toBe(1800)
+    expect(effectiveIsp(atmo, 0)).toBe(320)
+    expect(effectiveIsp(atmo, 1)).toBe(280)
+    expect(effectiveIsp(atmo, 0.5)).toBe(300)
+  })
+
+  it('clamps the pressure ratio to [0, 1]', () => {
+    expect(effectiveThrust(atmo, 2)).toBe(1600)
+    expect(effectiveThrust(atmo, -1)).toBe(2000)
+  })
+
+  it('is constant (vacuum) when no sea-level values are given', () => {
+    const fixed: EngineTerm = { instanceId: 'f', position: [0, 0, 0], direction: [0, 0, 1], maxThrust: 1000, isp: 300, stage: 0, gimbalRange: 0 }
+    expect(effectiveThrust(fixed, 1)).toBe(1000)
+    expect(effectiveIsp(fixed, 1)).toBe(300)
+  })
+
+  it('netThrust scales force with ambient pressure', () => {
+    const sea = netThrust([atmo], [0, 0, 0], 1, 1)
+    expect(sea.force[2]).toBeCloseTo(1600, 6)
+    const vac = netThrust([atmo], [0, 0, 0], 1, 0)
+    expect(vac.force[2]).toBeCloseTo(2000, 6)
   })
 })

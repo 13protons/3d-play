@@ -19,6 +19,8 @@ import {
   type VehicleAggregate,
   aggregate,
   buildSkeleton,
+  effectiveIsp,
+  effectiveThrust,
   netThrust,
   netThrustGimbaled,
   solveGimbalForTorque,
@@ -121,31 +123,32 @@ export class VehicleStructure {
     return sum
   }
 
-  /** Summed max thrust of the firing engines (for fuel-flow bookkeeping). */
-  totalMaxThrust(): number {
+  /** Summed max thrust of the firing engines at the given ambient pressure. */
+  totalMaxThrust(pressureRatio = 0): number {
     let sum = 0
-    for (const e of this.engines) sum += e.maxThrust
+    for (const e of this.engines) sum += effectiveThrust(e, pressureRatio)
     return sum
   }
 
-  /** Representative Isp (v1 assumes the firing engines share one). */
-  isp(): number {
-    return this.engines[0]?.isp ?? 0
+  /** Representative Isp at the given ambient pressure (v1: engines share one). */
+  isp(pressureRatio = 0): number {
+    const first = this.engines[0]
+    return first ? effectiveIsp(first, pressureRatio) : 0
   }
 
   /** Net thrust force + torque (about the CoM) in the body frame. */
-  netThrustBody(throttle: number, centerOfMass: Vec3): ThrustResult {
-    return netThrust(this.engines, centerOfMass, throttle)
+  netThrustBody(throttle: number, centerOfMass: Vec3, pressureRatio = 0): ThrustResult {
+    return netThrust(this.engines, centerOfMass, throttle, pressureRatio)
   }
 
   /** Gimbal command realizing a desired pitch/yaw torque about the CoM. */
-  solveGimbal(centerOfMass: Vec3, throttle: number, desiredX: number, desiredY: number): { gx: number, gy: number } {
-    return solveGimbalForTorque(this.engines, centerOfMass, throttle, desiredX, desiredY)
+  solveGimbal(centerOfMass: Vec3, throttle: number, desiredX: number, desiredY: number, pressureRatio = 0): { gx: number, gy: number } {
+    return solveGimbalForTorque(this.engines, centerOfMass, throttle, desiredX, desiredY, pressureRatio)
   }
 
   /** Net thrust with a gimbal command applied to the firing engines. */
-  netThrustBodyGimbaled(throttle: number, centerOfMass: Vec3, gx: number, gy: number): ThrustResult {
-    return netThrustGimbaled(this.engines, centerOfMass, throttle, gx, gy)
+  netThrustBodyGimbaled(throttle: number, centerOfMass: Vec3, gx: number, gy: number, pressureRatio = 0): ThrustResult {
+    return netThrustGimbaled(this.engines, centerOfMass, throttle, gx, gy, pressureRatio)
   }
 
   /**

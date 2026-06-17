@@ -23,9 +23,17 @@ export interface TankModule {
 /** An engine produces thrust along `thrustDirection` (local, default +Z). */
 export interface EngineModule {
   kind: 'engine'
+  /** Vacuum thrust (N). */
   maxThrust: number
-  /** Specific impulse (s). */
+  /** Vacuum specific impulse (s). */
   isp: number
+  /**
+   * Thrust / Isp at sea level (ambient pressure = surface density). When given,
+   * the engine interpolates between these and the vacuum values with ambient
+   * pressure; omitted means no atmospheric dependence (constant = vacuum).
+   */
+  thrustSeaLevel?: number
+  ispSeaLevel?: number
   /** Thrust axis in the part's local frame; normalized at skeleton build. */
   thrustDirection?: Vec3
   /** Max gimbal deflection from nominal (degrees). 0/undefined = fixed engine. */
