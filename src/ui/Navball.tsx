@@ -318,7 +318,7 @@ export function NavballCluster({
       style={{
         position: 'fixed',
         left: '50%',
-        bottom: 18,
+        bottom: 14, // bottom shelf overhangs ~2px below the instrument → ~12px viewport gap
         transform: 'translateX(-50%)',
         display: 'flex',
         alignItems: 'center',
@@ -327,7 +327,6 @@ export function NavballCluster({
         zIndex: 10, // keep the cluster (and its hover targets) above the 3D canvas
       }}
     >
-      <Proximity rows={rows.slice(2, 3)} />
       {onSelectMode && (
         <AutopilotColumn active={autopilotMode} hasNode={!!hasManeuverNode} onSelect={onSelectMode} />
       )}
@@ -347,7 +346,6 @@ export function NavballCluster({
         bottomRows={rows.slice(0, 2)}
       />
       <StatusColumn mode={mode} orbit={orbit} surfaceState={surfaceState} />
-      <Attitude rows={rows.slice(3)} />
     </div>
   )
 }
@@ -361,7 +359,7 @@ export function NavballInstrument(props: NavballInstrumentProps) {
       style={{
         position: 'relative',
         width: 190,
-        height: 202,
+        height: 180, // navball (170, at top:5) centered → 5px margins, symmetric shelves
         fontFamily: 'monospace',
         pointerEvents: 'none',
       }}
@@ -390,9 +388,10 @@ export function NavballInstrument(props: NavballInstrumentProps) {
           </Shelf>
         )
       })()}
-      {/* Bottom shelf: altitude then speed (mirrors AP/PE on top). */}
+      {/* Bottom shelf: altitude then speed, overlapping the navball's bottom
+          edge symmetrically with the AP/PE shelf on top (which uses top:-2). */}
       {bottomRows.length > 0 && (
-        <Shelf top={176}>
+        <Shelf bottom={-2}>
           {bottomRows.map((row) => (
             <ShelfValue
               key={row.label}
@@ -424,14 +423,16 @@ function GlyphIcon({ glyph: Glyph, size, color, title }: { glyph: NavGlyph; size
   )
 }
 
-/** A small panel that slightly overlaps the navball's top or bottom edge. */
-function Shelf({ top, children }: { top: number; children: React.ReactNode }) {
+/** A small panel that slightly overlaps the navball's top or bottom edge.
+ * Anchor by `top` (top shelf) or `bottom` (bottom shelf) so the two mirror. */
+function Shelf({ top, bottom, children }: { top?: number; bottom?: number; children: React.ReactNode }) {
   return (
     <div
       style={{
         position: 'absolute',
         left: '50%',
         top,
+        bottom,
         transform: 'translateX(-50%)',
         display: 'flex',
         alignItems: 'center',
