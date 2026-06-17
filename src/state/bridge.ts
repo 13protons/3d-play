@@ -30,10 +30,13 @@ let animFrameId: number | null = null
 /**
  * Load a body's plugin bundle (`/data/bodies/<id>/manifest.json`). Only the
  * bodies a scenario references are loaded (the caller maps over
- * `scenario.bodies`), and linked render assets — e.g. the atmosphere config —
- * are fetched separately as game assets, never bundled into the JS. The
- * resolved atmosphere config is attached as `atmosphereRender` for the BodyMeta
- * mapping to pick up.
+ * `scenario.bodies`), and the linked atmosphere asset is fetched separately as a
+ * game asset, never bundled into the JS. That asset holds both facets of the
+ * body's atmosphere: `render` (takram scattering params) is attached as
+ * `atmosphereRender`, and `physics` (the exponential drag model) as `atmosphere`
+ * — the shape the vehicle sim already consumes. Because the drag model is
+ * sim-critical, a body that *declares* an atmosphere asset whose load fails is a
+ * hard error, not a silent no-atmosphere fallback.
  */
 async function loadBodyDef(id: string): Promise<Record<string, unknown>> {
   const manifest = await fetchJsonOrNull(`/data/bodies/${id}/manifest.json`)
@@ -42,7 +45,11 @@ async function loadBodyDef(id: string): Promise<Record<string, unknown>> {
   const atmospherePath = render?.atmosphere
   if (typeof atmospherePath === 'string') {
     const atmosphere = await fetchJsonOrNull(atmospherePath)
-    if (atmosphere) manifest.atmosphereRender = atmosphere
+    if (!atmosphere) {
+      throw new Error(`Failed to load atmosphere asset for ${id}: ${atmospherePath}`)
+    }
+    if (atmosphere.render) manifest.atmosphereRender = atmosphere.render
+    if (atmosphere.physics) manifest.atmosphere = atmosphere.physics
   }
   return manifest
 }

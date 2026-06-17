@@ -1,16 +1,18 @@
 {
-  "$comment": "Render-side single-scattering config for Earth. All lengths in metres (scene units == metres for bodies). Coefficients are real per-metre extinction values, so no rescale is needed. Loaded over the network as a game asset; not bundled.",
-  "shellHeight": 100000,
-  "rayleigh": {
-    "coefficients": [5.8e-6, 13.5e-6, 33.1e-6],
-    "scaleHeight": 8000
+  "$comment": "Earth's atmosphere as one per-body asset (loaded over the network as a game asset). `render` = takram/Bruneton scattering params in takram's OWN units (per-km coefficients, metre scale heights) for the AtmosphereParameters mapper — no conversion. `physics` = the exponential drag model (SI) fed straight to the vehicle sim. bottomRadius is NOT here — it comes from manifest physics.radius (single source of truth).",
+  "render": {
+    "shellHeight": 60000,
+    "rayleighScattering": [0.005802, 0.013558, 0.0331],
+    "rayleighScaleHeight": 8000,
+    "mieScattering": 0.003996,
+    "mieScaleHeight": 1200,
+    "miePhaseFunctionG": 0.8
   },
-  "mie": {
-    "coefficient": 21e-6,
-    "scaleHeight": 1200,
-    "anisotropy": 0.76
-  },
-  "sunIntensity": 22,
-  "viewSamples": 16,
-  "lightSamples": 8
+  "physics": {
+    "model": "exponential",
+    "surfaceDensity": 1.225,
+    "scaleHeight": 8500,
+    "maxAltitude": 120000,
+    "loadRadiusMultiplier": 1.25
+  }
 }

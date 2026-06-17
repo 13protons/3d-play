@@ -16,12 +16,5 @@
     "emissive": false,
     "minimumLight": 0.04,
     "atmosphere": "/data/bodies/earth/atmosphere.json"
-  },
-  "atmosphere": {
-    "loadRadiusMultiplier": 1.25,
-    "model": "exponential",
-    "surfaceDensity": 1.225,
-    "scaleHeight": 8500,
-    "maxAltitude": 120000
   }
 }

@@ -33,29 +33,27 @@ export interface VehicleControlMeta {
 }
 
 /**
- * Render-side atmosphere config, loaded as a per-body game asset (e.g.
- * `/data/bodies/<id>/atmosphere.json`) — distinct from the physics
- * `InlineAtmosphere` the sim worker uses for drag. All lengths are in metres
- * (scene units == metres for bodies), so the per-metre scattering coefficients
- * apply directly with no rescale.
+ * Render-side atmosphere config — the `render` section of a body's
+ * `/data/bodies/<id>/atmosphere.json` asset. Serialized in takram/Bruneton's own
+ * units (per-km scattering coefficients, metre scale heights) so it maps
+ * field-for-field onto `AtmosphereParameters` with no conversion. The body radius
+ * (`bottomRadius`) is NOT here — it comes from the manifest's `physics.radius`;
+ * `topRadius = radius + shellHeight`. The `physics` section of the same asset
+ * (exponential drag model) is consumed separately by the sim worker.
  */
 export interface AtmosphereRenderConfig {
-  /** Atmosphere top above the surface, in metres — radius of the scattering shell. */
+  /** Scattering shell thickness above the surface, m. topRadius = radius + shellHeight. */
   shellHeight: number
-  rayleigh: {
-    /** Per-metre Rayleigh scattering coefficients, RGB. */
-    coefficients: [number, number, number]
-    scaleHeight: number
-  }
-  mie: {
-    coefficient: number
-    scaleHeight: number
-    /** Henyey-Greenstein anisotropy g (forward-scatter sun glow), 0..1. */
-    anisotropy: number
-  }
-  sunIntensity: number
-  viewSamples: number
-  lightSamples: number
+  /** Rayleigh scattering coefficients (per-km, takram units), RGB. */
+  rayleighScattering: [number, number, number]
+  /** Rayleigh density scale height, m. */
+  rayleighScaleHeight: number
+  /** Mie scattering coefficient (per-km, grey — expanded to RGB by the mapper). */
+  mieScattering: number
+  /** Mie density scale height, m. */
+  mieScaleHeight: number
+  /** Henyey-Greenstein anisotropy g (forward-scatter sun glow), 0..1. */
+  miePhaseFunctionG: number
 }
 
 export interface BodyMeta {

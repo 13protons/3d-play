@@ -8,7 +8,6 @@ import { useModeStore } from '../state/mode'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useVehicleStore } from '../state/vehicle'
 import { Vessel } from './Vessel'
-import { AtmosphereShell } from './AtmosphereShell'
 import { allFinite } from './finite'
 import type { BodyMeta } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
@@ -406,9 +405,8 @@ function VehicleSceneContent() {
             visibleBodyIds={visibleBodyIds}
           />
         ))}
-      {firstVehicle && bodies[firstVehicle.parentId]?.atmosphereRender && (
-        <AtmosphereShell bodyId={firstVehicle.parentId} vehicleId={firstVehicle.id} />
-      )}
+      {/* Atmosphere rendering removed with the v1 shell — takram pipeline lands in a
+          later phase (see docs/atmosphere-pipeline-refactor-plan-2026-06-17.md). */}
       {firstVehicle && (
         <PlanetTerrainTiles bodyId={firstVehicle.parentId} vehicleId={firstVehicle.id} />
       )}

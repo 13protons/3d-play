@@ -64,6 +64,20 @@ for (const [path, def] of Object.entries(manifestBodyModules)) {
   if (id) bodyDefById[id] = def
 }
 
+// A body's atmosphere lives in a sibling asset (`bodies/<id>/atmosphere.json`)
+// with `render` (takram scattering) + `physics` (exponential drag) sections —
+// not inline in the manifest. Same test/validation-only eager glob caveat as above.
+const atmosphereAssetModules = import.meta.glob('../../public/data/bodies/*/atmosphere.json', {
+  eager: true,
+  import: 'default',
+})
+
+const atmosphereAssetById: Record<string, unknown> = {}
+for (const [path, asset] of Object.entries(atmosphereAssetModules)) {
+  const id = path.split('/').slice(-2, -1)[0]
+  if (id) atmosphereAssetById[id] = asset
+}
+
 export function validateScenarioAssets(
   scenarioId: string,
 ): ScenarioAssetValidation {
@@ -78,12 +92,29 @@ export function validateScenarioAssets(
   const invalidBodyDefinitions = bodyIds.flatMap((bodyId) => {
     const body = bodyDefById[bodyId]
     if (!body) return []
+    const errors: string[] = []
+    const fail = (error: unknown) =>
+      errors.push(`${bodyId}: ${error instanceof Error ? error.message : String(error)}`)
     try {
       validateBodyDefinition(body as Record<string, unknown>)
-      return []
     } catch (error) {
-      return [`${bodyId}: ${error instanceof Error ? error.message : String(error)}`]
+      fail(error)
     }
+    // A body that links an atmosphere asset must have a valid one (sim-critical drag).
+    const render = (body as Record<string, unknown>).render as Record<string, unknown> | undefined
+    if (typeof render?.atmosphere === 'string') {
+      const asset = atmosphereAssetById[bodyId]
+      if (!asset) {
+        fail(new Error(`atmosphere asset missing: ${render.atmosphere}`))
+      } else {
+        try {
+          validateAtmosphereAsset(asset as Record<string, unknown>)
+        } catch (error) {
+          fail(error)
+        }
+      }
+    }
+    return errors
   })
   const invalidVehicles = (scenario.vehicles ?? []).flatMap((vehicle, index) => {
     try {
@@ -132,6 +163,16 @@ export function validateVehicleDefinition(def: Record<string, unknown>): void {
   if (def.aero !== undefined) validateAero(def.aero)
 }
 
+/**
+ * Validate a body's atmosphere asset (`bodies/<id>/atmosphere.json`): the
+ * `physics` section (exponential drag model) and/or the `render` section (takram
+ * scattering params). Each is validated only if present.
+ */
+export function validateAtmosphereAsset(asset: Record<string, unknown>): void {
+  if (asset.physics !== undefined) validateAtmosphere(asset.physics)
+  if (asset.render !== undefined) validateRenderConfig(asset.render)
+}
+
 function validateAtmosphere(value: unknown): asserts value is InlineAtmosphere {
   const atmosphere = objectValue(value, 'atmosphere')
   if (atmosphere.model !== 'exponential') {
@@ -141,6 +182,27 @@ function validateAtmosphere(value: unknown): asserts value is InlineAtmosphere {
   numberAtLeast(atmosphere.surfaceDensity, 0, 'atmosphere.surfaceDensity')
   numberGreaterThan(atmosphere.scaleHeight, 0, 'atmosphere.scaleHeight')
   numberAtLeast(atmosphere.maxAltitude, 0, 'atmosphere.maxAltitude')
+}
+
+function validateRenderConfig(value: unknown): void {
+  const render = objectValue(value, 'render')
+  numberGreaterThan(render.shellHeight, 0, 'render.shellHeight')
+  const rayleigh = render.rayleighScattering
+  if (
+    !Array.isArray(rayleigh) || rayleigh.length !== 3 ||
+    rayleigh.some((v) => typeof v !== 'number' || !Number.isFinite(v) || v < 0)
+  ) {
+    throw new Error('render.rayleighScattering must be a 3-number vector >= 0')
+  }
+  numberGreaterThan(render.rayleighScaleHeight, 0, 'render.rayleighScaleHeight')
+  numberAtLeast(render.mieScattering, 0, 'render.mieScattering')
+  numberGreaterThan(render.mieScaleHeight, 0, 'render.mieScaleHeight')
+  if (
+    typeof render.miePhaseFunctionG !== 'number' ||
+    render.miePhaseFunctionG < 0 || render.miePhaseFunctionG >= 1
+  ) {
+    throw new Error('render.miePhaseFunctionG must be in [0, 1)')
+  }
 }
 
 function validateResources(value: unknown): asserts value is VehicleResources {
