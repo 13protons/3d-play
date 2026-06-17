@@ -31,6 +31,7 @@ import {
   type Vec3,
 } from './controls'
 import { vehicleDerivatives, type VehicleAero, type VehicleEngine, type VehicleResources } from './dynamics'
+import { fuelBurned, fuelLimitedThrottle } from './thrust'
 import { surfaceFrame } from './referenceFrame'
 import type { VehicleAttitude } from '../types'
 import {
@@ -91,8 +92,14 @@ function emitControls(): void {
     reactionWheelTorque: attitude?.reactionWheelTorque,
     commandedTorque,
     mass: resources?.mass,
+    fuelMass: resources?.fuelMass,
     maxThrust: engine?.maxThrust,
-    currentThrust: engine ? engine.maxThrust * throttle : undefined,
+    isp: engine?.isp,
+    currentThrust: engine
+      ? resources && resources.fuelMass > 0
+        ? engine.maxThrust * throttle
+        : 0
+      : undefined,
     aeroForceWorld: shouldEmitAeroForce(aeroForceWorld) ? aeroForceWorld : undefined,
   })
 }
@@ -245,6 +252,20 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     manualHoldTime = advanceManualHoldTime(manualHoldTime, manualTorque, elapsedSeconds)
     aeroForceWorld = [0, 0, 0]
 
+    // Propellant limits thrust: full throttle while fuel lasts, scaled down on
+    // the step that empties the tank, zero when dry. Used for both the landed
+    // liftoff check and the flight integration below.
+    const effectiveThrottle =
+      engine && resources
+        ? fuelLimitedThrottle({
+            maxThrust: engine.maxThrust,
+            isp: engine.isp,
+            throttle,
+            fuelMass: resources.fuelMass,
+            elapsedSeconds,
+          })
+        : throttle
+
     const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
     const parentSurface = bodySurfaces.get(parentId)
 
@@ -270,7 +291,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         orientation,
         angularVelocity,
         0,
-        throttle,
+        effectiveThrottle,
         resources && engine ? { maxThrust: engine.maxThrust, mass: resources.mass } : undefined,
       )
       if (surfaceContact.type === 'landed' && dot(thrust, currentNormal) > 0) {
@@ -302,7 +323,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       aero,
       orientation,
       angularVelocity,
-      throttle,
+      throttle: effectiveThrottle,
       simTime,
       onAeroForce: (force) => {
         aeroForceWorld = force
@@ -311,6 +332,21 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
 
     advanceTo(stateVec, simTime, targetTime, deriv, 1e-10)
     advanceAttitude(elapsedSeconds)
+    // Burn the propellant this step consumed and drop the vehicle's mass to
+    // match (the rocket equation in action).
+    if (engine && resources && effectiveThrottle > 0) {
+      const burned = fuelBurned({
+        maxThrust: engine.maxThrust,
+        isp: engine.isp,
+        throttle: effectiveThrottle,
+        fuelMass: resources.fuelMass,
+        elapsedSeconds,
+      })
+      if (burned > 0) {
+        const fuelMass = Math.max(0, resources.fuelMass - burned)
+        resources = { ...resources, fuelMass, mass: resources.dryMass + fuelMass }
+      }
+    }
     simTime = targetTime
 
     if (surfaceContact.type === 'flying' && parentCurve && parentSurface) {

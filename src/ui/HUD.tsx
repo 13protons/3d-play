@@ -12,6 +12,7 @@ import { TooltipOverlay } from './Tooltip'
 import type { VehicleControlMeta } from '../state/trajectories'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
 import { computeFlightReadout, flightTelemetryRows } from './flightReadout'
+import { burnTimeForDeltaV, deltaVBudget, exhaustVelocity } from '../sim/vehicle/thrust'
 import { NavballCluster } from './Navball'
 import { computeForceLoadRatio } from './navballInstrumentMath'
 import {
@@ -272,6 +273,7 @@ function FlightReadouts() {
 
   return (
     <>
+      {vehicleControl && <ResourcesPanel control={vehicleControl} />}
       {showAttitudeDiagnostics && vehicleControl && (
         <AttitudeDiagnosticsPanel control={vehicleControl} />
       )}
@@ -281,7 +283,9 @@ function FlightReadouts() {
           node={node}
           simTime={simTime}
           mass={vehicleControl?.mass}
+          fuelMass={vehicleControl?.fuelMass}
           maxThrust={vehicleControl?.maxThrust}
+          isp={vehicleControl?.isp}
         />
       )}
       {vehicleControl && relativePosition && flightReadout && (
@@ -376,23 +380,79 @@ function AttitudeAxisRow({ row }: { row: AttitudeAxisDiagnostic }) {
   )
 }
 
+/**
+ * Always-on resources readout: total mass, remaining propellant, the ΔV that
+ * propellant can still deliver, and live consumption (flow + time to depletion
+ * while burning). Mirrors the old MASS card but as a standalone floating panel.
+ */
+function ResourcesPanel({ control }: { control: VehicleControlMeta }) {
+  const { mass, fuelMass, isp, currentThrust } = control
+  if (mass === undefined || fuelMass === undefined) return null
+  const flow = isp && currentThrust ? currentThrust / exhaustVelocity(isp) : 0
+  const dvRemaining = isp ? deltaVBudget(mass, mass - fuelMass, isp) : 0
+  const burnLeft = flow > 0 ? fuelMass / flow : null
+  const rows: { label: string; value: string; warn?: boolean }[] = [
+    { label: 'MASS', value: `${mass.toFixed(0)} kg` },
+    { label: 'FUEL', value: `${fuelMass.toFixed(0)} kg`, warn: fuelMass <= 0 },
+    { label: 'ΔV', value: `${dvRemaining.toFixed(0)} m/s` },
+    { label: 'FLOW', value: `${flow.toFixed(1)} kg/s` },
+  ]
+  if (burnLeft !== null) rows.push({ label: 'BURN', value: formatBurnDuration(burnLeft) })
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        right: 16,
+        bottom: 16,
+        width: 170,
+        padding: 12,
+        background: 'rgba(0,0,0,0.6)',
+        border: '1px solid rgba(210,225,255,0.3)',
+        borderRadius: 4,
+        color: 'white',
+        fontFamily: 'monospace',
+        fontSize: 12,
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{ color: '#9cd8ff', fontWeight: 'bold', marginBottom: 8 }}>RESOURCES</div>
+      {rows.map((row) => (
+        <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+          <span style={{ opacity: 0.7 }}>{row.label}</span>
+          <span style={{ color: row.warn ? '#ff7777' : '#ffcd70' }}>{row.value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 interface ManeuverNodePanelProps {
   vesselId: string
   node: ManeuverNode
   simTime: number
   mass?: number
+  fuelMass?: number
   maxThrust?: number
+  isp?: number
 }
 
-function ManeuverNodePanel({ vesselId, node, simTime, mass, maxThrust }: ManeuverNodePanelProps) {
+function ManeuverNodePanel({ vesselId, node, simTime, mass, fuelMass, maxThrust, isp }: ManeuverNodePanelProps) {
   const updateDeltaV = useManeuverStore((s) => s.updateDeltaV)
   const clearNode = useManeuverStore((s) => s.clearNode)
   const dt = node.simTime - simTime
   const totalDeltaV = Math.hypot(node.deltaV.prograde, node.deltaV.normal, node.deltaV.radial)
+  // Burn time accounts for mass lost as propellant burns (Tsiolkovsky), not the
+  // naive m·ΔV/F. ΔV budget is what the remaining fuel can actually deliver.
   const burnDuration =
-    totalDeltaV > 0 && mass && maxThrust && maxThrust > 0
-      ? (totalDeltaV * mass) / maxThrust
+    totalDeltaV > 0 && mass && maxThrust && maxThrust > 0 && isp && isp > 0
+      ? burnTimeForDeltaV(totalDeltaV, maxThrust, isp, mass)
       : null
+  const dvAvailable =
+    mass !== undefined && fuelMass !== undefined && isp
+      ? deltaVBudget(mass, mass - fuelMass, isp)
+      : null
+  const insufficientFuel = dvAvailable !== null && totalDeltaV > dvAvailable
 
   // Use refs so the hold-to-repeat callbacks always see the latest deltaV
   // instead of capturing stale values from when the button was first pressed.
@@ -444,6 +504,15 @@ function ManeuverNodePanel({ vesselId, node, simTime, mass, maxThrust }: Maneuve
       <div style={{ marginTop: 4, fontSize: 11 }}>
         Total ΔV: <span style={{ color: '#ffcc00' }}>{totalDeltaV.toFixed(1)} m/s</span>
       </div>
+      {dvAvailable !== null && (
+        <div style={{ marginTop: 2, fontSize: 11 }}>
+          ΔV avail:{' '}
+          <span style={{ color: insufficientFuel ? '#ff7777' : '#9cff8f' }}>
+            {dvAvailable.toFixed(1)} m/s
+          </span>
+          {insufficientFuel && <span style={{ color: '#ff7777' }}> ⚠ not enough fuel</span>}
+        </div>
+      )}
       {burnDuration !== null && (
         <div style={{ marginTop: 2, fontSize: 11 }}>
           Burn time: <span style={{ color: '#ffcc00' }}>{formatBurnDuration(burnDuration)}</span>

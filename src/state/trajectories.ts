@@ -17,7 +17,9 @@ export interface VehicleControlMeta {
   reactionWheelTorque?: [number, number, number]
   commandedTorque?: [number, number, number]
   mass?: number
+  fuelMass?: number
   maxThrust?: number
+  isp?: number
   currentThrust?: number
   aeroForceWorld?: [number, number, number]
 }

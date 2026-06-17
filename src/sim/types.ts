@@ -84,6 +84,8 @@ export interface VehicleAero {
 
 export interface VehicleEngine {
   maxThrust: number
+  /** Specific impulse (s) — sets propellant flow via ṁ = F/(Isp·g₀). */
+  isp: number
 }
 
 export interface VehicleAttitude {
@@ -146,7 +148,9 @@ export type VehicleWorkerOutbound =
       reactionWheelTorque?: [number, number, number]
       commandedTorque?: [number, number, number]
       mass?: number
+      fuelMass?: number
       maxThrust?: number
+      isp?: number
       currentThrust?: number
       aeroForceWorld?: [number, number, number]
     }

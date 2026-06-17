@@ -26,6 +26,7 @@ export interface VehicleAero {
 
 export interface VehicleEngine {
   maxThrust: number
+  isp: number
 }
 
 export interface VehicleAttitude {
@@ -141,6 +142,7 @@ function validateResources(value: unknown): asserts value is VehicleResources {
 function validateEngine(value: unknown): asserts value is VehicleEngine {
   const engine = objectValue(value, 'engine')
   numberGreaterThan(engine.maxThrust, 0, 'engine.maxThrust')
+  numberGreaterThan(engine.isp, 0, 'engine.isp')
 }
 
 function validateAttitude(value: unknown): asserts value is VehicleAttitude {

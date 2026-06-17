@@ -24,6 +24,8 @@ export interface VehicleResources {
 
 export interface VehicleEngine {
   maxThrust: number
+  /** Specific impulse (s) — sets propellant flow via ṁ = F/(Isp·g₀). */
+  isp: number
 }
 
 export interface VehicleAero {

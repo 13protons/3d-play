@@ -290,7 +290,9 @@ export async function startSim(scenarioId: string): Promise<void> {
           reactionWheelTorque: msg.reactionWheelTorque,
           commandedTorque: msg.commandedTorque,
           mass: msg.mass,
+          fuelMass: msg.fuelMass,
           maxThrust: msg.maxThrust,
+          isp: msg.isp,
           currentThrust: msg.currentThrust,
           aeroForceWorld: msg.aeroForceWorld,
         })
