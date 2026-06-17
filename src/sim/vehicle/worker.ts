@@ -27,12 +27,15 @@ import {
   shouldStabilizeAngularVelocityForWarp,
   sumAndClampTorque,
   thrustAccelerationForElapsedRotation,
+  thrustAccelerationFromBodyForce,
   type Quaternion,
   type Vec3,
 } from './controls'
 import { vehicleDerivatives, type VehicleAero, type VehicleEngine, type VehicleResources } from './dynamics'
 import { fuelBurned, fuelLimitedThrottle } from './thrust'
 import { surfaceFrame } from './referenceFrame'
+import { VehicleStructure } from './structure'
+import type { Mat3 } from './mat3'
 import type { VehicleAttitude } from '../types'
 import {
   classifySurfaceContact,
@@ -63,6 +66,18 @@ let resources: VehicleResources | undefined
 let engine: VehicleEngine | undefined
 let attitude: VehicleAttitude | undefined
 let aero: VehicleAero | undefined
+/**
+ * The structural model when the craft has propulsion. Source of truth for mass,
+ * CoM, inertia, fuel, and net thrust. For legacy single-body scenarios it's the
+ * synthesized 1-part structure (numerically identical to the old model); for an
+ * authored tree it carries the real geometry. Null only for unpowered craft.
+ */
+let structure: VehicleStructure | null = null
+/** Per-step thrust + inertia derived from the structure, shared with attitude. */
+let thrustForceBody: Vec3 = [0, 0, 0]
+let thrustTorqueBody: Vec3 = [0, 0, 0]
+let inertiaTensorStep: Mat3 | undefined
+let inertiaInverseStep: Mat3 | null | undefined
 let simTime = 0
 let warpRate = 1
 let throttle = 0
@@ -93,14 +108,16 @@ function emitControls(): void {
     commandedTorque,
     mass: resources?.mass,
     fuelMass: resources?.fuelMass,
-    maxThrust: engine?.maxThrust,
-    isp: engine?.isp,
-    currentThrust: engine
-      ? resources && resources.fuelMass > 0
-        ? engine.maxThrust * throttle
+    maxThrust: structure ? structure.totalMaxThrust() : engine?.maxThrust,
+    isp: structure ? structure.isp() : engine?.isp,
+    currentThrust: structure
+      ? structure.stageFuel() > 0
+        ? structure.totalMaxThrust() * throttle
         : 0
       : undefined,
     aeroForceWorld: shouldEmitAeroForce(aeroForceWorld) ? aeroForceWorld : undefined,
+    currentStage: structure?.currentStage,
+    canStage: structure?.canStage(),
   })
 }
 
@@ -145,6 +162,39 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     engine = msg.engine
     attitude = msg.attitude
     aero = msg.aero
+
+    // Build the structural model. An authored part tree wins; otherwise, a
+    // powered craft gets a degenerate 1-part structure that reproduces the
+    // single-body numbers exactly. Unpowered craft (no engine) have none.
+    if (msg.parts && msg.parts.length > 0 && msg.partDefs) {
+      structure = new VehicleStructure(msg.parts, new Map(msg.partDefs))
+    } else if (resources && engine) {
+      structure = VehicleStructure.singleBody({
+        dryMass: resources.dryMass,
+        fuelMass: resources.fuelMass,
+        maxThrust: engine.maxThrust,
+        isp: engine.isp,
+        reactionWheelTorque: attitude?.reactionWheelTorque,
+      })
+    } else {
+      structure = null
+    }
+    // A multi-part craft without an authored attitude derives its controller
+    // limits from geometry (diagonal of the inertia tensor + summed wheels).
+    if (structure && !attitude) {
+      const agg = structure.aggregate()
+      if (agg.inertiaInverse) {
+        attitude = {
+          momentOfInertia: [agg.inertia[0], agg.inertia[4], agg.inertia[8]],
+          reactionWheelTorque: structure.reactionWheelTorque,
+        }
+      }
+    }
+    thrustForceBody = [0, 0, 0]
+    thrustTorqueBody = [0, 0, 0]
+    inertiaTensorStep = undefined
+    inertiaInverseStep = undefined
+
     simTime = 0
     warpRate = 1
     throttle = 0
@@ -221,6 +271,22 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     attitudeTarget = msg.target
   }
 
+  if (msg.type === 'stage') {
+    if (structure) {
+      const jettisoned = structure.stage()
+      if (jettisoned.length > 0) {
+        // Structural-sync: tell the outside render mirror what was dropped.
+        postMessage({ type: 'vehicle-structure', id: vehicleId, jettisoned, currentStage: structure.currentStage })
+        // Mass/fuel readouts change immediately on a clean step boundary.
+        if (resources) {
+          const agg = structure.aggregate()
+          resources = { dryMass: resources.dryMass, fuelMass: structure.totalFuel(), mass: agg.mass }
+        }
+        emitControls()
+      }
+    }
+  }
+
   if (msg.type === 'set-warp') {
     warpRate = msg.rate
     let changedControls = false
@@ -252,19 +318,37 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     manualHoldTime = advanceManualHoldTime(manualHoldTime, manualTorque, elapsedSeconds)
     aeroForceWorld = [0, 0, 0]
 
-    // Propellant limits thrust: full throttle while fuel lasts, scaled down on
-    // the step that empties the tank, zero when dry. Used for both the landed
-    // liftoff check and the flight integration below.
-    const effectiveThrottle =
-      engine && resources
-        ? fuelLimitedThrottle({
-            maxThrust: engine.maxThrust,
-            isp: engine.isp,
-            throttle,
-            fuelMass: resources.fuelMass,
-            elapsedSeconds,
-          })
-        : throttle
+    // Aggregate the structure for this step: mass / CoM / inertia all follow the
+    // current fuel. Propellant limits thrust — full throttle while fuel lasts,
+    // scaled down on the step that empties the tank, zero when dry. Net thrust
+    // (force + torque about the CoM) and the inertia tensor are stashed for the
+    // derivative and the attitude integrator below.
+    let effectiveThrottle = throttle
+    thrustForceBody = [0, 0, 0]
+    thrustTorqueBody = [0, 0, 0]
+    inertiaTensorStep = undefined
+    inertiaInverseStep = undefined
+    if (structure) {
+      const agg = structure.aggregate()
+      if (resources) resources = { dryMass: resources.dryMass, fuelMass: structure.totalFuel(), mass: agg.mass }
+      effectiveThrottle = fuelLimitedThrottle({
+        maxThrust: structure.totalMaxThrust(),
+        isp: structure.isp(),
+        throttle,
+        fuelMass: structure.stageFuel(),
+        elapsedSeconds,
+      })
+      const thrust = structure.netThrustBody(effectiveThrottle, agg.centerOfMass)
+      thrustForceBody = thrust.force
+      thrustTorqueBody = thrust.torque
+      // Use the geometric tensor only when it inverts (a real multi-part craft).
+      // The synthesized single-body case stays on the authored diagonal MoI.
+      if (agg.inertiaInverse) {
+        inertiaTensorStep = agg.inertia
+        inertiaInverseStep = agg.inertiaInverse
+        if (attitude) attitude.momentOfInertia = [agg.inertia[0], agg.inertia[4], agg.inertia[8]]
+      }
+    }
 
     const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
     const parentSurface = bodySurfaces.get(parentId)
@@ -287,18 +371,20 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         landed.position[1] - parentPosition[1],
         landed.position[2] - parentPosition[2],
       ])
-      const thrust = thrustAccelerationForElapsedRotation(
-        orientation,
-        angularVelocity,
-        0,
-        effectiveThrottle,
-        resources && engine ? { maxThrust: engine.maxThrust, mass: resources.mass } : undefined,
-      )
+      const thrust = structure
+        ? thrustAccelerationFromBodyForce(thrustForceBody, structure.aggregate().mass, orientation, angularVelocity, 0)
+        : thrustAccelerationForElapsedRotation(
+            orientation,
+            angularVelocity,
+            0,
+            effectiveThrottle,
+            resources && engine ? { maxThrust: engine.maxThrust, mass: resources.mass } : undefined,
+          )
       if (surfaceContact.type === 'landed' && dot(thrust, currentNormal) > 0) {
         surfaceContact = { type: 'flying' }
       } else {
         stateVec.set([...landed.position, ...landed.velocity])
-        advanceAttitude(elapsedSeconds)
+        advanceAttitude(elapsedSeconds, thrustTorqueBody, inertiaTensorStep, inertiaInverseStep)
         // Co-rotate with the parent so a landed vehicle's orientation tracks
         // the surface it's glued to instead of drifting in inertial space.
         orientation = rotateOrientationAroundWorldAxis(
@@ -328,23 +414,26 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       onAeroForce: (force) => {
         aeroForceWorld = force
       },
+      // Spine path: net thrust force + current mass from the structure.
+      thrustBodyForce: structure ? thrustForceBody : undefined,
+      thrustMass: structure ? resources?.mass : undefined,
     })
 
     advanceTo(stateVec, simTime, targetTime, deriv, 1e-10)
-    advanceAttitude(elapsedSeconds)
+    advanceAttitude(elapsedSeconds, thrustTorqueBody, inertiaTensorStep, inertiaInverseStep)
     // Burn the propellant this step consumed and drop the vehicle's mass to
     // match (the rocket equation in action).
-    if (engine && resources && effectiveThrottle > 0) {
+    if (structure && effectiveThrottle > 0) {
       const burned = fuelBurned({
-        maxThrust: engine.maxThrust,
-        isp: engine.isp,
+        maxThrust: structure.totalMaxThrust(),
+        isp: structure.isp(),
         throttle: effectiveThrottle,
-        fuelMass: resources.fuelMass,
+        fuelMass: structure.stageFuel(),
         elapsedSeconds,
       })
       if (burned > 0) {
-        const fuelMass = Math.max(0, resources.fuelMass - burned)
-        resources = { ...resources, fuelMass, mass: resources.dryMass + fuelMass }
+        structure.drain(burned)
+        if (resources) resources = { ...resources, fuelMass: structure.totalFuel(), mass: structure.aggregate().mass }
       }
     }
     simTime = targetTime
@@ -410,7 +499,12 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
  * the integration is substepped so a long frame (stall or scheduler catch-up)
  * re-evaluates the controller per slice instead of taking one overshooting step.
  */
-function advanceAttitude(elapsedSeconds: number): void {
+function advanceAttitude(
+  elapsedSeconds: number,
+  externalTorque: Vec3 = [0, 0, 0],
+  inertiaTensor?: Mat3,
+  inertiaInverse?: Mat3 | null,
+): void {
   if (elapsedSeconds <= 0) return
   if (shouldStabilizeAngularVelocityForWarp(warpRate)) {
     commandedTorque = [0, 0, 0]
@@ -428,8 +522,11 @@ function advanceAttitude(elapsedSeconds: number): void {
     orientation,
     angularVelocity,
     momentOfInertia: attitude.momentOfInertia,
+    inertiaTensor,
+    inertiaInverse,
     elapsedSeconds,
     torqueFor: computeAttitudeTorque,
+    externalTorque,
   })
   orientation = result.orientation
   angularVelocity = result.angularVelocity

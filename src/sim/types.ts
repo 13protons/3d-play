@@ -1,3 +1,5 @@
+import type { PartDefinition } from './vehicle/parts'
+
 // ---------------------------------------------------------------------------
 // Coordinate System
 // ---------------------------------------------------------------------------
@@ -114,6 +116,13 @@ export type VehicleWorkerInbound =
       engine?: VehicleEngine
       attitude?: VehicleAttitude
       aero?: VehicleAero
+      /**
+       * Optional multi-part tree (authored outside the worker). When present the
+       * worker derives mass / CoM / inertia / thrust from it; otherwise it
+       * synthesizes a degenerate 1-part structure from resources/engine/attitude.
+       */
+      parts?: PartInstance[]
+      partDefs?: [id: string, def: PartDefinition][]
     }
   | {
       type: 'advance'
@@ -124,6 +133,7 @@ export type VehicleWorkerInbound =
   | { type: 'set-throttle'; value: number }
   | { type: 'set-attitude'; pitch: number; yaw: number; roll: number }
   | { type: 'set-attitude-target'; target: AttitudeTarget }
+  | { type: 'stage' }
 
 /** Outbound messages from the vehicle worker */
 export type VehicleWorkerOutbound =
@@ -136,6 +146,17 @@ export type VehicleWorkerOutbound =
       type: 'vehicle-position'
       position: [number, number, number]
       velocity: [number, number, number]
+    }
+  | {
+      /**
+       * Structural-sync event: a staging (or later, damage) change resolved in
+       * the worker. The outside render mirror deactivates these parts so both
+       * copies stay in lockstep without re-shipping the whole tree.
+       */
+      type: 'vehicle-structure'
+      id: string
+      jettisoned: string[]
+      currentStage: number
     }
   | {
       type: 'vehicle-controls'
@@ -153,6 +174,8 @@ export type VehicleWorkerOutbound =
       isp?: number
       currentThrust?: number
       aeroForceWorld?: [number, number, number]
+      currentStage?: number
+      canStage?: boolean
     }
 
 // ---------------------------------------------------------------------------

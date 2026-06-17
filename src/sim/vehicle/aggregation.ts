@@ -51,6 +51,8 @@ export interface TankTerm {
   position: Vec3
   /** Inertia about the origin per unit fuel mass: |r|²I − r⊗r. */
   inertiaUnit: Mat3
+  /** Staging group this tank belongs to (drives which stage drains it). */
+  stage: number
 }
 
 /** An active engine's geometry. Net force/torque also need throttle (dynamic). */
@@ -176,7 +178,7 @@ export function buildSkeleton(
 
     for (const mod of def.modules) {
       if (mod.kind === 'tank') {
-        tanks.push({ instanceId: part.instanceId, position, inertiaUnit: pointMassInertiaUnit(position) })
+        tanks.push({ instanceId: part.instanceId, position, inertiaUnit: pointMassInertiaUnit(position), stage: part.stage })
       } else if (mod.kind === 'engine') {
         engines.push({
           instanceId: part.instanceId,

@@ -4,8 +4,8 @@ import { evaluateCurve, evaluateCurveVelocity } from '../curves'
 import { computeAeroForce, type InlineAtmosphere } from './aero'
 import {
   thrustAccelerationForElapsedRotation,
+  thrustAccelerationFromBodyForce,
   type Quaternion,
-  type ThrustModel,
   type Vec3,
 } from './controls'
 
@@ -49,22 +49,38 @@ export interface VehicleDerivativeOptions {
   throttle: number
   simTime: number
   onAeroForce?: (force: Vec3) => void
+  /**
+   * Net thrust force in the body frame (the aggregation spine's summed engines).
+   * When supplied it replaces the single-engine `engine`/`throttle` model;
+   * `thrustMass` is the current total vehicle mass it acts on.
+   */
+  thrustBodyForce?: Vec3
+  thrustMass?: number
 }
 
 export function vehicleDerivatives(options: VehicleDerivativeOptions): DerivFn {
   return (t: number, y: Float64Array, dydt: Float64Array): void => {
     options.gravity(t, y, dydt)
 
-    const thrustModel: ThrustModel | undefined = options.resources && options.engine
-      ? { maxThrust: options.engine.maxThrust, mass: options.resources.mass }
-      : undefined
-    const thrust = thrustAccelerationForElapsedRotation(
-      options.orientation,
-      options.angularVelocity,
-      t - options.simTime,
-      options.throttle,
-      thrustModel,
-    )
+    // Spine path: a body-frame net thrust force (summed engines). Falls back to
+    // the single-engine +Z model when no aggregated force is supplied.
+    const thrust = options.thrustBodyForce && options.thrustMass !== undefined
+      ? thrustAccelerationFromBodyForce(
+          options.thrustBodyForce,
+          options.thrustMass,
+          options.orientation,
+          options.angularVelocity,
+          t - options.simTime,
+        )
+      : thrustAccelerationForElapsedRotation(
+          options.orientation,
+          options.angularVelocity,
+          t - options.simTime,
+          options.throttle,
+          options.resources && options.engine
+            ? { maxThrust: options.engine.maxThrust, mass: options.resources.mass }
+            : undefined,
+        )
     dydt[3] += thrust[0]
     dydt[4] += thrust[1]
     dydt[5] += thrust[2]

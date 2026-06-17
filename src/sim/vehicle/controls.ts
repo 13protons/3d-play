@@ -42,6 +42,7 @@ const SLEW_LINEAR_RATE_GAIN = SLEW_RATE_GAIN / 4
 
 import {
   type Mat3,
+  mat3FromQuaternion,
   mat3MulVec,
   vec3Add as mvAdd,
   vec3Cross as mvCross,
@@ -176,6 +177,12 @@ export interface AttitudeStepInput {
   elapsedSeconds: number
   /** Reaction-wheel torque for the current (orientation, angularVelocity). Re-evaluated per sub-step. */
   torqueFor: (orientation: Quaternion, angularVelocity: Vec3) => Vec3
+  /**
+   * Steady external torque in the body frame (e.g. an off-axis engine's thrust
+   * couple), added to the controller torque for the dynamics but NOT reported as
+   * the commanded reaction-wheel torque. Constant over the step in v1.
+   */
+  externalTorque?: Vec3
   /** Largest single integration slice (s). Defaults to MAX_ATTITUDE_SUBSTEP. */
   maxSubstep?: number
 }
@@ -202,6 +209,7 @@ export function integrateAttitudeOverStep({
   inertiaInverse,
   elapsedSeconds,
   torqueFor,
+  externalTorque,
   maxSubstep = MAX_ATTITUDE_SUBSTEP,
 }: AttitudeStepInput): AttitudeStepResult {
   let o = orientation
@@ -213,9 +221,10 @@ export function integrateAttitudeOverStep({
   while (remaining > 1e-9) {
     const dt = Math.min(remaining, step)
     lastTorque = torqueFor(o, w)
+    const dynamicsTorque = externalTorque ? mvAdd(lastTorque, externalTorque) : lastTorque
     w = useTensor
-      ? angularVelocityAfterTorqueTensor(w, lastTorque, inertiaTensor!, inertiaInverse!, dt)
-      : angularVelocityAfterTorque(w, lastTorque, momentOfInertia, dt)
+      ? angularVelocityAfterTorqueTensor(w, dynamicsTorque, inertiaTensor!, inertiaInverse!, dt)
+      : angularVelocityAfterTorque(w, dynamicsTorque, momentOfInertia, dt)
     o = integrateOrientation(o, w, dt)
     remaining -= dt
   }
@@ -483,6 +492,27 @@ export function thrustAccelerationForElapsedRotation(
     throttle,
     thrustModel,
   )
+}
+
+/**
+ * Acceleration from a net thrust force expressed in the body frame (e.g. the
+ * vector sum of several engines from the aggregation spine). The body force is
+ * rotated into the world by the orientation the craft will have after
+ * `elapsedSeconds` of its current spin — same elapsed-rotation handling as the
+ * single-engine path, so thrust tracks a rotating craft within an integration
+ * step. Returns zero for non-positive mass.
+ */
+export function thrustAccelerationFromBodyForce(
+  bodyForce: Vec3,
+  mass: number,
+  orientation: Quaternion,
+  angularVelocity: Vec3,
+  elapsedSeconds: number,
+): Vec3 {
+  if (!(mass > 0)) return [0, 0, 0]
+  const o = integrateOrientation(orientation, angularVelocity, elapsedSeconds)
+  const world = mat3MulVec(mat3FromQuaternion(o), bodyForce)
+  return [world[0] / mass, world[1] / mass, world[2] / mass]
 }
 
 /**
