@@ -41,6 +41,8 @@ interface NavballClusterProps extends NavballProps {
   rows: FlightTelemetryRow[];
   throttle: number;
   forceRatio: number;
+  /** Ambient atmospheric density ratio (0 = vacuum, 1 = surface). */
+  atmosphereRatio: number;
   surfaceState: SurfaceState;
   autopilotMode: AutopilotMode;
   orbit?: OrbitSummary;
@@ -282,6 +284,7 @@ export function StatusColumn({
 interface NavballInstrumentProps extends NavballProps {
   throttle: number;
   forceRatio: number;
+  atmosphereRatio: number;
   surfaceState: SurfaceState;
   autopilotMode: AutopilotMode;
   orbit?: OrbitSummary;
@@ -536,6 +539,7 @@ export function NavballCluster({
   mode,
   throttle,
   forceRatio,
+  atmosphereRatio,
   surfaceState,
   autopilotMode,
   maneuverDirection,
@@ -585,6 +589,7 @@ export function NavballCluster({
           mode={mode}
           throttle={throttle}
           forceRatio={forceRatio}
+          atmosphereRatio={atmosphereRatio}
           surfaceState={surfaceState}
           autopilotMode={autopilotMode}
           maneuverDirection={maneuverDirection}
@@ -601,7 +606,7 @@ export function NavballCluster({
 }
 
 export function NavballInstrument(props: NavballInstrumentProps) {
-  const { throttle, forceRatio, orbit, bottomRows = [] } = props;
+  const { throttle, forceRatio, atmosphereRatio, orbit, bottomRows = [] } = props;
   const throttleArc = computeArcProgressPath({
     value: throttle,
     radius: 90,
@@ -610,9 +615,21 @@ export function NavballInstrument(props: NavballInstrumentProps) {
     startDegrees: 135,
     endDegrees: 45,
   });
+  // Left side splits into two thin concentric arcs that touch: g-load (outer,
+  // radius 90 to match the throttle arc) and ambient atmospheric density (inner,
+  // radius 87 — 3 apart so the 3-wide strokes meet). Both mirror the throttle.
   const forceArc = computeArcProgressPath({
     value: forceRatio,
     radius: 90,
+    cx: 95,
+    cy: 90,
+    startDegrees: 135,
+    endDegrees: 45,
+    mirror: true,
+  });
+  const atmosphereArc = computeArcProgressPath({
+    value: atmosphereRatio,
+    radius: 87,
     cx: 95,
     cy: 90,
     startDegrees: 135,
@@ -636,14 +653,9 @@ export function NavballInstrument(props: NavballInstrumentProps) {
         aria-hidden='true'
         style={{ position: 'absolute', left: 0, top: 0 }}
       >
-        <InstrumentArc
-          indicator='force'
-          paths={forceArc}
-        />
-        <InstrumentArc
-          indicator='throttle'
-          paths={throttleArc}
-        />
+        <InstrumentArc paths={forceArc} width={3} trackColor='#2c4446' color='#ffc260' />
+        <InstrumentArc paths={atmosphereArc} width={3} trackColor='#2c4a5c' color='#9cd8ff' />
+        <InstrumentArc paths={throttleArc} width={6} trackColor='#406568' color='#ffc260' />
       </svg>
       <div style={{ position: 'absolute', left: 10, top: 5 }}>
         <Navball {...props} />
@@ -752,26 +764,20 @@ function ShelfValue({ label, value, title }: { label: string; value: string; tit
 }
 
 function InstrumentArc({
-  indicator,
   paths,
+  width,
+  trackColor,
+  color,
 }: {
-  indicator: 'force' | 'throttle';
   paths: { trackPath: string; progressPath: string };
+  width: number;
+  trackColor: string;
+  color: string;
 }) {
   return (
-    <g data-indicator={indicator}>
-      <path
-        d={paths.trackPath}
-        fill='none'
-        stroke='#406568'
-        strokeWidth='6'
-      />
-      <path
-        d={paths.progressPath}
-        fill='none'
-        stroke='#ffc260'
-        strokeWidth='6'
-      />
+    <g>
+      <path d={paths.trackPath} fill='none' stroke={trackColor} strokeWidth={width} />
+      <path d={paths.progressPath} fill='none' stroke={color} strokeWidth={width} />
     </g>
   );
 }

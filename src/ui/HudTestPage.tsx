@@ -122,6 +122,7 @@ export function HudTestPage() {
                 aeroForceWorld: [params.aeroForceNewtons, 0, 0],
                 mass: params.massKg,
               })}
+              atmosphereRatio={0.5}
               surfaceState={params.surfaceState}
               autopilotMode={params.autopilotMode}
               orbit={orbitFromParams(params)}

@@ -314,6 +314,7 @@ function FlightReadouts() {
             aeroForceWorld: vehicleControl.aeroForceWorld,
             mass: vehicleControl.mass,
           })}
+          atmosphereRatio={vehicleControl.pressureRatio ?? 0}
           surfaceState={vehicleControl.surfaceState}
           autopilotMode={activeAutopilotMode}
           maneuverDirection={node ? maneuverBurnDirection(node) ?? undefined : undefined}

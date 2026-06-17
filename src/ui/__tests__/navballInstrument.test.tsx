@@ -58,6 +58,7 @@ describe('NavballInstrument', () => {
         {...navballProps}
         throttle={0.62}
         forceRatio={0.18}
+        atmosphereRatio={0.4}
         surfaceState="flying"
         autopilotMode="damp"
         orbit={{ kind: 'closed', periapsisAltitude: 100_000, apoapsisAltitude: 250_000 }}
@@ -75,12 +76,18 @@ describe('NavballInstrument', () => {
     // Status indicators (frame/orbit/state) now live in StatusColumn, not here.
     expect(markup).not.toContain('Closed orbit')
     expect(markup).not.toContain('reference frame')
-    expect(markup).toContain('data-indicator="throttle"')
-    expect(markup).toContain('data-indicator="force"')
     expect(markup).toContain('width="190"')
     expect(markup).toContain('height="180"')
+    // Right: throttle arc (thick, radius 90, sweep 0).
     expect(markup).toContain('M 159 154 A 90 90 0 0 0 159 26')
+    expect(markup).toContain('stroke-width="6"')
+    // Left: g-load arc (thin, radius 90, mirrored sweep 1) + atmosphere arc
+    // (thin, radius 87, blue). Both 3-wide so they touch.
     expect(markup).toContain('M 31 154 A 90 90 0 0 1 31 26')
+    expect(markup).toContain('A 87 87 0 0 1')
+    expect(markup).toContain('stroke="#9cd8ff"')
+    expect(markup).toContain('stroke="#2c4a5c"') // atmosphere track background
+    expect(markup).toContain('stroke-width="3"')
   })
 
   it('sizes the raw navball as a 170px drawing', () => {
