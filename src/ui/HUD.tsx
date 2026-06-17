@@ -409,12 +409,13 @@ function ResourcesPanel({ control }: { control: VehicleControlMeta }) {
       style={{
         // `fixed` so it anchors to the viewport, not the short top HUD strip
         // (which is only as tall as its content — `absolute` here floated up and
-        // ran off the top of the screen).
+        // ran off the top of the screen). Hugs the top-right corner; that region
+        // is clear (the status readouts are all top-left).
         position: 'fixed',
         right: 16,
-        top: 96,
+        top: 16,
         width: 170,
-        maxHeight: 'calc(100vh - 120px)',
+        maxHeight: 'calc(100vh - 220px)',
         overflowY: 'auto',
         padding: 12,
         background: 'rgba(0,0,0,0.6)',
