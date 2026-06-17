@@ -157,11 +157,15 @@ body→camera offset, plus the body's surface-orientation rotation (reuse
 the emissive body each frame (reuse `VehicleSunLight`'s sun-position logic). Use a
 spherical `Ellipsoid(R,R,R)` per body (our bodies are spheres).
 
-### D6 — Lighting
-Replace the ad-hoc `VehicleSunLight` + ambient with takram's `SunLight`
-(`SunDirectionalLight`, color/intensity from the transmittance LUT) and
-`AerialPerspective`'s `skyLight`. Keep sun-occlusion logic (eclipse handling) by
-gating `SunLight` intensity with the existing `isSunOccluded` check.
+### D6 — Lighting (decision A: keep our lights)
+**Keep the existing `VehicleSunLight` + ambient for all bodies; do NOT swap to
+takram's `SunLight`/`SkyLight`.** takram's lights require the `<Atmosphere>`
+context, which only exists for bodies *with* an atmosphere — a swap would leave
+airless bodies (Moon, Mercury) unlit. Our directional sun already lights every
+body and handles eclipses (`isSunOccluded`); the atmosphere look comes from
+takram's sky + aerial-perspective fog (D2, phase 5). takram's `SunLight`/`SkyLight`
+(physically-reddened sun, bluish sky ambient) remain an optional later refinement
+for atmosphere bodies only, if our lighting looks flat once the sky is in.
 
 ## Implementation phases
 
@@ -179,8 +183,9 @@ gating `SunLight` intensity with the existing `isSunOccluded` check.
    gating still works. *Checkpoint: parity with today, minus atmosphere.*
 3. **`render` → `AtmosphereParameters` mapper** + per-body LUT cache (D3, D4).
    Unit-tested pure mapping function; calibrate Earth against `AtmosphereParameters.DEFAULT`.
-4. **Place + light.** Wire `worldToECEFMatrix` + `sunDirection` per frame (D5);
-   swap in `SunLight` + `skyLight`, preserve eclipse gating (D6).
+4. **Place + LUTs** (done). Per-body LUT cache + `<Atmosphere>` provider +
+   `worldToECEFMatrix`/`sunDirection` driver (D4, D5). Lighting unchanged — keep our
+   eclipse-aware directional + ambient (D6, decision A).
 5. **Atmosphere on.** Add `Sky` + `AerialPerspective` driven by our `sunDirection`,
    with takram's sun/moon disks **off** (`sun:false, moon:false`); keep all our body
    rendering. Confirm aerial perspective over terrain + vehicle and the sky/horizon,

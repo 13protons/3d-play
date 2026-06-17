@@ -19,11 +19,16 @@ export function getAtmosphereTextures(
 ): Promise<PrecomputedTextures> {
   const cached = cacheByBody.get(bodyId)
   if (cached) return cached
-  const promise = bakeTextures(gl, params).catch((error) => {
-    // Don't cache a failure — let a later mount retry instead.
-    cacheByBody.delete(bodyId)
-    throw error
-  })
+  const promise = bakeTextures(gl, params)
+    .then((textures) => {
+      console.info(`[atmosphere] LUTs baked for ${bodyId}`)
+      return textures
+    })
+    .catch((error) => {
+      // Don't cache a failure — let a later mount retry instead.
+      cacheByBody.delete(bodyId)
+      throw error
+    })
   cacheByBody.set(bodyId, promise)
   return promise
 }
