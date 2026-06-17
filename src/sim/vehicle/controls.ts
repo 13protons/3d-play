@@ -40,6 +40,15 @@ const SLEW_RATE_GAIN = 6
  */
 const SLEW_LINEAR_RATE_GAIN = SLEW_RATE_GAIN / 4
 
+import {
+  type Mat3,
+  mat3MulVec,
+  vec3Add as mvAdd,
+  vec3Cross as mvCross,
+  vec3Scale as mvScale,
+  vec3Sub as mvSub,
+} from './mat3'
+
 export type Quaternion = [number, number, number, number]
 export type Vec3 = [number, number, number]
 export interface ThrustModel {
@@ -122,10 +131,47 @@ export function angularVelocityAfterTorque(
   ]
 }
 
+/**
+ * Angular acceleration from Euler's rotational equation for a rigid body with a
+ * full inertia tensor: ω̇ = I⁻¹(τ − ω×(Iω)). The ω×(Iω) gyroscopic term is the
+ * coupling a diagonal `τ/I` model misses — it makes an asymmetric craft tumble
+ * and precess even with no applied torque. `inertiaInverse` is precomputed
+ * (it changes only as fuel burns, once per step, not per sub-step).
+ */
+export function angularAccelerationEuler(
+  inertiaTensor: Mat3,
+  inertiaInverse: Mat3,
+  angularVelocity: Vec3,
+  torque: Vec3,
+): Vec3 {
+  const gyro = mvCross(angularVelocity, mat3MulVec(inertiaTensor, angularVelocity))
+  return mat3MulVec(inertiaInverse, mvSub(torque, gyro))
+}
+
+/** Forward-Euler ω update using the full-tensor angular acceleration. */
+export function angularVelocityAfterTorqueTensor(
+  current: Vec3,
+  torque: Vec3,
+  inertiaTensor: Mat3,
+  inertiaInverse: Mat3,
+  dt: number,
+): Vec3 {
+  return mvAdd(current, mvScale(angularAccelerationEuler(inertiaTensor, inertiaInverse, current, torque), dt))
+}
+
 export interface AttitudeStepInput {
   orientation: Quaternion
   angularVelocity: Vec3
+  /** Diagonal moment of inertia — the legacy single-body dynamics path. */
   momentOfInertia: Vec3
+  /**
+   * Full inertia tensor + its inverse (body frame, about the CoM). When both are
+   * supplied the dynamics use Euler's equation (gyroscopic coupling); otherwise
+   * the diagonal `momentOfInertia` path runs. The controller torque (`torqueFor`)
+   * is unaffected either way — it schedules its gains off `momentOfInertia`.
+   */
+  inertiaTensor?: Mat3
+  inertiaInverse?: Mat3 | null
   /** Total time to advance attitude over (s). */
   elapsedSeconds: number
   /** Reaction-wheel torque for the current (orientation, angularVelocity). Re-evaluated per sub-step. */
@@ -152,6 +198,8 @@ export function integrateAttitudeOverStep({
   orientation,
   angularVelocity,
   momentOfInertia,
+  inertiaTensor,
+  inertiaInverse,
   elapsedSeconds,
   torqueFor,
   maxSubstep = MAX_ATTITUDE_SUBSTEP,
@@ -159,12 +207,15 @@ export function integrateAttitudeOverStep({
   let o = orientation
   let w = angularVelocity
   let lastTorque: Vec3 = [0, 0, 0]
+  const useTensor = !!inertiaTensor && !!inertiaInverse
   const step = maxSubstep > 0 ? maxSubstep : elapsedSeconds
   let remaining = elapsedSeconds
   while (remaining > 1e-9) {
     const dt = Math.min(remaining, step)
     lastTorque = torqueFor(o, w)
-    w = angularVelocityAfterTorque(w, lastTorque, momentOfInertia, dt)
+    w = useTensor
+      ? angularVelocityAfterTorqueTensor(w, lastTorque, inertiaTensor!, inertiaInverse!, dt)
+      : angularVelocityAfterTorque(w, lastTorque, momentOfInertia, dt)
     o = integrateOrientation(o, w, dt)
     remaining -= dt
   }

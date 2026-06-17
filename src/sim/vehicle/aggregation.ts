@@ -16,7 +16,7 @@
  * frame; the worker rotates net force into the world by the craft orientation.
  */
 
-import type { PartDefinition, EngineModule } from './parts'
+import type { PartDefinition } from './parts'
 import type { PartInstance } from '../types'
 import {
   type Mat3,
