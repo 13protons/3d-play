@@ -3,6 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { Navball, NavballInstrument, StatusColumn } from '../Navball'
 import { computeArcProgressPath, computeForceLoadRatio } from '../navballInstrumentMath'
 
+/** Extract the M start point and the A endpoint from an arc path string. */
+function pathPoints(path: string): [number, number][] {
+  const n = (path.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number)
+  return [[n[0], n[1]], [n[n.length - 2], n[n.length - 1]]]
+}
+
 const navballProps = {
   orientation: [0, 0, 0, 1] as [number, number, number, number],
   relativePosition: [1, 0, 0] as [number, number, number],
@@ -22,13 +28,21 @@ describe('computeArcProgressPath', () => {
     expect(left.progressPath).not.toBe(right.progressPath)
   })
 
-  it('matches the static navball frame arc coordinates', () => {
+  it('places arc endpoints on the radius-r circle (sub-pixel, no bulge)', () => {
     const right = computeArcProgressPath({ value: 0.5, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45 })
     const left = computeArcProgressPath({ value: 0, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45, mirror: true })
 
-    expect(right.trackPath).toBe('M 159 154 A 90 90 0 0 0 159 26')
-    expect(right.progressPath).toBe('M 159 154 A 90 90 0 0 0 185 90')
-    expect(left.trackPath).toBe('M 31 154 A 90 90 0 0 1 31 26')
+    expect(right.trackPath).toContain('A 90 90 0 0 0')
+    expect(right.progressPath).toContain('A 90 90 0 0 0')
+    expect(left.trackPath).toContain('A 90 90 0 0 1')
+
+    // Every coordinate in the path must lie on the radius-90 circle about
+    // (95, 90) — that's what keeps the stroked arc from bulging off its track.
+    for (const path of [right.trackPath, right.progressPath, left.trackPath]) {
+      for (const [x, y] of pathPoints(path)) {
+        expect(Math.hypot(x - 95, y - 90)).toBeCloseTo(90, 1)
+      }
+    }
   })
 })
 
@@ -79,11 +93,11 @@ describe('NavballInstrument', () => {
     expect(markup).toContain('width="190"')
     expect(markup).toContain('height="180"')
     // Right: throttle arc (thick, radius 90, sweep 0).
-    expect(markup).toContain('M 159 154 A 90 90 0 0 0 159 26')
+    expect(markup).toContain('A 90 90 0 0 0')
     expect(markup).toContain('stroke-width="6"')
     // Left: g-load arc (thin, radius 90, mirrored sweep 1) + atmosphere arc
     // (thin, radius 87, blue). Both 3-wide so they touch.
-    expect(markup).toContain('M 31 154 A 90 90 0 0 1 31 26')
+    expect(markup).toContain('A 90 90 0 0 1')
     expect(markup).toContain('A 87 87 0 0 1')
     expect(markup).toContain('stroke="#9cd8ff"')
     expect(markup).toContain('stroke="#2c4a5c"') // atmosphere track background

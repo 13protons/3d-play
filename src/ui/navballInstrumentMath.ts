@@ -93,5 +93,9 @@ function vectorMagnitude(vector: [number, number, number]) {
 }
 
 function formatCoord(value: number) {
-  return Math.round(value)
+  // Keep sub-pixel precision: rounding to whole pixels moves the endpoint off
+  // the exact radius-r circle, so the SVG arc (which keeps the exact radius)
+  // can't pass through it and bulges outward — visible as the fill "jumping
+  // out" of the track on thin arcs. Two decimals keeps the endpoint on-circle.
+  return Math.round(value * 100) / 100
 }
