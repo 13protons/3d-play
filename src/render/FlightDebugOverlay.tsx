@@ -2,9 +2,10 @@
  * Live flight-debug overlay for a multi-part craft. Rendered as a child of the
  * Vessel's group, so it inherits the orientation rotation and the vehicle render
  * layer; everything here is in the body frame, positioned relative to the center
- * of mass and scaled into scene units the same way the parts are. Vectors
- * (thrust, torque, drag) are fixed-length direction indicators — their
- * magnitudes live in the numeric debug panel.
+ * of mass and scaled into scene units the same way the parts are. The
+ * thrust/drag rays are scaled by magnitude (shared scale, so thrust vs drag is
+ * directly comparable); torque has its own scale. Lengths are capped so an
+ * extreme value can't shoot off to infinity. Exact magnitudes live in the panel.
  *
  * It subscribes to the high-frequency control telemetry on its own throttled
  * cadence so refreshing the vectors doesn't re-render the whole Vessel tree.
@@ -41,7 +42,12 @@ const COLORS = {
 }
 
 const AXIS_LEN = 6
-const VECTOR_LEN = 10
+/** Newtons per scene unit (shared by thrust + drag so their lengths compare). */
+const FORCE_PER_UNIT = 175_000
+/** N·m per scene unit for the torque ray. */
+const TORQUE_PER_UNIT = 150_000
+/** Cap on any ray's length (scene units) so an extreme value stays on-screen-ish. */
+const MAX_RAY_LEN = 40
 
 function norm(v: Vec3): Vec3 | null {
   const m = Math.hypot(v[0], v[1], v[2])
@@ -71,16 +77,26 @@ export function FlightDebugOverlay({ vehicleId, scale, engines }: FlightDebugOve
     (p[2] - com[2]) * scale,
   ]
   const origin: [number, number, number] = [0, 0, 0]
-  // Fixed-length direction indicator from the origin (magnitude shown in the panel).
-  const ray = (v: Vec3 | undefined, length: number): [number, number, number][] | null => {
+  // Fixed-length direction indicator (used for the engines' nominal axes).
+  const dirRay = (v: Vec3 | undefined, length: number): [number, number, number][] | null => {
     if (!v) return null
     const u = norm(v)
     return u ? [origin, [u[0] * length, u[1] * length, u[2] * length]] : null
   }
+  // Magnitude-scaled ray: length = |v| / perUnit, capped. Tiny force → tiny ray,
+  // none → nothing, so the lengths read as actual relative magnitudes.
+  const scaledRay = (v: Vec3 | undefined, perUnit: number): [number, number, number][] | null => {
+    if (!v) return null
+    const m = Math.hypot(v[0], v[1], v[2])
+    const u = norm(v)
+    if (!u || !(m > 0)) return null
+    const len = Math.min(m / perUnit, MAX_RAY_LEN)
+    return [origin, [u[0] * len, u[1] * len, u[2] * len]]
+  }
 
-  const thrustRay = ray(controls.thrustBody, VECTOR_LEN)
-  const torqueRay = ray(controls.torqueBody, VECTOR_LEN * 0.7)
-  const dragRay = ray(dragBody, VECTOR_LEN * 0.7)
+  const thrustRay = scaledRay(controls.thrustBody, FORCE_PER_UNIT)
+  const torqueRay = scaledRay(controls.torqueBody, TORQUE_PER_UNIT)
+  const dragRay = scaledRay(dragBody, FORCE_PER_UNIT)
 
   return (
     <group>
@@ -93,7 +109,7 @@ export function FlightDebugOverlay({ vehicleId, scale, engines }: FlightDebugOve
       <Line points={[[0, 0, -AXIS_LEN], [0, 0, AXIS_LEN]]} color={COLORS.axisZ} lineWidth={1.5} depthTest={false} depthWrite={false} />
 
       {engines.map((e, i) => {
-        const dir = ray(e.direction, 3)
+        const dir = dirRay(e.direction, 3)
         return (
           <group key={i} position={at(e.position)}>
             <mesh>
