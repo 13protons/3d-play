@@ -158,7 +158,6 @@ function AutopilotColumn({
         gap: 7,
         alignItems: 'end',
         pointerEvents: 'auto',
-        marginRight: '-1.8em',
       }}
     >
       <div style={rowStyle}>
@@ -256,9 +255,6 @@ export function StatusColumn({
         alignItems: 'center',
         gap: 4,
         pointerEvents: 'auto',
-        alignSelf: 'flex-end',
-        marginLeft: '-1.4em',
-        marginBottom: 10,
       }}
     >
       {orbit && (
@@ -555,40 +551,51 @@ export function NavballCluster({
         left: '50%',
         bottom: 14, // bottom shelf overhangs ~2px below the instrument → ~12px viewport gap
         transform: 'translateX(-50%)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
         pointerEvents: 'none',
         zIndex: 10, // keep the cluster (and its hover targets) above the 3D canvas
       }}
     >
-      {onSelectMode && (
-        <AutopilotColumn
-          active={autopilotMode}
-          hasNode={!!hasManeuverNode}
-          flying={surfaceState === 'flying'}
-          onSelect={onSelectMode}
+      {/* The instrument is the only in-flow child, so translateX(-50%) above
+          centers the navball itself on the page. The side columns are anchored
+          to this box absolutely, so their widths never shift the navball. */}
+      <div style={{ position: 'relative', width: 190 }}>
+        {onSelectMode && (
+          <div
+            style={{
+              position: 'absolute',
+              right: '100%',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              marginRight: -13, // tuck the buttons over the navball's left arc
+            }}
+          >
+            <AutopilotColumn
+              active={autopilotMode}
+              hasNode={!!hasManeuverNode}
+              flying={surfaceState === 'flying'}
+              onSelect={onSelectMode}
+            />
+          </div>
+        )}
+        <NavballInstrument
+          orientation={orientation}
+          relativePosition={relativePosition}
+          relativeVelocity={relativeVelocity}
+          parentRotationAxis={parentRotationAxis}
+          mode={mode}
+          throttle={throttle}
+          forceRatio={forceRatio}
+          surfaceState={surfaceState}
+          autopilotMode={autopilotMode}
+          maneuverDirection={maneuverDirection}
+          orbitNormal={orbitNormal}
+          orbit={orbit}
+          bottomRows={rows.slice(0, 2)}
         />
-      )}
-      <NavballInstrument
-        orientation={orientation}
-        relativePosition={relativePosition}
-        relativeVelocity={relativeVelocity}
-        parentRotationAxis={parentRotationAxis}
-        mode={mode}
-        throttle={throttle}
-        forceRatio={forceRatio}
-        surfaceState={surfaceState}
-        autopilotMode={autopilotMode}
-        maneuverDirection={maneuverDirection}
-        orbitNormal={orbitNormal}
-        orbit={orbit}
-        bottomRows={rows.slice(0, 2)}
-      />
-      <StatusColumn
-        orbit={orbit}
-        surfaceState={surfaceState}
-      />
+        <div style={{ position: 'absolute', left: '100%', bottom: 10, marginLeft: -8 }}>
+          <StatusColumn orbit={orbit} surfaceState={surfaceState} />
+        </div>
+      </div>
     </div>
   );
 }
