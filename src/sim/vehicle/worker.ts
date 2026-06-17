@@ -13,19 +13,17 @@ import { pointMassDerivatives } from '../integrator/derivatives'
 import {
   MAX_MANUAL_ANGULAR_RATE,
   advanceManualHoldTime,
+  angularRateSeekTorque,
   angularVelocityDampingTorque,
   forwardDirectionHoldTorque,
   integrateAttitudeOverStep,
   integrateOrientation,
-  limitTorqueToAngularRate,
-  manualReactionWheelTorque,
+  manualTorqueRampScale,
   quaternionFromBasis,
-  rampManualTorque,
   rotateOrientationAroundWorldAxis,
   shouldDisableThrottleForWarp,
   shouldEmitAeroForce,
   shouldStabilizeAngularVelocityForWarp,
-  sumAndClampTorque,
   thrustAccelerationForElapsedRotation,
   thrustAccelerationFromBodyForce,
   type Quaternion,
@@ -554,37 +552,57 @@ function advanceAttitude(
 
 /**
  * Desired control torque for a candidate (orientation, angularVelocity), shaped
- * to the given per-axis `maxTorque` budget. Used by the reaction wheels (budget
- * = wheel torque) and by the gimbal solver (budget = gimbal authority on
- * pitch/yaw). Pure w.r.t. the args.
+ * to the given per-axis `maxTorque` budget. Used both by the reaction wheels
+ * (budget = wheel torque) and the gimbal solver (budget unbounded — geometry +
+ * deflection range are the real limit). Pure w.r.t. the args.
+ *
+ * Manual pilot input is a per-axis *rate command* the controller seeks with the
+ * full available authority (so it works through a strong gimbal, not just as a
+ * fixed wheel-sized nudge). On any axis the pilot is actively driving, the rate
+ * command replaces the autopilot's hold — so a nudge under SAS/hold repositions
+ * the craft, and the autopilot resumes that axis the moment the input is
+ * released (holding the new attitude). Axes with no input keep the autopilot.
  */
 function desiredControlTorque(currentOrientation: Quaternion, currentAngularVelocity: Vec3, maxTorque: Vec3): Vec3 {
   if (!attitude) return manualTorque
-  if (attitudeTarget.kind === 'manual') {
-    const base = manualReactionWheelTorque({
-      commandTorque: manualTorque,
-      angularVelocity: currentAngularVelocity,
-    })
-    // Tap = gentle, hold = ramps up; then cap the resulting slew rate.
-    const ramped = rampManualTorque(base, manualHoldTime)
-    return limitTorqueToAngularRate(ramped, currentAngularVelocity, MAX_MANUAL_ANGULAR_RATE)
-  }
+
+  // Autopilot's hold torque (none in plain manual mode).
+  let base: Vec3 = [0, 0, 0]
   if (attitudeTarget.kind === 'damp') {
-    const dampingTorque = angularVelocityDampingTorque({
+    base = angularVelocityDampingTorque({
       angularVelocity: currentAngularVelocity,
       maxTorque,
       momentOfInertia: attitude.momentOfInertia,
     })
-    return sumAndClampTorque(dampingTorque, manualTorque, maxTorque)
+  } else if (attitudeTarget.kind === 'seek-forward') {
+    base = forwardDirectionHoldTorque({
+      currentOrientation,
+      targetForward: attitudeTarget.vector,
+      angularVelocity: currentAngularVelocity,
+      maxTorque,
+      momentOfInertia: attitude.momentOfInertia,
+    })
   }
-  const holdTorque = forwardDirectionHoldTorque({
-    currentOrientation,
-    targetForward: attitudeTarget.vector,
+
+  // Manual rate command: direction from the input, magnitude up to the manual
+  // rate cap, ramped (tap = gentle, hold = builds to full).
+  const rateCommand: Vec3 = [
+    manualTorque[0] !== 0 ? Math.sign(manualTorque[0]) * MAX_MANUAL_ANGULAR_RATE * manualTorqueRampScale(manualHoldTime[0]) : 0,
+    manualTorque[1] !== 0 ? Math.sign(manualTorque[1]) * MAX_MANUAL_ANGULAR_RATE * manualTorqueRampScale(manualHoldTime[1]) : 0,
+    manualTorque[2] !== 0 ? Math.sign(manualTorque[2]) * MAX_MANUAL_ANGULAR_RATE * manualTorqueRampScale(manualHoldTime[2]) : 0,
+  ]
+  const manualSeek = angularRateSeekTorque({
+    targetRate: rateCommand,
     angularVelocity: currentAngularVelocity,
     maxTorque,
     momentOfInertia: attitude.momentOfInertia,
   })
-  return sumAndClampTorque(holdTorque, manualTorque, maxTorque)
+  // Per axis: pilot input overrides the autopilot; otherwise hold.
+  return [
+    manualTorque[0] !== 0 ? manualSeek[0] : base[0],
+    manualTorque[1] !== 0 ? manualSeek[1] : base[1],
+    manualTorque[2] !== 0 ? manualSeek[2] : base[2],
+  ]
 }
 
 function dot(a: Vec3, b: Vec3): number {

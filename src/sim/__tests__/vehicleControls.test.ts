@@ -8,6 +8,7 @@ import {
   adjustThrottle,
   advanceManualHoldTime,
   angularVelocityAfterTorque,
+  angularRateSeekTorque,
   angularVelocityDampingTorque,
   attitudeHoldTorque,
   forwardDirectionHoldTorque,
@@ -226,6 +227,54 @@ describe('angularVelocityDampingTorque', () => {
       maxTorque: [400_000, 400_000, 250_000],
       momentOfInertia: [12_000, 12_000, 8_000],
     })).toEqual([0, 0, 0])
+  })
+})
+
+describe('angularRateSeekTorque', () => {
+  const moi: [number, number, number] = [12_000, 12_000, 8_000]
+
+  it('pushes toward the commanded rate and is zero once matched', () => {
+    const torque = angularRateSeekTorque({
+      targetRate: [0.2, 0, 0],
+      angularVelocity: [0, 0, 0],
+      maxTorque: [400_000, 400_000, 250_000],
+      momentOfInertia: moi,
+    })
+    expect(torque[0]).toBeGreaterThan(0) // accelerate toward +0.2 rad/s
+    expect(torque[1]).toBe(0)
+
+    expect(angularRateSeekTorque({
+      targetRate: [0.2, 0, 0],
+      angularVelocity: [0.2, 0, 0],
+      maxTorque: [400_000, 400_000, 250_000],
+      momentOfInertia: moi,
+    })[0]).toBe(0)
+  })
+
+  it('reduces to damping when the commanded rate is zero', () => {
+    const seek = angularRateSeekTorque({
+      targetRate: [0, 0, 0],
+      angularVelocity: [0.3, -0.1, 0],
+      maxTorque: [400_000, 400_000, 250_000],
+      momentOfInertia: moi,
+    })
+    const damp = angularVelocityDampingTorque({
+      angularVelocity: [0.3, -0.1, 0],
+      maxTorque: [400_000, 400_000, 250_000],
+      momentOfInertia: moi,
+    })
+    expect(seek).toEqual(damp)
+  })
+
+  it('clamps to the available torque', () => {
+    // (3 - 0) · 12000 · 2 = 72000, clamped to 50000.
+    const torque = angularRateSeekTorque({
+      targetRate: [3, 0, 0],
+      angularVelocity: [0, 0, 0],
+      maxTorque: [50_000, 50_000, 50_000],
+      momentOfInertia: moi,
+    })
+    expect(torque[0]).toBe(50_000)
   })
 })
 

@@ -325,6 +325,37 @@ export function angularVelocityDampingTorque({
   ]
 }
 
+export interface AngularRateSeekInput {
+  targetRate: Vec3
+  angularVelocity: Vec3
+  maxTorque: Vec3
+  momentOfInertia: Vec3
+  frequency?: number
+}
+
+/**
+ * Torque driving each axis toward a commanded angular rate (a generalization of
+ * {@link angularVelocityDampingTorque}, which seeks zero). Scaled by the moment
+ * of inertia so the response is consistent across craft, then clamped to the
+ * available torque. With a high `maxTorque` (e.g. a strong gimbal) it reaches
+ * the commanded rate quickly; this is how manual pilot input gets full control
+ * authority instead of a fixed reaction-wheel-sized nudge.
+ */
+export function angularRateSeekTorque({
+  targetRate,
+  angularVelocity,
+  maxTorque,
+  momentOfInertia,
+  frequency = 2,
+}: AngularRateSeekInput): Vec3 {
+  const seek = (axis: number) => cleanZero(clamp(
+    (targetRate[axis] - angularVelocity[axis]) * momentOfInertia[axis] * frequency,
+    -maxTorque[axis],
+    maxTorque[axis],
+  ))
+  return [seek(0), seek(1), seek(2)]
+}
+
 export function forwardDirectionHoldTorque({
   currentOrientation,
   targetForward,
