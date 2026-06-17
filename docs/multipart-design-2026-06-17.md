@@ -104,31 +104,43 @@ non-obvious chunk of work.
 - The `stage` command (`types.ts:36`) advances `currentStage`, fires that
   stage's decouplers (jettison parts at/below them), and activates the next
   engines.
-- A staging event triggers a **skeleton rebuild** (new active set) and re-emits
-  mass / per-stage ΔV / the render manifest.
+- A staging event triggers a **skeleton rebuild** (new active set), updates
+  mass / per-stage ΔV, and emits a **structural-sync event** to the outside tree
+  mirror (see "Tree ownership & worker / render split").
 - Jettisoned parts vanish in v1 (debris-as-tracked-bodies later).
 - Must land on an integration step boundary so the discontinuity is clean.
 
-## Worker / render split
+## Tree ownership & worker / render split
 
-The worker owns the tree, the configuration cache, aggregation, and staging.
-Only the minimum crosses to render the craft:
+The vehicle tree (parts + stage boundaries) is **authored outside the worker**
+(from scenario JSON) and passed in at init. Both sides therefore hold the tree:
+the worker runs physics on its copy; the main thread keeps it as the canonical
+**render model** (in the vehicle store, drawn by `src/render/Vessel.tsx`, whose
+stub header already says "assembles part meshes according to the part tree").
 
-- **World transform** (position + orientation): already flows — vehicle
-  trajectory curve + `vehicle-controls.orientation`. Per-frame, unchanged.
-- **Assembly manifest** (NEW, low-frequency): the list of active parts to draw —
-  `{ instanceId, defId (→mesh), localPosition, localRotation }`. Sent **once at
-  init and again on each staging event**, not per frame. `src/render/Vessel.tsx`
-  (currently a stub whose header already says "assembles part meshes according
-  to the part tree") builds a group of part meshes from it and places/orients the
-  group from the world transform.
-- **Dynamic visual flags** (piggyback on the existing `vehicle-controls`
-  message): which engines are firing + throttle (plumes), part temperature
-  (glow). Small, per-frame-ish, already a channel.
+Structural changes are a **sync protocol**, not a re-pushed manifest. The worker
+is authoritative for *when* they happen (it resolves them on a step boundary
+from physics state), so they flow worker → outside as small events that mutate
+the mirror:
 
-So: heavy physics stays in the worker; render gets a static-ish manifest + the
-transform it already has. The aggregation result (mass/CoM/inertia) does **not**
-need to cross — only what's needed to draw.
+- **Staging** → "stage N fired; parts [ids] jettisoned." Outside drops those
+  meshes; both copies recompute their active set identically.
+- **Damage** (later) → "part X destroyed." Same pattern.
+
+Because both copies start from the same tree and apply the same structural
+events, they stay in sync without shipping the whole tree each time.
+
+What actually crosses the boundary:
+- **Init:** full tree + part defs, outside → worker (once).
+- **Structural events:** staging/damage, worker → outside (rare, event-based).
+- **World transform:** vehicle trajectory curve + `vehicle-controls.orientation`
+  — already flows, per-frame, unchanged. `Vessel.tsx` places/orients the
+  assembled part group from it.
+- **Dynamic visual flags:** engine-firing + throttle (plumes), part temperature
+  (glow) — piggyback on the existing `vehicle-controls` message.
+
+Heavy physics (cache, aggregation, mass/CoM/inertia) stays entirely in the
+worker and never crosses — only structural events and the transform do.
 
 ## v1 scope (the spine) and build order
 
@@ -144,7 +156,9 @@ Suggested build order:
    feeds translation + attitude; fuel drains per-tank.
 4. Staging: `stage` command → rebuild + re-emit.
 5. UI: per-stage ΔV / RESOURCES from the new aggregate.
-6. Render: assembly manifest message → `Vessel.tsx` part-mesh assembly.
+6. Render: tree authored outside + passed to worker at init; `Vessel.tsx`
+   assembles part meshes from the outside mirror; staging structural-sync events
+   keep the mirror current.
 
 ## Deferred (bolt onto the spine later)
 
