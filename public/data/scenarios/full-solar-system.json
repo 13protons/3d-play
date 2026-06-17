@@ -270,11 +270,11 @@
       "mesh": "cylinder",
       "resources": {
         "dryMass": 9000,
-        "fuelMass": 15000
+        "fuelMass": 141000
       },
       "engine": {
-        "maxThrust": 300000,
-        "isp": 300
+        "maxThrust": 2100000,
+        "isp": 350
       },
       "attitude": {
         "momentOfInertia": [12000, 12000, 8000],
