@@ -1,0 +1,19 @@
+{
+  "id": "mercury",
+  "name": "Mercury",
+  "parentId": "sun",
+  "physics": {
+    "mass": 3.3011e+23,
+    "gm": 22031868550000.0,
+    "radius": 2439700,
+    "axialTilt": 0.03,
+    "angularVelocity": 1.24e-06,
+    "soiRadius": 112000000
+  },
+  "render": {
+    "color": "#9a8f82",
+    "texture": "/data/bodies/mercury/textures/surface.png",
+    "emissive": false,
+    "minimumLight": 0.02
+  }
+}

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import type { Group, Mesh } from 'three'
 import { useCameraStore } from '../../state/camera'
@@ -124,12 +124,17 @@ function TerrainTileBatchMesh({
     })
     if (tiles.length === 0) return null
     return bufferGeometryFromTerrainTileData(mergeTerrainTileData(tiles))
+    // `version` bumps when async tile loads land in the cache; it is a deliberate
+    // cache-bust so the geometry rebuilds even though it isn't referenced directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cache, tileIds, version])
   const meshRef = useRef<Mesh>(null)
 
-  useFrame(() => {
+  // The batch mesh's render layer only changes with renderLayer (or when the
+  // mesh first mounts as geometry arrives) — set it then, not every frame.
+  useEffect(() => {
     meshRef.current?.layers.set(renderLayer)
-  })
+  }, [renderLayer, geometry])
 
   if (!geometry) return null
 

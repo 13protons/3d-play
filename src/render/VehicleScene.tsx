@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Stars, OrbitControls } from '@react-three/drei'
 import { Vector3 } from 'three'
@@ -6,12 +6,17 @@ import type { AmbientLight, DirectionalLight, Group, Mesh, MeshBasicMaterial, Ob
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { useModeStore } from '../state/mode'
 import { useTrajectoriesStore } from '../state/trajectories'
+import { useVehicleStore } from '../state/vehicle'
+import { Vessel } from './Vessel'
+import { AtmosphereShell } from './AtmosphereShell'
+import { allFinite } from './finite'
 import type { BodyMeta } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
 import { evaluateCurveVelocity } from '../sim/curves'
 import {
   computeFlightReferenceFrame,
   rotationAxisFromAxialTilt,
+  surfaceFrame,
 } from '../sim/vehicle/referenceFrame'
 import {
   isSunOccluded,
@@ -38,6 +43,8 @@ import { RENDER_LAYERS, TERRAIN_RENDER_PASSES } from './renderLayers'
 import { PlanetTerrainTiles } from './terrain/PlanetTerrainTiles'
 import { vehiclePlanetSurfaceRenderDecision } from './terrain/terrainLodPolicy'
 import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
+import { PerfLogger } from './PerfLogger'
+import { countRender } from './perfCounters'
 
 const SUN_RENDER_DISTANCE = 5e8
 
@@ -88,9 +95,10 @@ function VehicleBody({
   const camera = useThree((s) => s.camera)
   const viewport = useThree((s) => s.size)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
+  const radius = body?.radius
   const surfaceGeometry = useMemo(
-    () => body ? createBodySurfaceGeometry(body.radius) : undefined,
-    [body?.radius],
+    () => radius != null ? createBodySurfaceGeometry(radius) : undefined,
+    [radius],
   )
 
   useFrame(() => {
@@ -275,46 +283,72 @@ function VehicleSunLight({
 function VehicleAmbientLight() {
   const lightRef = useRef<AmbientLight>(null)
 
-  useFrame(() => {
-    const light = lightRef.current
-    if (light) enableRenderableLayers(light.layers)
-  })
+  // Render layers don't change after mount — set them once instead of per frame.
+  useEffect(() => {
+    if (lightRef.current) enableRenderableLayers(lightRef.current.layers)
+  }, [])
 
   return <ambientLight ref={lightRef} intensity={0.04} />
 }
 
 function VehicleMesh() {
+  countRender('VehicleMesh')
   const groupRef = useRef<Group>(null)
+  const flameRef = useRef<Mesh>(null)
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
-  const vehicleControls = useTrajectoriesStore((s) => s.vehicleControls)
   const showRotationAxes = useModeStore((s) => s.showRotationAxes)
   const firstVehicle = Object.values(vehicles)[0]
-  const controls = firstVehicle ? vehicleControls[firstVehicle.id] : undefined
+  const vehicleId = firstVehicle?.id
+  const hasParts = useVehicleStore((s) => (vehicleId ? !!s.models[vehicleId]?.parts : false))
 
+  // Read the high-frequency control state imperatively each frame instead of
+  // subscribing to it (which would re-render this tree ~100x/s). Same pattern
+  // the orbital Body uses to keep itself off React's render path.
   useFrame(() => {
-    if (groupRef.current) setLayerRecursively(groupRef.current, RENDER_LAYERS.vehicle)
+    const group = groupRef.current
+    if (!group) return
+    setLayerRecursively(group, RENDER_LAYERS.vehicle)
+    if (!vehicleId) return
+    const controls = useTrajectoriesStore.getState().vehicleControls[vehicleId]
+    if (!controls) return
+    if (allFinite(controls.orientation)) {
+      const [x, y, z, w] = controls.orientation
+      group.quaternion.set(x, y, z, w)
+    }
+    if (flameRef.current) flameRef.current.visible = controls.throttle > 0
   })
 
+  // Multi-part craft: Vessel assembles the parts and (when debug is on) hosts the
+  // FlightDebugOverlay inside its oriented / CoM-pivoted / vehicle-layer group.
+  if (hasParts && vehicleId) {
+    return <Vessel vehicleId={vehicleId} />
+  }
+
   return (
-    <group ref={groupRef} quaternion={controls?.orientation}>
+    <group ref={groupRef}>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[1, 1.5, 4, 8]} />
         <meshStandardMaterial color="#cccccc" />
       </mesh>
-      {controls && controls.throttle > 0 && (
-        <mesh position={[0, 0, -3]}>
-          <sphereGeometry args={[0.7, 12, 8]} />
-          <meshBasicMaterial color="#ff8a18" />
-        </mesh>
-      )}
-      {showRotationAxes && (
-        <CraftDebugAxes
-          length={3}
-          aeroForceWorld={controls?.aeroForceWorld}
-          orientation={controls?.orientation}
-        />
-      )}
+      <mesh ref={flameRef} position={[0, 0, -3]} visible={false}>
+        <sphereGeometry args={[0.7, 12, 8]} />
+        <meshBasicMaterial color="#ff8a18" />
+      </mesh>
+      {showRotationAxes && vehicleId && <VehicleDebugAxes vehicleId={vehicleId} />}
     </group>
+  )
+}
+
+/** Debug-only; isolated so its per-tick control subscription re-renders just the
+ * axes, not the whole VehicleMesh tree. Not mounted during normal play. */
+function VehicleDebugAxes({ vehicleId }: { vehicleId: string }) {
+  const controls = useTrajectoriesStore((s) => s.vehicleControls[vehicleId])
+  return (
+    <CraftDebugAxes
+      length={3}
+      aeroForceWorld={controls?.aeroForceWorld}
+      orientation={controls?.orientation}
+    />
   )
 }
 
@@ -372,6 +406,9 @@ function VehicleSceneContent() {
             visibleBodyIds={visibleBodyIds}
           />
         ))}
+      {firstVehicle && bodies[firstVehicle.parentId]?.atmosphereRender && (
+        <AtmosphereShell bodyId={firstVehicle.parentId} vehicleId={firstVehicle.id} />
+      )}
       {firstVehicle && (
         <PlanetTerrainTiles bodyId={firstVehicle.parentId} vehicleId={firstVehicle.id} />
       )}
@@ -383,6 +420,7 @@ function VehicleViewControls() {
   const controlsRef = useRef<OrbitControlsImpl>(null)
   const targetUpRef = useRef(new Vector3(0, 1, 0))
   const surfaceCameraInitializedRef = useRef(false)
+  const surfaceRotationSimTimeRef = useRef<number | null>(null)
   const camera = useThree((s) => s.camera)
 
   useFrame((_, delta) => {
@@ -400,6 +438,7 @@ function VehicleViewControls() {
     const vehicleVelocity = evaluateCurveVelocity(vehicleCurve, t) as Vec3
     const parentVelocity = evaluateCurveVelocity(parentCurve, t) as Vec3
     const controls = store.vehicleControls[vehicle.id]
+    const surfaceState = controls?.surfaceState ?? 'flying'
     const relativePosition: Vec3 = [
       vehiclePosition[0] - parentPosition[0],
       vehiclePosition[1] - parentPosition[1],
@@ -410,27 +449,69 @@ function VehicleViewControls() {
       vehicleVelocity[1] - parentVelocity[1],
       vehicleVelocity[2] - parentVelocity[2],
     ]
+    const parentRotationAxis = rotationAxisFromAxialTilt(parent.axialTilt)
     const frame = computeFlightReferenceFrame({
       relativePosition,
       relativeVelocity,
       parentRadius: parent.radius,
       parentGm: parent.gm,
       parentAngularVelocity: parent.angularVelocity,
-      parentRotationAxis: rotationAxisFromAxialTilt(parent.axialTilt),
-      surfaceState: controls?.surfaceState ?? 'flying',
+      parentRotationAxis,
+      surfaceState,
     })
+
+    // While landed/crashed the vehicle co-rotates with the surface (see
+    // worker.ts). Rotate the camera around the same axis by the same per-frame
+    // angle so the planet stays visually fixed and time-warp shows a sunrise
+    // rather than the world tumbling under a stationary camera.
+    if (surfaceState !== 'flying' && Number.isFinite(t)) {
+      const prev = surfaceRotationSimTimeRef.current
+      if (prev !== null) {
+        const simDelta = t - prev
+        const angle = parent.angularVelocity * simDelta
+        if (Number.isFinite(angle) && angle !== 0 && Math.abs(simDelta) < 86400) {
+          const target = controlsRef.current?.target
+          const tx = target?.x ?? 0
+          const ty = target?.y ?? 0
+          const tz = target?.z ?? 0
+          const offset = new Vector3(
+            camera.position.x - tx,
+            camera.position.y - ty,
+            camera.position.z - tz,
+          )
+          offset.applyAxisAngle(
+            new Vector3(parentRotationAxis[0], parentRotationAxis[1], parentRotationAxis[2]),
+            angle,
+          )
+          camera.position.set(tx + offset.x, ty + offset.y, tz + offset.z)
+        }
+      }
+      surfaceRotationSimTimeRef.current = t
+    } else {
+      surfaceRotationSimTimeRef.current = null
+    }
 
     const targetUp = frame.mode === 'surface'
       ? [frame.radialOut[0], frame.radialOut[1], frame.radialOut[2]] as const
       : [0, 1, 0] as const
     targetUpRef.current.set(targetUp[0], targetUp[1], targetUp[2])
-    camera.up.lerp(targetUpRef.current, cameraUpLerpAlpha(delta)).normalize()
+    if (surfaceState !== 'flying') {
+      // Wall-clock-paced lerp can't keep up with sim-time-paced radialOut
+      // rotation under warp, leaving a constant tilt lag. Snap once landed —
+      // smoothing only matters during the orbital↔surface transition.
+      camera.up.copy(targetUpRef.current).normalize()
+    } else {
+      camera.up.lerp(targetUpRef.current, cameraUpLerpAlpha(delta)).normalize()
+    }
     if (frame.mode === 'surface' && !surfaceCameraInitializedRef.current) {
-      camera.position.set(...surfaceCameraPosition(frame.radialOut, 30, 10))
+      // Default to an elevated view from the south (north toward screen-top).
+      const tangent = surfaceFrame(relativePosition, parentRotationAxis)
+      const south: Vec3 = tangent ? [-tangent.north[0], -tangent.north[1], -tangent.north[2]] : [0, 0, 0]
+      camera.position.set(...surfaceCameraPosition(frame.radialOut, south, 18, 22))
       surfaceCameraInitializedRef.current = true
     }
     if (shouldClampCameraAboveLocalSurface({
-      surfaceState: controls?.surfaceState ?? 'flying',
+      surfaceState,
       referenceMode: frame.mode,
     })) {
       camera.position.set(...clampCameraAboveLocalSurface(
@@ -467,6 +548,7 @@ export function VehicleScene() {
         gl={{ autoClear: false }}
         style={{ width: '100%', height: '100%' }}
       >
+        <PerfLogger view="vehicle" />
         <VehicleSceneContent />
       </Canvas>
     </div>

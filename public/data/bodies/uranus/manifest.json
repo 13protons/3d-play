@@ -1,0 +1,18 @@
+{
+  "id": "uranus",
+  "name": "Uranus",
+  "parentId": "sun",
+  "physics": {
+    "mass": 8.681e+25,
+    "gm": 5793950610300000.0,
+    "radius": 25362000,
+    "axialTilt": 97.77,
+    "angularVelocity": 0.0001012,
+    "soiRadius": 51800000000
+  },
+  "render": {
+    "color": "#7fc8c8",
+    "emissive": false,
+    "minimumLight": 0.03
+  }
+}

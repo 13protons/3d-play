@@ -46,7 +46,7 @@ describe('isVehicleActivelyAccelerating', () => {
       throttle: 0,
       orientation: [0, 0, 0, 1],
       angularVelocity: [0, 0, 0],
-      attitudeMode: 'manual',
+      attitudeTargetKind: 'manual',
       surfaceState: 'flying',
       currentThrust: 0,
     })).toBe(false)
@@ -57,7 +57,7 @@ describe('isVehicleActivelyAccelerating', () => {
       throttle: 0.5,
       orientation: [0, 0, 0, 1],
       angularVelocity: [0, 0, 0],
-      attitudeMode: 'manual',
+      attitudeTargetKind: 'manual',
       surfaceState: 'flying',
       currentThrust: 100,
     })).toBe(true)

@@ -26,6 +26,7 @@ export interface VehicleAero {
 
 export interface VehicleEngine {
   maxThrust: number
+  isp: number
 }
 
 export interface VehicleAttitude {
@@ -48,10 +49,20 @@ const scenarioModules = import.meta.glob<ScenarioAsset>(
   { eager: true, import: 'default' },
 )
 
-const bodyModules = import.meta.glob('../../public/data/bodies/*.json', {
+// Each body is a plugin bundle: `bodies/<id>/manifest.json`. This eager glob is
+// a test/validation helper only (validateScenarioAssets is never imported by
+// the app), so bundling every manifest here doesn't affect the runtime — the
+// app fetches only a scenario's referenced bodies over the network.
+const manifestBodyModules = import.meta.glob('../../public/data/bodies/*/manifest.json', {
   eager: true,
   import: 'default',
 })
+
+const bodyDefById: Record<string, unknown> = {}
+for (const [path, def] of Object.entries(manifestBodyModules)) {
+  const id = path.split('/').slice(-2, -1)[0]
+  if (id) bodyDefById[id] = def
+}
 
 export function validateScenarioAssets(
   scenarioId: string,
@@ -62,10 +73,10 @@ export function validateScenarioAssets(
 
   const bodyIds = Object.keys(scenario.bodies)
   const missingBodyDefinitions = bodyIds.filter(
-    (bodyId) => !bodyModules[`../../public/data/bodies/${bodyId}.json`],
+    (bodyId) => !bodyDefById[bodyId],
   )
   const invalidBodyDefinitions = bodyIds.flatMap((bodyId) => {
-    const body = bodyModules[`../../public/data/bodies/${bodyId}.json`]
+    const body = bodyDefById[bodyId]
     if (!body) return []
     try {
       validateBodyDefinition(body as Record<string, unknown>)
@@ -141,6 +152,7 @@ function validateResources(value: unknown): asserts value is VehicleResources {
 function validateEngine(value: unknown): asserts value is VehicleEngine {
   const engine = objectValue(value, 'engine')
   numberGreaterThan(engine.maxThrust, 0, 'engine.maxThrust')
+  numberGreaterThan(engine.isp, 0, 'engine.isp')
 }
 
 function validateAttitude(value: unknown): asserts value is VehicleAttitude {

@@ -1,0 +1,18 @@
+{
+  "id": "deimos",
+  "name": "Deimos",
+  "parentId": "mars",
+  "physics": {
+    "mass": 1476200000000000.0,
+    "gm": 98517.417,
+    "radius": 6200,
+    "axialTilt": 0,
+    "angularVelocity": 5.757e-05,
+    "soiRadius": 24000
+  },
+  "render": {
+    "color": "#a09890",
+    "emissive": false,
+    "minimumLight": 0.02
+  }
+}

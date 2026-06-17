@@ -3,13 +3,21 @@
  * routes commands, orchestrates sequential advance: orbital -> vehicle.
  */
 
+import { useCameraStore } from './camera'
 import { useTrajectoriesStore } from './trajectories'
 import { useInputStore } from './input'
+import { useManeuverStore } from './maneuver'
 import { useVehicleStore } from './vehicle'
-import type { BodyMeta } from './trajectories'
-import type { VehicleAero, VehicleAttitude, VehicleEngine, VehicleResources } from '../sim/types'
+import { useAutopilotStore } from './autopilot'
+import type { AtmosphereRenderConfig, BodyMeta } from './trajectories'
+import type { PartInstance, VehicleAero, VehicleAttitude, VehicleEngine, VehicleResources } from '../sim/types'
 import type { TrajectoryCurve } from '../sim/types'
+import type { PartDefinition } from '../sim/vehicle/parts'
 import { G } from '../sim/constants'
+import { computeAttitudeTarget } from '../sim/autopilot'
+import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
+import { rotationAxisFromAxialTilt } from '../sim/vehicle/referenceFrame'
+import { shouldStabilizeAngularVelocityForWarp } from '../sim/vehicle/controls'
 import {
   jplEclipticToAppYUpVector,
   vectorToSectorPosition,
@@ -19,7 +27,46 @@ let orbitalWorker: Worker | null = null
 let vehicleWorker: Worker | null = null
 let animFrameId: number | null = null
 
+/**
+ * Load a body's plugin bundle (`/data/bodies/<id>/manifest.json`). Only the
+ * bodies a scenario references are loaded (the caller maps over
+ * `scenario.bodies`), and linked render assets — e.g. the atmosphere config —
+ * are fetched separately as game assets, never bundled into the JS. The
+ * resolved atmosphere config is attached as `atmosphereRender` for the BodyMeta
+ * mapping to pick up.
+ */
+async function loadBodyDef(id: string): Promise<Record<string, unknown>> {
+  const manifest = await fetchJsonOrNull(`/data/bodies/${id}/manifest.json`)
+  if (!manifest) throw new Error(`Failed to load body: ${id}`)
+  const render = manifest.render as Record<string, unknown> | undefined
+  const atmospherePath = render?.atmosphere
+  if (typeof atmospherePath === 'string') {
+    const atmosphere = await fetchJsonOrNull(atmospherePath)
+    if (atmosphere) manifest.atmosphereRender = atmosphere
+  }
+  return manifest
+}
+
+/**
+ * Fetch a JSON asset, returning null when it's absent. Guards against dev/SPA
+ * servers that answer a missing path with a 200 `index.html` fallback, so a
+ * missing manifest yields null (→ a clean "Failed to load body" error) rather
+ * than an HTML parse failure, and an optional missing asset stays optional.
+ */
+async function fetchJsonOrNull(url: string): Promise<Record<string, unknown> | null> {
+  const resp = await fetch(url)
+  if (!resp.ok) return null
+  if (!(resp.headers.get('content-type') ?? '').includes('json')) return null
+  try {
+    return (await resp.json()) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
 // Bridge-owned clock
+/** Max real-time advanced per frame (s) — caps backgrounded-tab catch-up. */
+const MAX_FRAME_DELTA = 0.25
 let simTime = 0
 let warpRate = 1
 let lastWallTime = 0
@@ -32,9 +79,25 @@ let vehicleState: WorkerState = 'idle'
 
 // Pending vehicle dispatch (waiting for orbital to finish)
 let pendingTargetTime: number | null = null
+// Latest vehicle target requested while the vehicle worker was still busy.
+// Dispatched the moment it goes idle so a slow worker never drops an interval.
+let pendingVehicleTarget: number | null = null
 
 // Body metadata for computing G*M
 let bodyGMs: [string, number][] = []
+
+// Per-body surface info (for autopilot reference frame)
+interface BodySurfaceInfo {
+  gm: number
+  radius: number
+  angularVelocity: number
+  rotationAxis: [number, number, number]
+}
+const bodySurfaceMap = new Map<string, BodySurfaceInfo>()
+
+// Active vehicle (for autopilot dispatch)
+let activeVehicleId: string | null = null
+let activeVehicleParentId: string | null = null
 
 // Latest orbital curves (forwarded to vehicle worker)
 let latestOrbitalCurves: TrajectoryCurve[] = []
@@ -74,13 +137,7 @@ export async function startSim(scenarioId: string): Promise<void> {
   const isJplEclipticFrame = scenario.coordinateFrame === 'jpl-ecliptic'
 
   const bodyIds = Object.keys(scenario.bodies)
-  const bodyDefs = await Promise.all(
-    bodyIds.map(async (id: string) => {
-      const resp = await fetch(`/data/bodies/${id}.json`)
-      if (!resp.ok) throw new Error(`Failed to load body: ${id} (${resp.status})`)
-      return resp.json()
-    }),
-  )
+  const bodyDefs = await Promise.all(bodyIds.map(loadBodyDef))
 
   // Populate body metadata in the trajectory store
   const bodyMetas: BodyMeta[] = bodyDefs.map(
@@ -101,6 +158,7 @@ export async function startSim(scenarioId: string): Promise<void> {
         texture: render.texture as string | undefined,
         emissive: (render.emissive as boolean) ?? false,
         minimumLight: (render.minimumLight as number | undefined) ?? 0,
+        atmosphereRender: def.atmosphereRender as AtmosphereRenderConfig | undefined,
       }
     },
   )
@@ -124,6 +182,18 @@ export async function startSim(scenarioId: string): Promise<void> {
       def.atmosphere as VehicleWorkerAtmosphere | undefined,
     ] as [string, number, number, number, VehicleWorkerAtmosphere | undefined]
   })
+
+  bodySurfaceMap.clear()
+  for (const def of bodyDefs as Record<string, unknown>[]) {
+    const physics = def.physics as Record<string, unknown>
+    const id = def.id as string
+    bodySurfaceMap.set(id, {
+      gm: (physics.gm as number | undefined) ?? G * (physics.mass as number),
+      radius: physics.radius as number,
+      angularVelocity: physics.angularVelocity as number,
+      rotationAxis: rotationAxisFromAxialTilt(physics.axialTilt as number),
+    })
+  }
 
   // Spawn the orbital worker
   orbitalWorker = new Worker(
@@ -190,6 +260,10 @@ export async function startSim(scenarioId: string): Promise<void> {
       id: v.id, name: v.name, parentId: v.parentId, mesh: v.mesh,
     }))
     useTrajectoriesStore.getState().setVehicles(vehicleMetas)
+    const firstVehicleId = vehicleMetas[0]?.id
+    if (typeof firstVehicleId === 'string') {
+      useCameraStore.getState().setFollowTarget(firstVehicleId)
+    }
     for (const v of vehicles as Record<string, unknown>[]) {
       if (v.resources) {
         const resourcesInput = v.resources as { dryMass: number; fuelMass: number }
@@ -202,6 +276,8 @@ export async function startSim(scenarioId: string): Promise<void> {
           engine: v.engine as VehicleEngine | undefined,
           attitude: v.attitude as VehicleAttitude | undefined,
           aero: v.aero as VehicleAero | undefined,
+          parts: v.parts as PartInstance[] | undefined,
+          partDefs: v.partDefs as [string, PartDefinition][] | undefined,
         })
       }
     }
@@ -234,22 +310,46 @@ export async function startSim(scenarioId: string): Promise<void> {
       if (msg.type === 'vehicle-trajectories') {
         useTrajectoriesStore.getState().mergeCurves(msg.curves)
         vehicleState = 'idle'
+        // Flush a target queued while the worker was busy (C1: never drop one).
+        if (pendingVehicleTarget !== null) {
+          const next = pendingVehicleTarget
+          pendingVehicleTarget = null
+          dispatchVehicle(next)
+        }
       }
       if (msg.type === 'vehicle-controls') {
         useTrajectoriesStore.getState().setVehicleControl(msg.id, {
           throttle: msg.throttle,
           orientation: msg.orientation,
           angularVelocity: msg.angularVelocity,
-          attitudeMode: msg.attitudeMode,
+          attitudeTargetKind: msg.attitudeTargetKind,
           surfaceState: msg.surfaceState,
           reactionWheelTorque: msg.reactionWheelTorque,
+          commandedTorque: msg.commandedTorque,
           mass: msg.mass,
+          fuelMass: msg.fuelMass,
           maxThrust: msg.maxThrust,
+          isp: msg.isp,
           currentThrust: msg.currentThrust,
           aeroForceWorld: msg.aeroForceWorld,
+          currentStage: msg.currentStage,
+          canStage: msg.canStage,
+          stages: msg.stages,
+          centerOfMass: msg.centerOfMass,
+          thrustBody: msg.thrustBody,
+          torqueBody: msg.torqueBody,
+          pressureRatio: msg.pressureRatio,
+          centerOfPressure: msg.centerOfPressure,
         })
       }
+      if (msg.type === 'vehicle-structure') {
+        // Structural-sync: mirror the worker's staging on the outside tree.
+        useVehicleStore.getState().applyStaging(msg.id, msg.jettisoned)
+      }
     }
+
+    activeVehicleId = v.id as string
+    activeVehicleParentId = v.parentId as string
 
     vehicleWorker.postMessage({
       type: 'init',
@@ -261,6 +361,8 @@ export async function startSim(scenarioId: string): Promise<void> {
       engine: useVehicleStore.getState().models[v.id as string]?.engine,
       attitude: useVehicleStore.getState().models[v.id as string]?.attitude,
       aero: useVehicleStore.getState().models[v.id as string]?.aero,
+      parts: useVehicleStore.getState().models[v.id as string]?.parts,
+      partDefs: useVehicleStore.getState().models[v.id as string]?.partDefs,
     })
   }
 
@@ -271,7 +373,13 @@ export async function startSim(scenarioId: string): Promise<void> {
 
   function loop() {
     const now = performance.now()
-    const wallDelta = (now - lastWallTime) / 1000
+    // Clamp the wall-clock delta: a backgrounded tab pauses rAF, so on refocus
+    // `now - lastWallTime` can be minutes. Unclamped, that single frame would
+    // hand the workers an enormous step (the attitude integrator substeps at
+    // 1/60 s and would grind synchronously, hanging the tab). Capping it means
+    // the sim effectively idles while hidden and resumes with a small hitch
+    // rather than fast-forwarding. Normal slow frames stay well under the cap.
+    const wallDelta = Math.min((now - lastWallTime) / 1000, MAX_FRAME_DELTA)
     lastWallTime = now
 
     // Flush input commands (warp changes)
@@ -300,13 +408,69 @@ export async function startSim(scenarioId: string): Promise<void> {
 }
 
 function dispatchVehicle(targetTime: number): void {
-  if (!vehicleWorker || vehicleState !== 'idle') return
+  if (!vehicleWorker) return
+  if (vehicleState !== 'idle') {
+    // Worker still busy — remember the most recent target and dispatch it when
+    // it goes idle, rather than dropping this interval (latest wins).
+    pendingVehicleTarget = targetTime
+    return
+  }
   vehicleState = 'busy'
+  dispatchAutopilotTarget(targetTime)
   vehicleWorker.postMessage({
     type: 'advance',
     targetTime,
     bodyCurves: latestOrbitalCurves,
   })
+}
+
+function dispatchAutopilotTarget(targetTime: number): void {
+  if (!vehicleWorker || !activeVehicleId || !activeVehicleParentId) return
+
+  // Under warp the worker freezes vehicle attitude, so don't recompute or post
+  // seek targets. The autopilot *mode* persists in its store; when warp returns
+  // to 1× this resumes and re-derives the live target (e.g. current prograde),
+  // rather than restoring a stale pre-warp orientation.
+  if (shouldStabilizeAngularVelocityForWarp(warpRate)) return
+
+  const mode = useAutopilotStore.getState().modes[activeVehicleId] ?? 'off'
+  const state = useTrajectoriesStore.getState()
+  const vehicleCurve = state.curves[activeVehicleId]
+  const parentCurve = state.curves[activeVehicleParentId]
+  const surface = bodySurfaceMap.get(activeVehicleParentId)
+  const control = state.vehicleControls[activeVehicleId]
+
+  if (!vehicleCurve || !parentCurve || !surface) {
+    vehicleWorker.postMessage({ type: 'set-attitude-target', target: { kind: 'manual' } })
+    return
+  }
+
+  const vehiclePos = evaluateCurve(vehicleCurve, targetTime)
+  const vehicleVel = evaluateCurveVelocity(vehicleCurve, targetTime)
+  const parentPos = evaluateCurve(parentCurve, targetTime)
+  const parentVel = evaluateCurveVelocity(parentCurve, targetTime)
+
+  const maneuverNode = useManeuverStore.getState().nodes[activeVehicleId]
+  const target = computeAttitudeTarget(mode, {
+    relativePosition: [
+      vehiclePos[0] - parentPos[0],
+      vehiclePos[1] - parentPos[1],
+      vehiclePos[2] - parentPos[2],
+    ],
+    relativeVelocity: [
+      vehicleVel[0] - parentVel[0],
+      vehicleVel[1] - parentVel[1],
+      vehicleVel[2] - parentVel[2],
+    ],
+    parentRadius: surface.radius,
+    parentGm: surface.gm,
+    parentAngularVelocity: surface.angularVelocity,
+    parentRotationAxis: surface.rotationAxis,
+    surfaceState: control?.surfaceState ?? 'flying',
+    maneuverNode,
+  })
+
+  vehicleWorker.postMessage({ type: 'set-attitude-target', target })
 }
 
 function flushCommands(): void {
@@ -328,8 +492,11 @@ function flushCommands(): void {
         roll: cmd.roll,
       })
     }
-    if (cmd.type === 'set-attitude-mode' && vehicleWorker) {
-      vehicleWorker.postMessage({ type: 'set-attitude-mode', mode: cmd.mode })
+    if (cmd.type === 'set-attitude-target' && vehicleWorker) {
+      vehicleWorker.postMessage({ type: 'set-attitude-target', target: cmd.target })
+    }
+    if (cmd.type === 'stage' && vehicleWorker) {
+      vehicleWorker.postMessage({ type: 'stage' })
     }
   }
 }
@@ -354,8 +521,12 @@ export function stopSim(): void {
   vehicleState = 'idle'
   pendingTargetTime = null
   latestOrbitalCurves = []
+  bodySurfaceMap.clear()
+  activeVehicleId = null
+  activeVehicleParentId = null
   useTrajectoriesStore.getState().reset()
   useVehicleStore.getState().reset()
+  useAutopilotStore.getState().reset()
 }
 
 export function pauseSim(): void {

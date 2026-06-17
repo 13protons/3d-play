@@ -1,0 +1,18 @@
+{
+  "id": "phobos",
+  "name": "Phobos",
+  "parentId": "mars",
+  "physics": {
+    "mass": 1.0659e+16,
+    "gm": 711338.337,
+    "radius": 11266,
+    "axialTilt": 0,
+    "angularVelocity": 0.000228,
+    "soiRadius": 16000
+  },
+  "render": {
+    "color": "#8b8178",
+    "emissive": false,
+    "minimumLight": 0.02
+  }
+}

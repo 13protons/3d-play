@@ -90,18 +90,28 @@ export function pointMassDerivatives(
     for (let i = 0; i < sources.length; i++) {
       const { curve, gm } = sources[i]
 
-      // Inline cubic Hermite interpolation (avoids tuple allocation per call)
+      // Inline cubic Hermite interpolation (avoids tuple allocation per call).
+      // Guard cdt===0 (zero-length curves are emitted on init / when targetTime
+      // <= simTime) to avoid a divide-by-zero NaN that would otherwise propagate
+      // into the integrator and stall it.
       const cdt = curve.t1 - curve.t0
-      const s = (t - curve.t0) / cdt
-      const s2 = s * s
-      const s3 = s2 * s
-      const h00 = 2 * s3 - 3 * s2 + 1
-      const h10 = s3 - 2 * s2 + s
-      const h01 = -2 * s3 + 3 * s2
-      const h11 = s3 - s2
-      const bpx = h00 * curve.p0[0] + h10 * cdt * curve.v0[0] + h01 * curve.p1[0] + h11 * cdt * curve.v1[0]
-      const bpy = h00 * curve.p0[1] + h10 * cdt * curve.v0[1] + h01 * curve.p1[1] + h11 * cdt * curve.v1[1]
-      const bpz = h00 * curve.p0[2] + h10 * cdt * curve.v0[2] + h01 * curve.p1[2] + h11 * cdt * curve.v1[2]
+      let bpx: number, bpy: number, bpz: number
+      if (cdt === 0) {
+        bpx = curve.p1[0]
+        bpy = curve.p1[1]
+        bpz = curve.p1[2]
+      } else {
+        const s = (t - curve.t0) / cdt
+        const s2 = s * s
+        const s3 = s2 * s
+        const h00 = 2 * s3 - 3 * s2 + 1
+        const h10 = s3 - 2 * s2 + s
+        const h01 = -2 * s3 + 3 * s2
+        const h11 = s3 - s2
+        bpx = h00 * curve.p0[0] + h10 * cdt * curve.v0[0] + h01 * curve.p1[0] + h11 * cdt * curve.v1[0]
+        bpy = h00 * curve.p0[1] + h10 * cdt * curve.v0[1] + h01 * curve.p1[1] + h11 * cdt * curve.v1[1]
+        bpz = h00 * curve.p0[2] + h10 * cdt * curve.v0[2] + h01 * curve.p1[2] + h11 * cdt * curve.v1[2]
+      }
 
       const dx = bpx - y[0]
       const dy = bpy - y[1]

@@ -43,10 +43,10 @@ describe('HUD component colors', () => {
     expect(markup).toContain('color:rgba(255,205,112,0.94)')
   })
 
-  it('renders crashed state in the Attitude panel', () => {
-    const markup = renderToStaticMarkup(<Attitude rows={rows} surfaceState="crashed" />)
+  it('renders only the given rows (state moved to the navball shelf)', () => {
+    const markup = renderToStaticMarkup(<Attitude rows={[{ label: 'MASS', value: '9000 kg' }]} />)
 
-    expect(markup).toContain('STATE')
-    expect(markup).toContain('CRASH')
+    expect(markup).toContain('MASS')
+    expect(markup).not.toContain('STATE')
   })
 })

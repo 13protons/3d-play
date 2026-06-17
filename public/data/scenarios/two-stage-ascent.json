@@ -1,0 +1,114 @@
+{
+  "id": "two-stage-ascent",
+  "name": "Two-Stage Ascent",
+  "epoch": 0,
+  "bodies": {
+    "sun": {
+      "position": { "sector": [0, 0, 0], "local": [0, 0, 0] },
+      "velocity": [0, 0, 0],
+      "rotationPhase": 0
+    },
+    "earth": {
+      "position": { "sector": [149600, 0, 0], "local": [0, 0, 0] },
+      "velocity": [0, 0, 29783],
+      "rotationPhase": 0
+    },
+    "moon": {
+      "position": { "sector": [149984, 0, 0], "local": [400000, 0, 0] },
+      "velocity": [0, 0, 30805],
+      "rotationPhase": 0
+    }
+  },
+  "vehicles": [
+    {
+      "id": "vehicle-1",
+      "name": "Two-Stage Lifter",
+      "parentId": "earth",
+      "position": { "sector": [149600, 0, 0], "local": [-6371000, 0, 0] },
+      "velocity": [0, 0, 29783],
+      "mesh": "cylinder",
+      "resources": {
+        "dryMass": 8000,
+        "fuelMass": 120000
+      },
+      "aero": {
+        "model": "simple-drag",
+        "dragCoefficient": 2.2,
+        "referenceArea": 12,
+        "referenceLength": 4,
+        "centerOfPressureBody": [0, 0, 0]
+      },
+      "parts": [
+        {
+          "instanceId": "booster",
+          "defId": "booster",
+          "parentInstanceId": null,
+          "parentAttachPointId": null,
+          "myAttachPointId": "root",
+          "localPosition": [0, 0, 0],
+          "localRotation": [0, 0, 0, 1],
+          "fuel": 90000,
+          "stage": 0,
+          "active": true
+        },
+        {
+          "instanceId": "upper",
+          "defId": "upper",
+          "parentInstanceId": "booster",
+          "parentAttachPointId": "top",
+          "myAttachPointId": "bottom",
+          "localPosition": [0, 0, 12],
+          "localRotation": [0, 0, 0, 1],
+          "fuel": 30000,
+          "stage": 1,
+          "active": true
+        },
+        {
+          "instanceId": "capsule",
+          "defId": "capsule",
+          "parentInstanceId": "upper",
+          "parentAttachPointId": "top",
+          "myAttachPointId": "bottom",
+          "localPosition": [0, 0, 8],
+          "localRotation": [0, 0, 0, 1],
+          "stage": 2,
+          "active": true
+        }
+      ],
+      "partDefs": [
+        ["booster", {
+          "id": "booster",
+          "dryMass": 5000,
+          "inertia": [200000, 0, 0, 0, 200000, 0, 0, 0, 10000],
+          "dragArea": 12,
+          "modules": [
+            { "kind": "engine", "maxThrust": 2100000, "isp": 300, "thrustSeaLevel": 1850000, "ispSeaLevel": 265, "gimbalRange": 5 },
+            { "kind": "tank", "capacity": 90000 }
+          ],
+          "render": { "shape": "cylinder", "radius": 2, "length": 12, "color": "#b8bcc4" }
+        }],
+        ["upper", {
+          "id": "upper",
+          "dryMass": 2000,
+          "inertia": [60000, 0, 0, 0, 60000, 0, 0, 0, 4000],
+          "dragArea": 2,
+          "modules": [
+            { "kind": "engine", "maxThrust": 600000, "isp": 340, "thrustSeaLevel": 480000, "ispSeaLevel": 270, "gimbalRange": 4 },
+            { "kind": "tank", "capacity": 30000 }
+          ],
+          "render": { "shape": "cylinder", "radius": 1.6, "length": 8, "color": "#d8dce4" }
+        }],
+        ["capsule", {
+          "id": "capsule",
+          "dryMass": 1000,
+          "inertia": [8000, 0, 0, 0, 8000, 0, 0, 0, 3000],
+          "dragArea": 1,
+          "modules": [
+            { "kind": "reactionWheel", "torque": [40000, 40000, 20000] }
+          ],
+          "render": { "shape": "cone", "radius": 1.6, "length": 4, "color": "#e8b060" }
+        }]
+      ]
+    }
+  ]
+}

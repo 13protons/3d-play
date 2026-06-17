@@ -2,9 +2,56 @@ export const RCS_ANGULAR_RATE = 0.25
 export const REACTION_WHEEL_ANGULAR_RATE = RCS_ANGULAR_RATE
 export const THROTTLE_RAMP_RATE = 0.5
 
+/** Default cap on autopilot slew rate (rad/s) so high-torque craft don't slam the target. */
+export const MAX_AUTOPILOT_ANGULAR_RATE = 0.6
+/** Cap on manual reaction-wheel slew rate (rad/s, ≈26°/s) so held keys can't spin up forever. */
+export const MAX_MANUAL_ANGULAR_RATE = 0.45
+/** Continuous hold time (s) for manual torque to ramp from its floor up to full authority. */
+export const MANUAL_TORQUE_RAMP_SECONDS = 1.0
+/** Torque fraction applied the instant a key is pressed — a quick tap is gentle, holding builds up. */
+export const MANUAL_TORQUE_MIN_SCALE = 0.15
+/**
+ * Max attitude integration step (s). The attitude controller re-evaluates each
+ * sub-step, so covering a long frame (a stall, or a catch-up after the worker
+ * fell behind) in small slices keeps it from applying a stale torque across a
+ * big step and overshooting. Also the natural inner-loop dt for a future stiff
+ * multi-body vehicle. Only ever runs at 1× warp (attitude is frozen above).
+ */
+export const MAX_ATTITUDE_SUBSTEP = 1 / 60
+/**
+ * Fraction of available angular acceleration the brake curve assumes. < 1 so
+ * commanding full torque always decelerates *faster* than the planned curve,
+ * which guarantees the craft stops short of the target instead of overshooting.
+ */
+const SLEW_BRAKE_SAFETY = 0.9
+/**
+ * Rate-error → torque stiffness. The controller commands a target angular rate,
+ * then drives the actual rate toward it; this gain saturates to max torque
+ * outside a thin boundary layer (half-width ≈ αmax / gain), so the approach is
+ * effectively bang-bang far out and critically damped near the target.
+ */
+const SLEW_RATE_GAIN = 6
+/**
+ * Rate-per-radian gain used inside a small region around the target, where the
+ * sqrt brake curve's near-infinite slope would otherwise chatter in discrete
+ * time. Set to SLEW_RATE_GAIN / 4 so the combined outer (angle) + inner (rate)
+ * loop is critically damped (ζ = 1) in this linear region — no overshoot, no
+ * creep. Far from the target the sqrt brake curve dominates instead.
+ */
+const SLEW_LINEAR_RATE_GAIN = SLEW_RATE_GAIN / 4
+
+import {
+  type Mat3,
+  mat3FromQuaternion,
+  mat3MulVec,
+  vec3Add as mvAdd,
+  vec3Cross as mvCross,
+  vec3Scale as mvScale,
+  vec3Sub as mvSub,
+} from './mat3'
+
 export type Quaternion = [number, number, number, number]
 export type Vec3 = [number, number, number]
-export type AttitudeMode = 'manual' | 'hold-current' | 'retrograde'
 export interface ThrustModel {
   maxThrust: number
   mass: number
@@ -33,7 +80,7 @@ export interface ForwardDirectionHoldInput {
   angularVelocity: Vec3
   maxTorque: Vec3
   momentOfInertia: Vec3
-  naturalFrequency?: number
+  maxAngularRate?: number
 }
 
 export interface ManualReactionWheelInput {
@@ -49,10 +96,6 @@ export interface PidStepInput {
   ki: number
   kd: number
   maxOutput: number
-}
-
-export function angularVelocityForRcsKeys(keys: Set<string>): Vec3 {
-  return angularVelocityForReactionWheelKeys(keys)
 }
 
 export function angularVelocityForReactionWheelKeys(keys: Set<string>): Vec3 {
@@ -89,15 +132,171 @@ export function angularVelocityAfterTorque(
   ]
 }
 
+/**
+ * Angular acceleration from Euler's rotational equation for a rigid body with a
+ * full inertia tensor: ω̇ = I⁻¹(τ − ω×(Iω)). The ω×(Iω) gyroscopic term is the
+ * coupling a diagonal `τ/I` model misses — it makes an asymmetric craft tumble
+ * and precess even with no applied torque. `inertiaInverse` is precomputed
+ * (it changes only as fuel burns, once per step, not per sub-step).
+ */
+export function angularAccelerationEuler(
+  inertiaTensor: Mat3,
+  inertiaInverse: Mat3,
+  angularVelocity: Vec3,
+  torque: Vec3,
+): Vec3 {
+  const gyro = mvCross(angularVelocity, mat3MulVec(inertiaTensor, angularVelocity))
+  return mat3MulVec(inertiaInverse, mvSub(torque, gyro))
+}
+
+/** Forward-Euler ω update using the full-tensor angular acceleration. */
+export function angularVelocityAfterTorqueTensor(
+  current: Vec3,
+  torque: Vec3,
+  inertiaTensor: Mat3,
+  inertiaInverse: Mat3,
+  dt: number,
+): Vec3 {
+  return mvAdd(current, mvScale(angularAccelerationEuler(inertiaTensor, inertiaInverse, current, torque), dt))
+}
+
+export interface AttitudeStepInput {
+  orientation: Quaternion
+  angularVelocity: Vec3
+  /** Diagonal moment of inertia — the legacy single-body dynamics path. */
+  momentOfInertia: Vec3
+  /**
+   * Full inertia tensor + its inverse (body frame, about the CoM). When both are
+   * supplied the dynamics use Euler's equation (gyroscopic coupling); otherwise
+   * the diagonal `momentOfInertia` path runs. The controller torque (`torqueFor`)
+   * is unaffected either way — it schedules its gains off `momentOfInertia`.
+   */
+  inertiaTensor?: Mat3
+  inertiaInverse?: Mat3 | null
+  /** Total time to advance attitude over (s). */
+  elapsedSeconds: number
+  /** Reaction-wheel torque for the current (orientation, angularVelocity). Re-evaluated per sub-step. */
+  torqueFor: (orientation: Quaternion, angularVelocity: Vec3) => Vec3
+  /**
+   * Steady external torque in the body frame (e.g. an off-axis engine's thrust
+   * couple), added to the controller torque for the dynamics but NOT reported as
+   * the commanded reaction-wheel torque. Constant over the step in v1.
+   */
+  externalTorque?: Vec3
+  /** Largest single integration slice (s). Defaults to MAX_ATTITUDE_SUBSTEP. */
+  maxSubstep?: number
+}
+
+export interface AttitudeStepResult {
+  orientation: Quaternion
+  angularVelocity: Vec3
+  /** Torque commanded on the final sub-step — published for diagnostics. */
+  lastTorque: Vec3
+}
+
+/**
+ * Advance attitude over `elapsedSeconds` in slices no larger than `maxSubstep`,
+ * re-evaluating the controller torque each slice. Re-evaluation is what prevents
+ * overshoot: a single large explicit step would hold the start-of-step torque/ω
+ * across the whole interval and sail past the target, whereas small slices let
+ * the controller brake as it approaches. A no-op for `elapsedSeconds <= 0`.
+ */
+export function integrateAttitudeOverStep({
+  orientation,
+  angularVelocity,
+  momentOfInertia,
+  inertiaTensor,
+  inertiaInverse,
+  elapsedSeconds,
+  torqueFor,
+  externalTorque,
+  maxSubstep = MAX_ATTITUDE_SUBSTEP,
+}: AttitudeStepInput): AttitudeStepResult {
+  let o = orientation
+  let w = angularVelocity
+  let lastTorque: Vec3 = [0, 0, 0]
+  const useTensor = !!inertiaTensor && !!inertiaInverse
+  const step = maxSubstep > 0 ? maxSubstep : elapsedSeconds
+  let remaining = elapsedSeconds
+  while (remaining > 1e-9) {
+    const dt = Math.min(remaining, step)
+    lastTorque = torqueFor(o, w)
+    const dynamicsTorque = externalTorque ? mvAdd(lastTorque, externalTorque) : lastTorque
+    w = useTensor
+      ? angularVelocityAfterTorqueTensor(w, dynamicsTorque, inertiaTensor!, inertiaInverse!, dt)
+      : angularVelocityAfterTorque(w, dynamicsTorque, momentOfInertia, dt)
+    o = integrateOrientation(o, w, dt)
+    remaining -= dt
+  }
+  return { orientation: o, angularVelocity: w, lastTorque }
+}
+
 export function manualReactionWheelTorque({
   commandTorque,
 }: ManualReactionWheelInput): Vec3 {
   return commandTorque
 }
 
-export function toggledAttitudeMode(current: AttitudeMode, requested: AttitudeMode): AttitudeMode {
-  if (requested === 'manual') return 'manual'
-  return current === requested ? 'manual' : requested
+/**
+ * Ramp factor (minScale..1) for manual reaction-wheel torque given how long the
+ * input has been held continuously. A quick tap applies only `minScale` of the
+ * torque; holding for `rampSeconds` builds up to full authority — like pointer
+ * acceleration, so fine nudges and large slews share one key.
+ */
+export function manualTorqueRampScale(
+  holdSeconds: number,
+  rampSeconds = MANUAL_TORQUE_RAMP_SECONDS,
+  minScale = MANUAL_TORQUE_MIN_SCALE,
+): number {
+  if (!(holdSeconds > 0)) return minScale
+  if (!(rampSeconds > 0)) return 1
+  return clamp(minScale + (1 - minScale) * (holdSeconds / rampSeconds), minScale, 1)
+}
+
+/** Apply each axis's hold-duration ramp to a manual torque command. */
+export function rampManualTorque(torque: Vec3, holdSeconds: Vec3): Vec3 {
+  return [
+    torque[0] * manualTorqueRampScale(holdSeconds[0]),
+    torque[1] * manualTorqueRampScale(holdSeconds[1]),
+    torque[2] * manualTorqueRampScale(holdSeconds[2]),
+  ]
+}
+
+/**
+ * Zero any torque component that would push an axis past ±maxRate in the
+ * direction it is already spinning. Torque opposing the current spin (braking)
+ * always passes through, and releasing input (zero torque) is untouched — so
+ * this caps manual slew rate without adding auto-braking on release.
+ */
+export function limitTorqueToAngularRate(
+  torque: Vec3,
+  angularVelocity: Vec3,
+  maxRate: number,
+): Vec3 {
+  const limit = (axis: number): number => {
+    const t = torque[axis]
+    const w = angularVelocity[axis]
+    if (t > 0 && w >= maxRate) return 0
+    if (t < 0 && w <= -maxRate) return 0
+    return t
+  }
+  return [limit(0), limit(1), limit(2)]
+}
+
+/**
+ * Advance per-axis manual-hold timers by `elapsedSeconds`: an axis with active
+ * manual torque accumulates hold time (driving the ramp), an idle axis resets.
+ */
+export function advanceManualHoldTime(
+  holdSeconds: Vec3,
+  manualTorque: Vec3,
+  elapsedSeconds: number,
+): Vec3 {
+  return [
+    manualTorque[0] !== 0 ? holdSeconds[0] + elapsedSeconds : 0,
+    manualTorque[1] !== 0 ? holdSeconds[1] + elapsedSeconds : 0,
+    manualTorque[2] !== 0 ? holdSeconds[2] + elapsedSeconds : 0,
+  ]
 }
 
 export function sumAndClampTorque(a: Vec3, b: Vec3, maxTorque: Vec3): Vec3 {
@@ -126,21 +325,104 @@ export function angularVelocityDampingTorque({
   ]
 }
 
+export interface AngularRateSeekInput {
+  targetRate: Vec3
+  angularVelocity: Vec3
+  maxTorque: Vec3
+  momentOfInertia: Vec3
+  frequency?: number
+}
+
+/**
+ * Torque driving each axis toward a commanded angular rate (a generalization of
+ * {@link angularVelocityDampingTorque}, which seeks zero). Scaled by the moment
+ * of inertia so the response is consistent across craft, then clamped to the
+ * available torque. With a high `maxTorque` (e.g. a strong gimbal) it reaches
+ * the commanded rate quickly; this is how manual pilot input gets full control
+ * authority instead of a fixed reaction-wheel-sized nudge.
+ */
+export function angularRateSeekTorque({
+  targetRate,
+  angularVelocity,
+  maxTorque,
+  momentOfInertia,
+  frequency = 2,
+}: AngularRateSeekInput): Vec3 {
+  const seek = (axis: number) => cleanZero(clamp(
+    (targetRate[axis] - angularVelocity[axis]) * momentOfInertia[axis] * frequency,
+    -maxTorque[axis],
+    maxTorque[axis],
+  ))
+  return [seek(0), seek(1), seek(2)]
+}
+
 export function forwardDirectionHoldTorque({
   currentOrientation,
   targetForward,
   angularVelocity,
   maxTorque,
   momentOfInertia,
-  naturalFrequency = 2,
+  maxAngularRate = MAX_AUTOPILOT_ANGULAR_RATE,
 }: ForwardDirectionHoldInput): Vec3 {
   const targetLocal = rotateVectorByQuaternion(normalizeVec3(targetForward, [0, 0, 1]), conjugateQuaternion(currentOrientation))
-  const error = cross([0, 0, 1], targetLocal)
+  const error = forwardAlignmentError(targetLocal)
   return [
-    cleanZero(pidStep({ error: error[0], integral: 0, derivative: -angularVelocity[0], kp: momentOfInertia[0] * naturalFrequency * naturalFrequency, ki: 0, kd: 2 * momentOfInertia[0] * naturalFrequency, maxOutput: maxTorque[0] })),
-    cleanZero(pidStep({ error: error[1], integral: 0, derivative: -angularVelocity[1], kp: momentOfInertia[1] * naturalFrequency * naturalFrequency, ki: 0, kd: 2 * momentOfInertia[1] * naturalFrequency, maxOutput: maxTorque[1] })),
-    cleanZero(pidStep({ error: 0, integral: 0, derivative: -angularVelocity[2], kp: 0, ki: 0, kd: 2 * momentOfInertia[2] * naturalFrequency, maxOutput: maxTorque[2] })),
+    slewAxisTorque(error[0], angularVelocity[0], maxTorque[0], momentOfInertia[0], maxAngularRate),
+    slewAxisTorque(error[1], angularVelocity[1], maxTorque[1], momentOfInertia[1], maxAngularRate),
+    // Roll has no orientation target (zero error) — damp the rate only.
+    slewAxisTorque(0, angularVelocity[2], maxTorque[2], momentOfInertia[2], maxAngularRate),
   ]
+}
+
+/**
+ * Slew-rate-limited reaction-wheel torque for a single axis.
+ *
+ * Instead of a linear PD law (which saturates on large slews and overshoots
+ * because it can't brake in time at high inertia), this commands a target
+ * angular rate from a "brake curve" — the fastest rate from which the axis can
+ * still decelerate to a stop within the remaining `error`, given the available
+ * angular acceleration. The rate is clamped to `maxAngularRate`, then a stiff
+ * inner loop drives the actual rate toward it. With a sub-unity safety factor
+ * on the brake curve, commanding full torque always over-brakes the plan, so
+ * the axis converges without overshoot regardless of inertia or wheel torque.
+ */
+export function slewAxisTorque(
+  error: number,
+  angularVelocity: number,
+  maxTorque: number,
+  momentOfInertia: number,
+  maxAngularRate: number,
+): number {
+  if (!(maxTorque > 0) || !(momentOfInertia > 0)) return 0
+  const angularAccelMax = maxTorque / momentOfInertia
+  const magnitude = Math.abs(error)
+  // Brake curve far out; linear ramp near the target; never exceed the rate cap.
+  const brakeRate = Math.sqrt(2 * angularAccelMax * SLEW_BRAKE_SAFETY * magnitude)
+  const linearRate = SLEW_LINEAR_RATE_GAIN * magnitude
+  const speed = Math.min(maxAngularRate, brakeRate, linearRate)
+  const desiredRate = Math.sign(error) * speed
+  const torque = momentOfInertia * SLEW_RATE_GAIN * (desiredRate - angularVelocity)
+  return cleanZero(clamp(torque, -maxTorque, maxTorque))
+}
+
+/**
+ * Rotation-vector error (axis * angle, in radians) that takes local +Z onto
+ * targetLocal. Magnitude grows linearly with the angle, avoiding the sin(θ)
+ * collapse of a bare cross product at 180° — without that the autopilot would
+ * stall when asked to flip to the opposite direction.
+ */
+export function forwardAlignmentError(targetLocal: Vec3): Vec3 {
+  const crossError = cross([0, 0, 1], targetLocal)
+  const sinTheta = Math.hypot(crossError[0], crossError[1], crossError[2])
+  const cosTheta = targetLocal[2]
+  if (sinTheta < 1e-6) {
+    // Either aligned or antipodal. Antipodal: pick any perpendicular axis and
+    // command a half-turn. Aligned: zero error.
+    return cosTheta < 0 ? [Math.PI, 0, 0] : [0, 0, 0]
+  }
+  const angle = Math.atan2(sinTheta, cosTheta)
+  const scale = angle / sinTheta
+  return [crossError[0] * scale, crossError[1] * scale, crossError[2] * scale]
 }
 
 export function attitudeHoldTorque({
@@ -243,6 +525,46 @@ export function thrustAccelerationForElapsedRotation(
   )
 }
 
+/**
+ * Acceleration from a net thrust force expressed in the body frame (e.g. the
+ * vector sum of several engines from the aggregation spine). The body force is
+ * rotated into the world by the orientation the craft will have after
+ * `elapsedSeconds` of its current spin — same elapsed-rotation handling as the
+ * single-engine path, so thrust tracks a rotating craft within an integration
+ * step. Returns zero for non-positive mass.
+ */
+export function thrustAccelerationFromBodyForce(
+  bodyForce: Vec3,
+  mass: number,
+  orientation: Quaternion,
+  angularVelocity: Vec3,
+  elapsedSeconds: number,
+): Vec3 {
+  if (!(mass > 0)) return [0, 0, 0]
+  const o = integrateOrientation(orientation, angularVelocity, elapsedSeconds)
+  const world = mat3MulVec(mat3FromQuaternion(o), bodyForce)
+  return [world[0] / mass, world[1] / mass, world[2] / mass]
+}
+
+/**
+ * Pre-multiplies orientation by a rotation of `angle` radians around a
+ * world-frame axis. Use when something external to the vehicle (e.g. the
+ * surface a landed vessel is glued to) needs to drag the orientation along.
+ */
+export function rotateOrientationAroundWorldAxis(
+  orientation: Quaternion,
+  axis: Vec3,
+  angle: number,
+): Quaternion {
+  if (angle === 0) return orientation
+  const magnitude = Math.hypot(axis[0], axis[1], axis[2])
+  if (magnitude === 0) return orientation
+  const half = angle / 2
+  const s = Math.sin(half) / magnitude
+  const delta: Quaternion = [axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(half)]
+  return normalizeQuaternion(multiplyQuaternions(delta, orientation))
+}
+
 export function integrateOrientation(
   orientation: Quaternion,
   angularVelocity: Vec3,
@@ -313,6 +635,45 @@ export function conjugateQuaternion(q: Quaternion): Quaternion {
 export function normalizeQuaternion(q: Quaternion): Quaternion {
   const m = Math.hypot(q[0], q[1], q[2], q[3])
   return m > 0 ? [q[0] / m, q[1] / m, q[2] / m, q[3] / m] : [0, 0, 0, 1]
+}
+
+/**
+ * Orientation quaternion from an orthonormal body frame, where `x`/`y`/`z` are
+ * the world-space directions the body's +X/+Y/+Z axes should point. (Standard
+ * rotation-matrix → quaternion, columns = the basis vectors.)
+ */
+export function quaternionFromBasis(x: Vec3, y: Vec3, z: Vec3): Quaternion {
+  const m00 = x[0], m10 = x[1], m20 = x[2]
+  const m01 = y[0], m11 = y[1], m21 = y[2]
+  const m02 = z[0], m12 = z[1], m22 = z[2]
+  const trace = m00 + m11 + m22
+  let qx: number, qy: number, qz: number, qw: number
+  if (trace > 0) {
+    const s = 0.5 / Math.sqrt(trace + 1)
+    qw = 0.25 / s
+    qx = (m21 - m12) * s
+    qy = (m02 - m20) * s
+    qz = (m10 - m01) * s
+  } else if (m00 > m11 && m00 > m22) {
+    const s = 2 * Math.sqrt(1 + m00 - m11 - m22)
+    qw = (m21 - m12) / s
+    qx = 0.25 * s
+    qy = (m01 + m10) / s
+    qz = (m02 + m20) / s
+  } else if (m11 > m22) {
+    const s = 2 * Math.sqrt(1 + m11 - m00 - m22)
+    qw = (m02 - m20) / s
+    qx = (m01 + m10) / s
+    qy = 0.25 * s
+    qz = (m12 + m21) / s
+  } else {
+    const s = 2 * Math.sqrt(1 + m22 - m00 - m11)
+    qw = (m10 - m01) / s
+    qx = (m02 + m20) / s
+    qy = (m12 + m21) / s
+    qz = 0.25 * s
+  }
+  return normalizeQuaternion([qx, qy, qz, qw])
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -26,6 +26,8 @@ export interface FlightReferenceFrame {
   surfaceVelocity: Vec3
   navVelocity: Vec3
   radialOut: Vec3
+  /** Orbit-plane normal, normalize(cross(r, v_orbital)). Falls back to parent rotation axis when degenerate. */
+  orbitNormal: Vec3
 }
 
 export function computeFlightReferenceFrame({
@@ -39,10 +41,16 @@ export function computeFlightReferenceFrame({
 }: FlightReferenceFrameInput): FlightReferenceFrame {
   const distance = magnitude(relativePosition)
   const radialOut = distance > 0 ? scale(relativePosition, 1 / distance) : [1, 0, 0] as Vec3
-  const surfaceVelocity = subtract(
-    relativeVelocity,
-    cross(scale(parentRotationAxis, parentAngularVelocity), relativePosition),
-  )
+  // A landed/crashed vehicle is rigidly attached to the surface, so its velocity
+  // in the surface frame is exactly zero by definition. Force it — otherwise the
+  // ω×r subtraction leaves floating-point noise that makes the navball's
+  // prograde/retrograde markers jitter.
+  const surfaceVelocity: Vec3 = surfaceState === 'flying'
+    ? subtract(
+        relativeVelocity,
+        cross(scale(parentRotationAxis, parentAngularVelocity), relativePosition),
+      )
+    : [0, 0, 0]
   const altitude = distance - parentRadius
   const orbit = computeOrbitSummary({
     relativePosition,
@@ -53,6 +61,7 @@ export function computeFlightReferenceFrame({
   const mode = surfaceState !== 'flying' || orbit.kind === 'impacting'
     ? 'surface'
     : 'orbital'
+  const orbitNormal = normalize(cross(relativePosition, relativeVelocity), parentRotationAxis)
 
   return {
     mode,
@@ -62,14 +71,40 @@ export function computeFlightReferenceFrame({
     surfaceVelocity,
     navVelocity: mode === 'surface' ? surfaceVelocity : relativeVelocity,
     radialOut,
+    orbitNormal,
   }
 }
 
-export function referenceFrameRetrogradeDirection(
-  input: FlightReferenceFrameInput,
-): Vec3 {
-  const frame = computeFlightReferenceFrame(input)
-  return normalize(scale(frame.navVelocity, -1), [0, 0, -1])
+export interface SurfaceFrame {
+  /** Radial-out (local vertical). */
+  up: Vec3
+  /** Toward the spin axis, projected onto the surface tangent plane. */
+  north: Vec3
+  /** north × up. */
+  east: Vec3
+}
+
+/**
+ * Local surface tangent frame at a point — the single source for the navball
+ * compass and the vehicle's default "stand up" orientation. Null when degenerate
+ * (zero position, or up parallel to the spin axis, i.e. at a pole).
+ */
+export function surfaceFrame(relativePosition: Vec3, spinAxis: Vec3): SurfaceFrame | null {
+  const posMag = magnitude(relativePosition)
+  const axisMag = magnitude(spinAxis)
+  if (!Number.isFinite(posMag) || !Number.isFinite(axisMag) || posMag <= 0 || axisMag <= 0) {
+    return null
+  }
+  const up = scale(relativePosition, 1 / posMag)
+  const axis = scale(spinAxis, 1 / axisMag)
+  const northRaw = subtract(axis, scale(up, dot(axis, up)))
+  const northMag = magnitude(northRaw)
+  if (northMag < 1e-6) return null
+  const north = scale(northRaw, 1 / northMag)
+  const eastRaw = cross(north, up)
+  const eastMag = magnitude(eastRaw)
+  if (eastMag < 1e-6) return null
+  return { up, north, east: scale(eastRaw, 1 / eastMag) }
 }
 
 export function rotationAxisFromAxialTilt(axialTiltDegrees: number): Vec3 {

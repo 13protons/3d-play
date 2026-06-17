@@ -6,7 +6,7 @@ import {
 } from '../scenarioValidation'
 import sunEarthMoon from '../../../public/data/scenarios/sun-earth-moon.json'
 import innerSolarSystem from '../../../public/data/scenarios/inner-solar-system.json'
-import earth from '../../../public/data/bodies/earth.json'
+import earth from '../../../public/data/bodies/earth/manifest.json'
 
 describe('validateScenarioAssets', () => {
   it.each([
@@ -109,7 +109,7 @@ describe('validateScenarioAssets', () => {
     expect(() => validateVehicleDefinition({
       id: 'vehicle-1',
       resources: { dryMass: 1000, fuelMass: 0 },
-      engine: { maxThrust: 300_000 },
+      engine: { maxThrust: 300_000, isp: 300 },
       attitude: {
         momentOfInertia: [12_000, 12_000, 8_000],
         reactionWheelTorque: [400_000, 400_000, 250_000],

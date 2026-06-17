@@ -1,0 +1,19 @@
+{
+  "id": "venus",
+  "name": "Venus",
+  "parentId": "sun",
+  "physics": {
+    "mass": 4.8675e+24,
+    "gm": 324858592000000.0,
+    "radius": 6051800,
+    "axialTilt": 177.36,
+    "angularVelocity": 2.992e-07,
+    "soiRadius": 616000000
+  },
+  "render": {
+    "color": "#d8b26e",
+    "texture": "/data/bodies/venus/textures/surface.png",
+    "emissive": false,
+    "minimumLight": 0.04
+  }
+}

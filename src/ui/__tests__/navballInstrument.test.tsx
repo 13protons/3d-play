@@ -1,7 +1,13 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Navball, NavballInstrument } from '../Navball'
+import { Navball, NavballInstrument, StatusColumn } from '../Navball'
 import { computeArcProgressPath, computeForceLoadRatio } from '../navballInstrumentMath'
+
+/** Extract the M start point and the A endpoint from an arc path string. */
+function pathPoints(path: string): [number, number][] {
+  const n = (path.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number)
+  return [[n[0], n[1]], [n[n.length - 2], n[n.length - 1]]]
+}
 
 const navballProps = {
   orientation: [0, 0, 0, 1] as [number, number, number, number],
@@ -22,13 +28,21 @@ describe('computeArcProgressPath', () => {
     expect(left.progressPath).not.toBe(right.progressPath)
   })
 
-  it('matches the static navball frame arc coordinates', () => {
+  it('places arc endpoints on the radius-r circle (sub-pixel, no bulge)', () => {
     const right = computeArcProgressPath({ value: 0.5, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45 })
     const left = computeArcProgressPath({ value: 0, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45, mirror: true })
 
-    expect(right.trackPath).toBe('M 159 154 A 90 90 0 0 0 159 26')
-    expect(right.progressPath).toBe('M 159 154 A 90 90 0 0 0 185 90')
-    expect(left.trackPath).toBe('M 31 154 A 90 90 0 0 1 31 26')
+    expect(right.trackPath).toContain('A 90 90 0 0 0')
+    expect(right.progressPath).toContain('A 90 90 0 0 0')
+    expect(left.trackPath).toContain('A 90 90 0 0 1')
+
+    // Every coordinate in the path must lie on the radius-90 circle about
+    // (95, 90) — that's what keeps the stroked arc from bulging off its track.
+    for (const path of [right.trackPath, right.progressPath, left.trackPath]) {
+      for (const [x, y] of pathPoints(path)) {
+        expect(Math.hypot(x - 95, y - 90)).toBeCloseTo(90, 1)
+      }
+    }
   })
 })
 
@@ -52,46 +66,44 @@ describe('computeForceLoadRatio', () => {
 })
 
 describe('NavballInstrument', () => {
-  it('renders unified regime, status pads, and arc progress bars', () => {
+  it('renders ap/pe and alt/vel shelves and arc progress bars', () => {
     const markup = renderToStaticMarkup(
       <NavballInstrument
         {...navballProps}
         throttle={0.62}
         forceRatio={0.18}
+        atmosphereRatio={0.4}
+        maneuverRatio={0.25}
         surfaceState="flying"
-        attitudeMode="hold-current"
+        autopilotMode="damp"
+        orbit={{ kind: 'closed', periapsisAltitude: 100_000, apoapsisAltitude: 250_000 }}
+        bottomRows={[
+          { label: 'ALT', value: '12.0 km' },
+          { label: 'VEL', value: '250 m/s' },
+        ]}
       />
     )
 
-    expect(markup).toContain('ORB')
-    expect(markup).not.toContain('ORBITAL')
-    expect(markup).not.toContain('FLY')
-    expect(markup).not.toContain('CRASH')
-    expect(markup).toContain('HOLD')
-    expect(markup).toContain('data-indicator="throttle"')
-    expect(markup).toContain('data-indicator="force"')
+    expect(markup).toContain('PE') // top shelf periapsis
+    expect(markup).toContain('ALT') // bottom shelf altitude
+    expect(markup).toContain('VEL') // bottom shelf velocity
+    expect(markup).toContain('12.0 km')
+    // Status indicators (frame/orbit/state) now live in StatusColumn, not here.
+    expect(markup).not.toContain('Closed orbit')
+    expect(markup).not.toContain('reference frame')
     expect(markup).toContain('width="190"')
     expect(markup).toContain('height="180"')
-    expect(markup).toContain('M 159 154 A 90 90 0 0 0 159 26')
-    expect(markup).toContain('M 31 154 A 90 90 0 0 1 31 26')
-    expect(markup).not.toContain('ORBITAL MODE')
-  })
-
-  it('renders surface mode as a short regime pad', () => {
-    const markup = renderToStaticMarkup(
-      <NavballInstrument
-        {...navballProps}
-        mode="surface"
-        throttle={0.62}
-        forceRatio={0.18}
-        surfaceState="crashed"
-        attitudeMode="manual"
-      />
-    )
-
-    expect(markup).toContain('SUR')
-    expect(markup).not.toContain('SURFACE')
-    expect(markup).not.toContain('CRASH')
+    // Four thin (3-wide) touching arcs. Right (sweep 0): maneuver ΔV outer
+    // (radius 90), throttle inner (radius 87). Left (mirrored, sweep 1):
+    // atmosphere outer (radius 90), g-load inner (radius 87).
+    expect(markup).toContain('A 90 90 0 0 0') // maneuver (right outer)
+    expect(markup).toContain('A 87 87 0 0 0') // throttle (right inner)
+    expect(markup).toContain('A 90 90 0 0 1') // atmosphere (left outer)
+    expect(markup).toContain('A 87 87 0 0 1') // g-load (left inner)
+    expect(markup).toContain('stroke="#9cd8ff"') // atmosphere
+    expect(markup).toContain('stroke="#7ee0c0"') // maneuver ΔV
+    expect(markup).toContain('stroke-width="3"')
+    expect(markup).not.toContain('stroke-width="6"') // all arcs are thin now
   })
 
   it('sizes the raw navball as a 170px drawing', () => {
@@ -119,5 +131,45 @@ describe('NavballInstrument', () => {
 
     expect(markup).not.toContain('ORBIT NAV')
     expect(markup).not.toContain('SURF NAV')
+  })
+})
+
+describe('StatusColumn', () => {
+  it('shows orbit and state indicators, and no reference-frame icon', () => {
+    const markup = renderToStaticMarkup(
+      <StatusColumn
+        surfaceState="flying"
+        orbit={{ kind: 'closed', periapsisAltitude: 100_000, apoapsisAltitude: 250_000 }}
+      />
+    )
+
+    expect(markup).toContain('Closed orbit')
+    expect(markup).toContain('Flying')
+    expect(markup).not.toContain('reference frame')
+  })
+
+  it('dims an impact trajectory when not flying', () => {
+    const markup = renderToStaticMarkup(
+      <StatusColumn
+        surfaceState="crashed"
+        orbit={{ kind: 'impacting', periapsisAltitude: -5_000, apoapsisAltitude: null }}
+      />
+    )
+
+    expect(markup).toContain('Impact trajectory')
+    expect(markup).toContain('Crashed')
+    expect(markup).toContain('opacity:0.3') // impact icon disabled on the ground
+  })
+
+  it('keeps an impact trajectory active while flying', () => {
+    const markup = renderToStaticMarkup(
+      <StatusColumn
+        surfaceState="flying"
+        orbit={{ kind: 'impacting', periapsisAltitude: -5_000, apoapsisAltitude: null }}
+      />
+    )
+
+    expect(markup).toContain('Impact trajectory')
+    expect(markup).not.toContain('opacity:0.3')
   })
 })

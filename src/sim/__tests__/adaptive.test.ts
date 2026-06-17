@@ -308,4 +308,20 @@ describe('SciPy-ported: edge cases', () => {
     const tightTol = advanceTo(new Float64Array([1 / 3, 2 / 9]), 5, 9, funRational, 1e-12)
     expect(tightTol.steps).toBeGreaterThan(looseTol.steps)
   })
+
+  it('bails out instead of spinning when the derivative returns NaN', () => {
+    // A NaN error fails `errorNorm <= 1`, takes the reject branch, and makes the
+    // step size NaN — which the `t + h === t` stagnation guard can't detect, so the
+    // loop would otherwise grind all the way to MAX_STEPS (1e6). The non-finite guard
+    // must stop it near-immediately and leave the original state uncorrupted.
+    const nanDeriv: DerivFn = (_t, y, dydt) => {
+      dydt[0] = y[3]; dydt[1] = y[4]; dydt[2] = y[5]
+      dydt[3] = NaN; dydt[4] = NaN; dydt[5] = NaN
+    }
+    const y = new Float64Array([1, 0, 0, 0, 1, 0])
+    const { steps } = advanceTo(y, 0, 100, nanDeriv, 1e-9)
+    expect(steps).toBeLessThan(100)
+    // No step is accepted, so y is preserved rather than poisoned with NaN.
+    expect(Array.from(y).every(Number.isFinite)).toBe(true)
+  })
 })

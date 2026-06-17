@@ -5,28 +5,36 @@
  * Driven by the bridge via 'advance' messages. No self-scheduling.
  */
 
-import type { TrajectoryCurve, VehicleAttitudeMode, VehicleWorkerInbound } from '../types'
+import type { AttitudeTarget, TrajectoryCurve, VehicleWorkerInbound } from '../types'
 import { toAbsolute } from '../coordinates'
+import { evaluateCurve, evaluateCurveVelocity } from '../curves'
 import { advanceTo } from '../integrator/adaptive'
 import { pointMassDerivatives } from '../integrator/derivatives'
-import { referenceFrameRetrogradeDirection } from './referenceFrame'
 import {
-  angularVelocityAfterTorque,
+  MAX_MANUAL_ANGULAR_RATE,
+  advanceManualHoldTime,
+  angularRateSeekTorque,
   angularVelocityDampingTorque,
-  attitudeHoldTorque,
   forwardDirectionHoldTorque,
+  integrateAttitudeOverStep,
   integrateOrientation,
-  manualReactionWheelTorque,
+  manualTorqueRampScale,
+  quaternionFromBasis,
+  rotateOrientationAroundWorldAxis,
   shouldDisableThrottleForWarp,
   shouldEmitAeroForce,
   shouldStabilizeAngularVelocityForWarp,
-  sumAndClampTorque,
   thrustAccelerationForElapsedRotation,
-  toggledAttitudeMode,
+  thrustAccelerationFromBodyForce,
   type Quaternion,
   type Vec3,
 } from './controls'
 import { vehicleDerivatives, type VehicleAero, type VehicleEngine, type VehicleResources } from './dynamics'
+import { exponentialAtmosphereDensity } from './aero'
+import { fuelBurned, fuelLimitedThrottle } from './thrust'
+import { surfaceFrame } from './referenceFrame'
+import { VehicleStructure } from './structure'
+import { type Mat3, mat3FromQuaternion, mat3MulVec, mat3Transpose, vec3Add, vec3Cross, vec3Sub } from './mat3'
 import type { VehicleAttitude } from '../types'
 import {
   classifySurfaceContact,
@@ -57,12 +65,33 @@ let resources: VehicleResources | undefined
 let engine: VehicleEngine | undefined
 let attitude: VehicleAttitude | undefined
 let aero: VehicleAero | undefined
+/**
+ * The structural model when the craft has propulsion. Source of truth for mass,
+ * CoM, inertia, fuel, and net thrust. For legacy single-body scenarios it's the
+ * synthesized 1-part structure (numerically identical to the old model); for an
+ * authored tree it carries the real geometry. Null only for unpowered craft.
+ */
+let structure: VehicleStructure | null = null
+/** Per-step thrust + inertia derived from the structure, shared with attitude. */
+let thrustForceBody: Vec3 = [0, 0, 0]
+let thrustTorqueBody: Vec3 = [0, 0, 0]
+let inertiaTensorStep: Mat3 | undefined
+let inertiaInverseStep: Mat3 | null | undefined
+/** Ambient pressure ratio (0 = vacuum, 1 = sea level) from the last advance. */
+let lastPressureRatio = 0
+/** Body-frame CoM from the last advance — for the aero (CoP−CoM) torque arm. */
+let lastCenterOfMass: Vec3 = [0, 0, 0]
 let simTime = 0
+let warpRate = 1
 let throttle = 0
 let orientation: Quaternion = [0, 0, 0, 1]
 let angularVelocity: Vec3 = [0, 0, 0]
 let manualTorque: Vec3 = [0, 0, 0]
-let attitudeMode: VehicleAttitudeMode = 'manual'
+/** Per-axis continuous hold time for manual input, driving the torque ramp. */
+let manualHoldTime: Vec3 = [0, 0, 0]
+/** Last reaction-wheel torque actually commanded — published for diagnostics. */
+let commandedTorque: Vec3 = [0, 0, 0]
+let attitudeTarget: AttitudeTarget = { kind: 'manual' }
 let surfaceContact: SurfaceContact = { type: 'flying' }
 let landedAt = 0
 let aeroForceWorld: Vec3 = [0, 0, 0]
@@ -76,13 +105,30 @@ function emitControls(): void {
     throttle,
     orientation,
     angularVelocity,
-    attitudeMode,
+    attitudeTargetKind: attitudeTarget.kind,
     surfaceState: surfaceContact.type,
     reactionWheelTorque: attitude?.reactionWheelTorque,
+    commandedTorque,
     mass: resources?.mass,
-    maxThrust: engine?.maxThrust,
-    currentThrust: engine ? engine.maxThrust * throttle : undefined,
+    fuelMass: resources?.fuelMass,
+    maxThrust: structure ? structure.totalMaxThrust(lastPressureRatio) : engine?.maxThrust,
+    isp: structure ? structure.isp(lastPressureRatio) : engine?.isp,
+    currentThrust: structure
+      ? structure.stageFuel() > 0
+        ? structure.totalMaxThrust(lastPressureRatio) * throttle
+        : 0
+      : undefined,
     aeroForceWorld: shouldEmitAeroForce(aeroForceWorld) ? aeroForceWorld : undefined,
+    currentStage: structure?.currentStage,
+    canStage: structure?.canStage(),
+    stages: structure?.stageSummaries(),
+    // Body-frame CoM so the renderer can pivot the craft about it (it shifts as
+    // fuel burns and jumps on staging). The tracked trajectory point is the CoM.
+    centerOfMass: structure ? structure.aggregate().centerOfMass : undefined,
+    thrustBody: structure ? thrustForceBody : undefined,
+    torqueBody: structure ? thrustTorqueBody : undefined,
+    pressureRatio: structure ? lastPressureRatio : undefined,
+    centerOfPressure: structure && structure.dragArea > 0 ? structure.centerOfPressure : undefined,
   })
 }
 
@@ -127,12 +173,49 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     engine = msg.engine
     attitude = msg.attitude
     aero = msg.aero
+
+    // Build the structural model. An authored part tree wins; otherwise, a
+    // powered craft gets a degenerate 1-part structure that reproduces the
+    // single-body numbers exactly. Unpowered craft (no engine) have none.
+    if (msg.parts && msg.parts.length > 0 && msg.partDefs) {
+      structure = new VehicleStructure(msg.parts, new Map(msg.partDefs))
+    } else if (resources && engine) {
+      structure = VehicleStructure.singleBody({
+        dryMass: resources.dryMass,
+        fuelMass: resources.fuelMass,
+        maxThrust: engine.maxThrust,
+        isp: engine.isp,
+        reactionWheelTorque: attitude?.reactionWheelTorque,
+      })
+    } else {
+      structure = null
+    }
+    // A multi-part craft without an authored attitude derives its controller
+    // limits from geometry (diagonal of the inertia tensor + summed wheels).
+    if (structure && !attitude) {
+      const agg = structure.aggregate()
+      if (agg.inertiaInverse) {
+        attitude = {
+          momentOfInertia: [agg.inertia[0], agg.inertia[4], agg.inertia[8]],
+          reactionWheelTorque: structure.reactionWheelTorque,
+        }
+      }
+    }
+    thrustForceBody = [0, 0, 0]
+    thrustTorqueBody = [0, 0, 0]
+    inertiaTensorStep = undefined
+    inertiaInverseStep = undefined
+    lastPressureRatio = 0
+    lastCenterOfMass = [0, 0, 0]
+
     simTime = 0
+    warpRate = 1
     throttle = 0
     orientation = [0, 0, 0, 1]
     angularVelocity = [0, 0, 0]
     manualTorque = [0, 0, 0]
-    attitudeMode = 'manual'
+    manualHoldTime = [0, 0, 0]
+    attitudeTarget = { kind: 'manual' }
     surfaceContact = { type: 'flying' }
     landedAt = 0
     aeroForceWorld = [0, 0, 0]
@@ -140,8 +223,8 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
     const parentSurface = bodySurfaces.get(parentId)
     if (parentCurve && parentSurface) {
-      const parentPosition = sampleCurvePosition(parentCurve, simTime)
-      const parentVelocity = sampleCurveVelocity(parentCurve, simTime)
+      const parentPosition = evaluateCurve(parentCurve, simTime)
+      const parentVelocity = evaluateCurveVelocity(parentCurve, simTime)
       const relativePosition: Vec3 = [
         stateVec[0] - parentPosition[0],
         stateVec[1] - parentPosition[1],
@@ -152,6 +235,12 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         stateVec[4] - parentVelocity[1],
         stateVec[5] - parentVelocity[2],
       ]
+      // Stand the vehicle up: forward (+Z) radial-out, pitch (+X) along East,
+      // yaw (+Y) along North — so the controls map to compass directions.
+      const launchFrame = surfaceFrame(relativePosition, parentSurface.rotationAxis)
+      if (launchFrame) {
+        orientation = quaternionFromBasis(launchFrame.east, launchFrame.north, launchFrame.up)
+      }
       surfaceContact = classifySurfaceContact({
         relativePosition,
         relativeVelocity,
@@ -189,17 +278,36 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     emitControls()
   }
 
-  if (msg.type === 'set-attitude-mode') {
-    attitudeMode = toggledAttitudeMode(attitudeMode, msg.mode)
-    emitControls()
+  if (msg.type === 'set-attitude-target') {
+    // High-frequency from the autopilot — don't re-emit controls here.
+    // The next `advance` will broadcast updated state.
+    attitudeTarget = msg.target
+  }
+
+  if (msg.type === 'stage') {
+    if (structure) {
+      const jettisoned = structure.stage()
+      if (jettisoned.length > 0) {
+        // Structural-sync: tell the outside render mirror what was dropped.
+        postMessage({ type: 'vehicle-structure', id: vehicleId, jettisoned, currentStage: structure.currentStage })
+        // Mass/fuel readouts change immediately on a clean step boundary.
+        if (resources) {
+          const agg = structure.aggregate()
+          resources = { dryMass: resources.dryMass, fuelMass: structure.totalFuel(), mass: agg.mass }
+        }
+        emitControls()
+      }
+    }
   }
 
   if (msg.type === 'set-warp') {
+    warpRate = msg.rate
     let changedControls = false
     if (shouldStabilizeAngularVelocityForWarp(msg.rate)) {
       angularVelocity = [0, 0, 0]
       manualTorque = [0, 0, 0]
-      attitudeMode = 'manual'
+      manualHoldTime = [0, 0, 0]
+      attitudeTarget = { kind: 'manual' }
       changedControls = true
     }
     if (shouldDisableThrottleForWarp(msg.rate)) {
@@ -220,14 +328,74 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     const prevTime = simTime
     const prevState = new Float64Array(stateVec)
     const elapsedSeconds = targetTime - simTime
+    manualHoldTime = advanceManualHoldTime(manualHoldTime, manualTorque, elapsedSeconds)
     aeroForceWorld = [0, 0, 0]
 
+    // Aggregate the structure for this step: mass / CoM / inertia all follow the
+    // current fuel. Propellant limits thrust — full throttle while fuel lasts,
+    // scaled down on the step that empties the tank, zero when dry. Net thrust
+    // (force + torque about the CoM) and the inertia tensor are stashed for the
+    // derivative and the attitude integrator below.
     const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
     const parentSurface = bodySurfaces.get(parentId)
 
+    // Ambient pressure ratio (0 = vacuum, 1 = sea level) for atmospheric engine
+    // performance. For an isothermal exponential atmosphere pressure tracks
+    // density, so the ratio is just density / surface density at this altitude.
+    let pressureRatio = 0
+    if (parentCurve && parentSurface?.atmosphere) {
+      const parentPosition = evaluateCurve(parentCurve, simTime)
+      const altitude = Math.hypot(
+        stateVec[0] - parentPosition[0],
+        stateVec[1] - parentPosition[1],
+        stateVec[2] - parentPosition[2],
+      ) - parentSurface.radius
+      const density = exponentialAtmosphereDensity(parentSurface.atmosphere, altitude)
+      pressureRatio = Math.min(1, Math.max(0, density / parentSurface.atmosphere.surfaceDensity))
+    }
+    lastPressureRatio = pressureRatio
+
+    let effectiveThrottle = throttle
+    thrustForceBody = [0, 0, 0]
+    thrustTorqueBody = [0, 0, 0]
+    inertiaTensorStep = undefined
+    inertiaInverseStep = undefined
+    if (structure) {
+      const agg = structure.aggregate()
+      lastCenterOfMass = agg.centerOfMass
+      if (resources) resources = { dryMass: resources.dryMass, fuelMass: structure.totalFuel(), mass: agg.mass }
+      effectiveThrottle = fuelLimitedThrottle({
+        maxThrust: structure.totalMaxThrust(pressureRatio),
+        isp: structure.isp(pressureRatio),
+        throttle,
+        fuelMass: structure.stageFuel(),
+        elapsedSeconds,
+      })
+      // Use the geometric tensor only when it inverts (a real multi-part craft).
+      // The synthesized single-body case stays on the authored diagonal MoI.
+      if (agg.inertiaInverse) {
+        inertiaTensorStep = agg.inertia
+        inertiaInverseStep = agg.inertiaInverse
+        if (attitude) attitude.momentOfInertia = [agg.inertia[0], agg.inertia[4], agg.inertia[8]]
+      }
+
+      // Gimbaled thrust: point the engines toward the controller's desired
+      // steering torque; the deflected thrust imparts a torque from each engine's
+      // mount point, and the integrator + reaction wheels take it from there. The
+      // deflection range is the only limit; a centered engine has no moment arm,
+      // so the solve yields no deflection and the craft just steers with wheels.
+      const desired = attitude
+        ? desiredControlTorque(orientation, angularVelocity, [Infinity, Infinity, Infinity])
+        : ([0, 0, 0] as Vec3)
+      const { gx, gy } = structure.solveGimbal(agg.centerOfMass, effectiveThrottle, desired[0], desired[1], pressureRatio)
+      const thrust = structure.netThrustBodyGimbaled(effectiveThrottle, agg.centerOfMass, gx, gy, pressureRatio)
+      thrustForceBody = thrust.force
+      thrustTorqueBody = thrust.torque
+    }
+
     if (surfaceContact.type !== 'flying' && parentCurve && parentSurface) {
-      const parentPosition = sampleCurvePosition(parentCurve, targetTime)
-      const parentVelocity = sampleCurveVelocity(parentCurve, targetTime)
+      const parentPosition = evaluateCurve(parentCurve, targetTime)
+      const parentVelocity = evaluateCurveVelocity(parentCurve, targetTime)
       const landed = rotatingSurfaceState({
         landedAt,
         simTime: targetTime,
@@ -243,24 +411,39 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         landed.position[1] - parentPosition[1],
         landed.position[2] - parentPosition[2],
       ])
-      const thrust = thrustAccelerationForElapsedRotation(
-        orientation,
-        angularVelocity,
-        0,
-        throttle,
-        resources && engine ? { maxThrust: engine.maxThrust, mass: resources.mass } : undefined,
-      )
+      const thrust = structure
+        ? thrustAccelerationFromBodyForce(thrustForceBody, structure.aggregate().mass, orientation, angularVelocity, 0)
+        : thrustAccelerationForElapsedRotation(
+            orientation,
+            angularVelocity,
+            0,
+            effectiveThrottle,
+            resources && engine ? { maxThrust: engine.maxThrust, mass: resources.mass } : undefined,
+          )
       if (surfaceContact.type === 'landed' && dot(thrust, currentNormal) > 0) {
         surfaceContact = { type: 'flying' }
       } else {
         stateVec.set([...landed.position, ...landed.velocity])
-        updateAngularState(elapsedSeconds, currentAttitudeTorque(parentCurve, parentSurface, targetTime))
+        advanceAttitude(elapsedSeconds, thrustTorqueBody, inertiaTensorStep, inertiaInverseStep)
+        // Co-rotate with the parent so a landed vehicle's orientation tracks
+        // the surface it's glued to instead of drifting in inertial space.
+        orientation = rotateOrientationAroundWorldAxis(
+          orientation,
+          parentSurface.rotationAxis,
+          parentSurface.angularVelocity * elapsedSeconds,
+        )
         simTime = targetTime
         emitCurves(prevTime, prevState)
         emitControls()
         return
       }
     }
+
+    // Drag reference area follows the active parts (so it shrinks on staging
+    // instead of flying the whole rocket's frontal area on a bare capsule).
+    const stepAero = aero && structure && structure.dragArea > 0
+      ? { ...aero, referenceArea: structure.dragArea }
+      : aero
 
     const deriv = vehicleDerivatives({
       gravity: pointMassDerivatives(msg.bodyCurves, bodyGMs),
@@ -269,24 +452,45 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       bodySurfaces,
       resources,
       engine,
-      aero,
+      aero: stepAero,
       orientation,
       angularVelocity,
-      throttle,
+      throttle: effectiveThrottle,
       simTime,
       onAeroForce: (force) => {
         aeroForceWorld = force
       },
+      // Spine path: net thrust force + current mass from the structure.
+      thrustBodyForce: structure ? thrustForceBody : undefined,
+      thrustMass: structure ? resources?.mass : undefined,
     })
 
     advanceTo(stateVec, simTime, targetTime, deriv, 1e-10)
-    updateAngularState(elapsedSeconds, currentAttitudeTorque(parentCurve, parentSurface, targetTime))
+    // Aerodynamic torque: drag acts at the center of pressure, so its offset from
+    // the CoM (rotated into the body frame) gives a torque that weathervanes the
+    // craft prograde when the CoP is behind the CoM, or tumbles it when ahead.
+    advanceAttitude(elapsedSeconds, vec3Add(thrustTorqueBody, aeroTorqueBody()), inertiaTensorStep, inertiaInverseStep)
+    // Burn the propellant this step consumed and drop the vehicle's mass to
+    // match (the rocket equation in action).
+    if (structure && effectiveThrottle > 0) {
+      const burned = fuelBurned({
+        maxThrust: structure.totalMaxThrust(lastPressureRatio),
+        isp: structure.isp(lastPressureRatio),
+        throttle: effectiveThrottle,
+        fuelMass: structure.stageFuel(),
+        elapsedSeconds,
+      })
+      if (burned > 0) {
+        structure.drain(burned)
+        if (resources) resources = { ...resources, fuelMass: structure.totalFuel(), mass: structure.aggregate().mass }
+      }
+    }
     simTime = targetTime
 
     if (surfaceContact.type === 'flying' && parentCurve && parentSurface) {
-      const parentPosition = sampleCurvePosition(parentCurve, simTime)
-      const parentVelocity = sampleCurveVelocity(parentCurve, simTime)
-      const previousParentPosition = sampleCurvePosition(parentCurve, prevTime)
+      const parentPosition = evaluateCurve(parentCurve, simTime)
+      const parentVelocity = evaluateCurveVelocity(parentCurve, simTime)
+      const previousParentPosition = evaluateCurve(parentCurve, prevTime)
       const relativePosition: Vec3 = [
         stateVec[0] - parentPosition[0],
         stateVec[1] - parentPosition[1],
@@ -336,116 +540,127 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
   }
 }
 
-function updateAngularState(elapsedSeconds: number, torque: Vec3): void {
-  if (elapsedSeconds <= 0) return
-  angularVelocity = attitude
-    ? angularVelocityAfterTorque(
-        angularVelocity,
-        torque,
-        attitude.momentOfInertia,
-        elapsedSeconds,
-      )
-    : torque
-  orientation = integrateOrientation(orientation, angularVelocity, elapsedSeconds)
+/**
+ * Aerodynamic torque in the body frame: drag (a world-frame force) acting at the
+ * center of pressure produces (CoP − CoM) × F about the CoM. Zero without a
+ * structural aero model. The drag force was captured during the last derivative
+ * evaluation; rotate it into the body frame for the (body-frame) attitude step.
+ */
+function aeroTorqueBody(): Vec3 {
+  if (!structure || structure.dragArea <= 0) return [0, 0, 0]
+  const arm = vec3Sub(structure.centerOfPressure, lastCenterOfMass)
+  const forceBody = mat3MulVec(mat3Transpose(mat3FromQuaternion(orientation)), aeroForceWorld)
+  return vec3Cross(arm, forceBody)
 }
 
-function currentAttitudeTorque(
-  parentCurve: TrajectoryCurve | undefined,
-  parentSurface: BodySurface | undefined,
-  targetTime: number,
-): Vec3 {
-  if (!attitude) return manualTorque
-  if (attitudeMode === 'manual') {
-    return manualReactionWheelTorque({
-      commandTorque: manualTorque,
-      angularVelocity,
-    })
+/**
+ * Advance vehicle attitude (reaction-wheel control) over `elapsedSeconds`.
+ *
+ * Frozen above 1× warp: only translation, planet spin (analytic), and landed
+ * co-rotation continue then — the vehicle's controlled attitude holds. At 1×
+ * the integration is substepped so a long frame (stall or scheduler catch-up)
+ * re-evaluates the controller per slice instead of taking one overshooting step.
+ */
+function advanceAttitude(
+  elapsedSeconds: number,
+  externalTorque: Vec3 = [0, 0, 0],
+  inertiaTensor?: Mat3,
+  inertiaInverse?: Mat3 | null,
+): void {
+  if (elapsedSeconds <= 0) return
+  if (shouldStabilizeAngularVelocityForWarp(warpRate)) {
+    commandedTorque = [0, 0, 0]
+    return
   }
-  if (attitudeMode === 'hold-current') {
-    const dampingTorque = angularVelocityDampingTorque({
-      angularVelocity,
-      maxTorque: attitude.reactionWheelTorque,
+  if (!attitude) {
+    // Degenerate path (no attitude model): treat manual torque as a direct rate.
+    const torque = desiredControlTorque(orientation, angularVelocity, [0, 0, 0])
+    commandedTorque = torque
+    angularVelocity = torque
+    orientation = integrateOrientation(orientation, angularVelocity, elapsedSeconds)
+    return
+  }
+  const reactionWheelTorque = attitude.reactionWheelTorque
+  const result = integrateAttitudeOverStep({
+    orientation,
+    angularVelocity,
+    momentOfInertia: attitude.momentOfInertia,
+    inertiaTensor,
+    inertiaInverse,
+    elapsedSeconds,
+    // Reaction wheels run normally on every axis; the gimbal's torque arrives
+    // via externalTorque. Both are just torques the integrator sums — no
+    // actuator allocation is asserted (the gimbal naturally can't roll, so the
+    // wheels cover it without being told to).
+    torqueFor: (o, w) => desiredControlTorque(o, w, reactionWheelTorque),
+    externalTorque,
+  })
+  // Guard against a pathological blow-up (e.g. a near-singular inertia tensor
+  // through the gyroscopic term) producing a non-finite attitude. Commit only
+  // finite results; otherwise hold the last good orientation and kill the rate,
+  // so a NaN can never persist in worker state or reach the renderer.
+  if (result.orientation.every(Number.isFinite) && result.angularVelocity.every(Number.isFinite)) {
+    orientation = result.orientation
+    angularVelocity = result.angularVelocity
+    commandedTorque = result.lastTorque
+  } else {
+    angularVelocity = [0, 0, 0]
+    commandedTorque = [0, 0, 0]
+  }
+}
+
+/**
+ * Desired control torque for a candidate (orientation, angularVelocity), shaped
+ * to the given per-axis `maxTorque` budget. Used both by the reaction wheels
+ * (budget = wheel torque) and the gimbal solver (budget unbounded — geometry +
+ * deflection range are the real limit). Pure w.r.t. the args.
+ *
+ * Manual pilot input is a per-axis *rate command* the controller seeks with the
+ * full available authority (so it works through a strong gimbal, not just as a
+ * fixed wheel-sized nudge). On any axis the pilot is actively driving, the rate
+ * command replaces the autopilot's hold — so a nudge under SAS/hold repositions
+ * the craft, and the autopilot resumes that axis the moment the input is
+ * released (holding the new attitude). Axes with no input keep the autopilot.
+ */
+function desiredControlTorque(currentOrientation: Quaternion, currentAngularVelocity: Vec3, maxTorque: Vec3): Vec3 {
+  if (!attitude) return manualTorque
+
+  // Autopilot's hold torque (none in plain manual mode).
+  let base: Vec3 = [0, 0, 0]
+  if (attitudeTarget.kind === 'damp') {
+    base = angularVelocityDampingTorque({
+      angularVelocity: currentAngularVelocity,
+      maxTorque,
       momentOfInertia: attitude.momentOfInertia,
     })
-    return sumAndClampTorque(dampingTorque, manualTorque, attitude.reactionWheelTorque)
+  } else if (attitudeTarget.kind === 'seek-forward') {
+    base = forwardDirectionHoldTorque({
+      currentOrientation,
+      targetForward: attitudeTarget.vector,
+      angularVelocity: currentAngularVelocity,
+      maxTorque,
+      momentOfInertia: attitude.momentOfInertia,
+    })
   }
-  const holdTorque = attitudeMode === 'retrograde'
-    ? forwardDirectionHoldTorque({
-        currentOrientation: orientation,
-        targetForward: retrogradeDirection(parentCurve, parentSurface, targetTime),
-        angularVelocity,
-        maxTorque: attitude.reactionWheelTorque,
-        momentOfInertia: attitude.momentOfInertia,
-      })
-    : attitudeHoldTorque({
-        currentOrientation: orientation,
-        targetOrientation: orientation,
-        angularVelocity,
-        maxTorque: attitude.reactionWheelTorque,
-        momentOfInertia: attitude.momentOfInertia,
-      })
-  return sumAndClampTorque(holdTorque, manualTorque, attitude.reactionWheelTorque)
-}
 
-function retrogradeDirection(
-  parentCurve: TrajectoryCurve | undefined,
-  parentSurface: BodySurface | undefined,
-  targetTime: number,
-): Vec3 {
-  if (!stateVec || !parentCurve || !parentSurface) return [0, 0, -1]
-  const parentPosition = sampleCurvePosition(parentCurve, targetTime)
-  const parentVelocity = sampleCurveVelocity(parentCurve, targetTime)
-  const relativePosition: Vec3 = [
-    stateVec[0] - parentPosition[0],
-    stateVec[1] - parentPosition[1],
-    stateVec[2] - parentPosition[2],
+  // Manual rate command: direction from the input, magnitude up to the manual
+  // rate cap, ramped (tap = gentle, hold = builds to full).
+  const rateCommand: Vec3 = [
+    manualTorque[0] !== 0 ? Math.sign(manualTorque[0]) * MAX_MANUAL_ANGULAR_RATE * manualTorqueRampScale(manualHoldTime[0]) : 0,
+    manualTorque[1] !== 0 ? Math.sign(manualTorque[1]) * MAX_MANUAL_ANGULAR_RATE * manualTorqueRampScale(manualHoldTime[1]) : 0,
+    manualTorque[2] !== 0 ? Math.sign(manualTorque[2]) * MAX_MANUAL_ANGULAR_RATE * manualTorqueRampScale(manualHoldTime[2]) : 0,
   ]
-  const relativeVelocity: Vec3 = [
-    stateVec[3] - parentVelocity[0],
-    stateVec[4] - parentVelocity[1],
-    stateVec[5] - parentVelocity[2],
-  ]
-  return referenceFrameRetrogradeDirection({
-    relativePosition,
-    relativeVelocity,
-    parentRadius: parentSurface.radius,
-    parentGm: bodyGMs.get(parentId) ?? 0,
-    parentAngularVelocity: parentSurface.angularVelocity,
-    parentRotationAxis: parentSurface.rotationAxis,
-    surfaceState: surfaceContact.type,
+  const manualSeek = angularRateSeekTorque({
+    targetRate: rateCommand,
+    angularVelocity: currentAngularVelocity,
+    maxTorque,
+    momentOfInertia: attitude.momentOfInertia,
   })
-}
-
-function sampleCurvePosition(curve: TrajectoryCurve, t: number): Vec3 {
-  const dt = curve.t1 - curve.t0
-  if (dt === 0) return curve.p1
-  const s = (t - curve.t0) / dt
-  const s2 = s * s
-  const s3 = s2 * s
-  const h00 = 2 * s3 - 3 * s2 + 1
-  const h10 = s3 - 2 * s2 + s
-  const h01 = -2 * s3 + 3 * s2
-  const h11 = s3 - s2
+  // Per axis: pilot input overrides the autopilot; otherwise hold.
   return [
-    h00 * curve.p0[0] + h10 * dt * curve.v0[0] + h01 * curve.p1[0] + h11 * dt * curve.v1[0],
-    h00 * curve.p0[1] + h10 * dt * curve.v0[1] + h01 * curve.p1[1] + h11 * dt * curve.v1[1],
-    h00 * curve.p0[2] + h10 * dt * curve.v0[2] + h01 * curve.p1[2] + h11 * dt * curve.v1[2],
-  ]
-}
-
-function sampleCurveVelocity(curve: TrajectoryCurve, t: number): Vec3 {
-  const dt = curve.t1 - curve.t0
-  if (dt === 0) return curve.v1
-  const s = (t - curve.t0) / dt
-  const s2 = s * s
-  const dh00 = 6 * s2 - 6 * s
-  const dh10 = 3 * s2 - 4 * s + 1
-  const dh01 = -6 * s2 + 6 * s
-  const dh11 = 3 * s2 - 2 * s
-  return [
-    (dh00 * curve.p0[0] + dh10 * dt * curve.v0[0] + dh01 * curve.p1[0] + dh11 * dt * curve.v1[0]) / dt,
-    (dh00 * curve.p0[1] + dh10 * dt * curve.v0[1] + dh01 * curve.p1[1] + dh11 * dt * curve.v1[1]) / dt,
-    (dh00 * curve.p0[2] + dh10 * dt * curve.v0[2] + dh01 * curve.p1[2] + dh11 * dt * curve.v1[2]) / dt,
+    manualTorque[0] !== 0 ? manualSeek[0] : base[0],
+    manualTorque[1] !== 0 ? manualSeek[1] : base[1],
+    manualTorque[2] !== 0 ? manualSeek[2] : base[2],
   ]
 }
 

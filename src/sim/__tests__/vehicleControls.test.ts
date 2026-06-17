@@ -1,17 +1,30 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MANUAL_TORQUE_MIN_SCALE,
+  MAX_ATTITUDE_SUBSTEP,
+  MAX_AUTOPILOT_ANGULAR_RATE,
+  MAX_MANUAL_ANGULAR_RATE,
   REACTION_WHEEL_ANGULAR_RATE,
   adjustThrottle,
+  advanceManualHoldTime,
   angularVelocityAfterTorque,
+  angularRateSeekTorque,
   angularVelocityDampingTorque,
   attitudeHoldTorque,
   forwardDirectionHoldTorque,
+  integrateAttitudeOverStep,
+  integrateOrientation,
+  limitTorqueToAngularRate,
   manualReactionWheelTorque,
+  manualTorqueRampScale,
+  quaternionFromBasis,
+  rampManualTorque,
+  rotateOrientationAroundWorldAxis,
   pidStep,
+  slewAxisTorque,
   angularVelocityForReactionWheelKeys,
   reactionWheelTorqueForKeys,
   sumAndClampTorque,
-  toggledAttitudeMode,
   shouldEmitAeroForce,
   shouldDisableThrottleForWarp,
   shouldStabilizeAngularVelocityForWarp,
@@ -78,15 +91,56 @@ describe('manualReactionWheelTorque', () => {
   })
 })
 
-describe('toggledAttitudeMode', () => {
-  it('turns an active autopilot mode off when requested again', () => {
-    expect(toggledAttitudeMode('retrograde', 'retrograde')).toBe('manual')
-    expect(toggledAttitudeMode('hold-current', 'hold-current')).toBe('manual')
+describe('manualTorqueRampScale', () => {
+  it('applies only the minimum scale on a quick tap', () => {
+    expect(manualTorqueRampScale(0)).toBe(MANUAL_TORQUE_MIN_SCALE)
+    expect(manualTorqueRampScale(0.05)).toBeGreaterThan(MANUAL_TORQUE_MIN_SCALE)
+    expect(manualTorqueRampScale(0.05)).toBeLessThan(0.3)
   })
 
-  it('switches to a different requested autopilot mode', () => {
-    expect(toggledAttitudeMode('manual', 'retrograde')).toBe('retrograde')
-    expect(toggledAttitudeMode('retrograde', 'hold-current')).toBe('hold-current')
+  it('ramps to full authority after holding through the ramp window', () => {
+    expect(manualTorqueRampScale(1)).toBeCloseTo(1)
+    expect(manualTorqueRampScale(5)).toBe(1)
+  })
+
+  it('increases monotonically with hold time', () => {
+    expect(manualTorqueRampScale(0.5)).toBeGreaterThan(manualTorqueRampScale(0.2))
+  })
+})
+
+describe('rampManualTorque', () => {
+  it('scales each axis by its own hold time', () => {
+    const ramped = rampManualTorque([4800, 4800, 3200], [0, 1, 5])
+    expect(ramped[0]).toBeCloseTo(4800 * MANUAL_TORQUE_MIN_SCALE)
+    expect(ramped[1]).toBeCloseTo(4800)
+    expect(ramped[2]).toBeCloseTo(3200)
+  })
+})
+
+describe('limitTorqueToAngularRate', () => {
+  it('cuts torque that would accelerate past the rate cap', () => {
+    const limited = limitTorqueToAngularRate([4800, 4800, 0], [MAX_MANUAL_ANGULAR_RATE, 0, 0], MAX_MANUAL_ANGULAR_RATE)
+    expect(limited[0]).toBe(0)
+    expect(limited[1]).toBe(4800)
+  })
+
+  it('still allows braking torque against an over-speed axis', () => {
+    const limited = limitTorqueToAngularRate([-4800, 0, 0], [MAX_MANUAL_ANGULAR_RATE + 0.5, 0, 0], MAX_MANUAL_ANGULAR_RATE)
+    expect(limited[0]).toBe(-4800)
+  })
+
+  it('leaves released (zero) input untouched — no auto-braking', () => {
+    expect(limitTorqueToAngularRate([0, 0, 0], [1, -1, 0.5], MAX_MANUAL_ANGULAR_RATE)).toEqual([0, 0, 0])
+  })
+})
+
+describe('advanceManualHoldTime', () => {
+  it('accumulates hold time on active axes and resets idle ones', () => {
+    const next = advanceManualHoldTime([0.2, 0, 1.0], [4800, 0, 0], 0.1)
+    expect(next[0]).toBeCloseTo(0.3)
+    expect(next[1]).toBe(0)
+    // Axis 2 had no current input → resets even though it had accumulated time.
+    expect(next[2]).toBe(0)
   })
 })
 
@@ -176,6 +230,54 @@ describe('angularVelocityDampingTorque', () => {
   })
 })
 
+describe('angularRateSeekTorque', () => {
+  const moi: [number, number, number] = [12_000, 12_000, 8_000]
+
+  it('pushes toward the commanded rate and is zero once matched', () => {
+    const torque = angularRateSeekTorque({
+      targetRate: [0.2, 0, 0],
+      angularVelocity: [0, 0, 0],
+      maxTorque: [400_000, 400_000, 250_000],
+      momentOfInertia: moi,
+    })
+    expect(torque[0]).toBeGreaterThan(0) // accelerate toward +0.2 rad/s
+    expect(torque[1]).toBe(0)
+
+    expect(angularRateSeekTorque({
+      targetRate: [0.2, 0, 0],
+      angularVelocity: [0.2, 0, 0],
+      maxTorque: [400_000, 400_000, 250_000],
+      momentOfInertia: moi,
+    })[0]).toBe(0)
+  })
+
+  it('reduces to damping when the commanded rate is zero', () => {
+    const seek = angularRateSeekTorque({
+      targetRate: [0, 0, 0],
+      angularVelocity: [0.3, -0.1, 0],
+      maxTorque: [400_000, 400_000, 250_000],
+      momentOfInertia: moi,
+    })
+    const damp = angularVelocityDampingTorque({
+      angularVelocity: [0.3, -0.1, 0],
+      maxTorque: [400_000, 400_000, 250_000],
+      momentOfInertia: moi,
+    })
+    expect(seek).toEqual(damp)
+  })
+
+  it('clamps to the available torque', () => {
+    // (3 - 0) · 12000 · 2 = 72000, clamped to 50000.
+    const torque = angularRateSeekTorque({
+      targetRate: [3, 0, 0],
+      angularVelocity: [0, 0, 0],
+      maxTorque: [50_000, 50_000, 50_000],
+      momentOfInertia: moi,
+    })
+    expect(torque[0]).toBe(50_000)
+  })
+})
+
 describe('forwardDirectionHoldTorque', () => {
   it('does not seek a fixed roll when forward is already aligned', () => {
     const halfRoll = Math.PI / 4
@@ -202,6 +304,281 @@ describe('forwardDirectionHoldTorque', () => {
     expect(torque[0]).toBe(0)
     expect(torque[1]).toBeGreaterThan(0)
     expect(torque[2]).toBe(0)
+  })
+
+  it('still produces torque when target is exactly opposite to current forward', () => {
+    // Identity orientation -> vehicle forward is +z. Asking for -z is a 180° flip;
+    // a bare cross-product error would be zero here.
+    const torque = forwardDirectionHoldTorque({
+      currentOrientation: [0, 0, 0, 1],
+      targetForward: [0, 0, -1],
+      angularVelocity: [0, 0, 0],
+      maxTorque: [400_000, 400_000, 250_000],
+      momentOfInertia: [12_000, 12_000, 8_000],
+    })
+
+    const magnitude = Math.hypot(torque[0], torque[1], torque[2])
+    expect(magnitude).toBeGreaterThan(0)
+  })
+})
+
+describe('slewAxisTorque', () => {
+  const I = 12_000
+  const maxTorque = 8_000
+
+  it('commands torque toward a positive error and brakes against a positive rate near target', () => {
+    // Far from target, at rest → accelerate toward the target (positive torque).
+    expect(slewAxisTorque(1, 0, maxTorque, I, 1)).toBeGreaterThan(0)
+    // Essentially at the target but still spinning → brake (negative torque).
+    expect(slewAxisTorque(1e-4, 0.5, maxTorque, I, 1)).toBeLessThan(0)
+  })
+
+  it('never commands more than the available reaction-wheel torque', () => {
+    expect(Math.abs(slewAxisTorque(Math.PI, 0, maxTorque, I, 10))).toBeLessThanOrEqual(maxTorque)
+    expect(Math.abs(slewAxisTorque(-Math.PI, 0, maxTorque, I, 10))).toBeLessThanOrEqual(maxTorque)
+  })
+
+  it('returns zero with no torque authority or inertia', () => {
+    expect(slewAxisTorque(1, 0, 0, I, 1)).toBe(0)
+    expect(slewAxisTorque(1, 0, maxTorque, 0, 1)).toBe(0)
+  })
+})
+
+describe('forwardDirectionHoldTorque convergence', () => {
+  // Closed-loop simulation using the real integration the worker performs:
+  // torque -> angular velocity -> orientation, one constant-torque tick at a time.
+  function rotate(v: [number, number, number], q: [number, number, number, number]): [number, number, number] {
+    const [x, y, z] = v
+    const [qx, qy, qz, qw] = q
+    const ix = qw * x + qy * z - qz * y
+    const iy = qw * y + qz * x - qx * z
+    const iz = qw * z + qx * y - qy * x
+    const iw = -qx * x - qy * y - qz * z
+    return [
+      ix * qw + iw * -qx + iy * -qz - iz * -qy,
+      iy * qw + iw * -qy + iz * -qx - ix * -qz,
+      iz * qw + iw * -qz + ix * -qy - iy * -qx,
+    ]
+  }
+
+  function angleTo(forward: [number, number, number], target: [number, number, number]): number {
+    const tm = Math.hypot(...target)
+    const t: [number, number, number] = [target[0] / tm, target[1] / tm, target[2] / tm]
+    const dot = forward[0] * t[0] + forward[1] * t[1] + forward[2] * t[2]
+    return Math.acos(Math.max(-1, Math.min(1, dot)))
+  }
+
+  function simulate(opts: {
+    target: [number, number, number]
+    momentOfInertia: [number, number, number]
+    maxTorque: [number, number, number]
+    dt?: number
+    steps?: number
+  }): { finalAngle: number; peakAngularRate: number; overshoot: number } {
+    const { target, momentOfInertia, maxTorque, dt = 1 / 60, steps = 4000 } = opts
+    let orientation: [number, number, number, number] = [0, 0, 0, 1]
+    let angularVelocity: [number, number, number] = [0, 0, 0]
+    let peakAngularRate = 0
+    let minAngle = Infinity
+    let overshoot = 0
+    for (let i = 0; i < steps; i++) {
+      const torque = forwardDirectionHoldTorque({
+        currentOrientation: orientation,
+        targetForward: target,
+        angularVelocity,
+        maxTorque,
+        momentOfInertia,
+      })
+      angularVelocity = angularVelocityAfterTorque(angularVelocity, torque, momentOfInertia, dt)
+      orientation = integrateOrientation(orientation, angularVelocity, dt)
+      const angle = angleTo(rotate([0, 0, 1], orientation), target)
+      peakAngularRate = Math.max(peakAngularRate, Math.hypot(...angularVelocity))
+      minAngle = Math.min(minAngle, angle)
+      // Once it has first reached the target, any later growth in angle is overshoot/oscillation.
+      if (minAngle < 0.02) overshoot = Math.max(overshoot, angle - minAngle)
+    }
+    const finalForward = rotate([0, 0, 1], orientation)
+    return { finalAngle: angleTo(finalForward, target), peakAngularRate, overshoot }
+  }
+
+  it('converges to a 90° target without overshoot at high inertia / low wheel torque', () => {
+    const result = simulate({
+      target: [1, 0, 0],
+      momentOfInertia: [12_000, 12_000, 8_000],
+      maxTorque: [8_000, 8_000, 5_000],
+    })
+    expect(result.finalAngle).toBeLessThan(0.01)
+    expect(result.overshoot).toBeLessThan(0.02)
+  })
+
+  it('converges on a near-180° flip without overshoot', () => {
+    const result = simulate({
+      target: [0, 0.05, -0.998],
+      momentOfInertia: [9_000, 9_000, 6_000],
+      maxTorque: [6_000, 6_000, 4_000],
+    })
+    expect(result.finalAngle).toBeLessThan(0.01)
+    expect(result.overshoot).toBeLessThan(0.03)
+  })
+
+  it('caps slew rate so high-torque craft do not slam the target', () => {
+    const result = simulate({
+      target: [1, 0, 0],
+      momentOfInertia: [500, 500, 300],
+      maxTorque: [400_000, 400_000, 250_000],
+    })
+    expect(result.peakAngularRate).toBeLessThanOrEqual(MAX_AUTOPILOT_ANGULAR_RATE * 1.05)
+    expect(result.finalAngle).toBeLessThan(0.01)
+    expect(result.overshoot).toBeLessThan(0.02)
+  })
+})
+
+describe('integrateAttitudeOverStep', () => {
+  function rotate(v: [number, number, number], q: [number, number, number, number]): [number, number, number] {
+    const [x, y, z] = v
+    const [qx, qy, qz, qw] = q
+    const ix = qw * x + qy * z - qz * y
+    const iy = qw * y + qz * x - qx * z
+    const iz = qw * z + qx * y - qy * x
+    const iw = -qx * x - qy * y - qz * z
+    return [
+      ix * qw + iw * -qx + iy * -qz - iz * -qy,
+      iy * qw + iw * -qy + iz * -qx - ix * -qz,
+      iz * qw + iw * -qz + ix * -qy - iy * -qx,
+    ]
+  }
+  function angleTo(forward: [number, number, number], target: [number, number, number]): number {
+    const tm = Math.hypot(...target)
+    const t: [number, number, number] = [target[0] / tm, target[1] / tm, target[2] / tm]
+    return Math.acos(Math.max(-1, Math.min(1, forward[0] * t[0] + forward[1] * t[1] + forward[2] * t[2])))
+  }
+
+  const I: [number, number, number] = [12_000, 12_000, 8_000]
+  const maxTorque: [number, number, number] = [8_000, 8_000, 5_000]
+  const target: [number, number, number] = [1, 0, 0]
+  const seek = (o: [number, number, number, number], w: [number, number, number]) =>
+    forwardDirectionHoldTorque({ currentOrientation: o, targetForward: target, angularVelocity: w, maxTorque, momentOfInertia: I })
+
+  // Drive the controller through many coarse frames at the given sub-step cap.
+  function run(frameDt: number, maxSubstep: number, frames: number) {
+    let orientation: [number, number, number, number] = [0, 0, 0, 1]
+    let angularVelocity: [number, number, number] = [0, 0, 0]
+    let minAngle = Infinity
+    let overshoot = 0
+    let peakRate = 0
+    for (let i = 0; i < frames; i++) {
+      const r = integrateAttitudeOverStep({ orientation, angularVelocity, momentOfInertia: I, elapsedSeconds: frameDt, maxSubstep, torqueFor: seek })
+      orientation = r.orientation
+      angularVelocity = r.angularVelocity
+      const angle = angleTo(rotate([0, 0, 1], orientation), target)
+      peakRate = Math.max(peakRate, Math.hypot(...angularVelocity))
+      minAngle = Math.min(minAngle, angle)
+      if (minAngle < 0.05) overshoot = Math.max(overshoot, angle - minAngle)
+    }
+    return { finalAngle: angleTo(rotate([0, 0, 1], orientation), target), overshoot, peakRate }
+  }
+
+  it('is a no-op for non-positive elapsed time', () => {
+    const r = integrateAttitudeOverStep({
+      orientation: [0, 0, 0, 1], angularVelocity: [0.1, 0, 0], momentOfInertia: I,
+      elapsedSeconds: 0, torqueFor: seek,
+    })
+    expect(r.orientation).toEqual([0, 0, 0, 1])
+    expect(r.angularVelocity).toEqual([0.1, 0, 0])
+    expect(r.lastTorque).toEqual([0, 0, 0])
+  })
+
+  it('slices the elapsed time into sub-steps no larger than maxSubstep', () => {
+    let calls = 0
+    const countingTorque = () => { calls++; return [0, 0, 0] as [number, number, number] }
+    const base = { orientation: [0, 0, 0, 1] as [number, number, number, number], angularVelocity: [0, 0, 0] as [number, number, number], momentOfInertia: I, torqueFor: countingTorque }
+    integrateAttitudeOverStep({ ...base, elapsedSeconds: 0.02, maxSubstep: 0.02 })
+    expect(calls).toBe(1)
+    calls = 0
+    integrateAttitudeOverStep({ ...base, elapsedSeconds: 0.025, maxSubstep: 0.02 })
+    expect(calls).toBe(2)
+    calls = 0
+    integrateAttitudeOverStep({ ...base, elapsedSeconds: 0.05, maxSubstep: 0.02 })
+    expect(calls).toBe(3)
+  })
+
+  it('converges a coarse-frame slew without overshoot when sub-stepped', () => {
+    // ~5 fps frames (0.2s) — a stall/catch-up regime.
+    const r = run(0.2, MAX_ATTITUDE_SUBSTEP, 200)
+    expect(r.finalAngle).toBeLessThan(0.02)
+    expect(r.overshoot).toBeLessThan(0.03)
+    expect(r.peakRate).toBeLessThanOrEqual(MAX_AUTOPILOT_ANGULAR_RATE * 1.05)
+  })
+
+  it('overshoots far more without sub-stepping (one big step per coarse frame)', () => {
+    const subStepped = run(0.2, MAX_ATTITUDE_SUBSTEP, 200)
+    const oneStep = run(0.2, 0.2, 200) // maxSubstep == frame → a single explicit step
+    // The whole point of sub-stepping: re-evaluating mid-frame avoids the overshoot
+    // a single stale-torque step incurs.
+    expect(oneStep.overshoot).toBeGreaterThan(subStepped.overshoot)
+  })
+})
+
+describe('quaternionFromBasis', () => {
+  function rotate(v: [number, number, number], q: [number, number, number, number]): [number, number, number] {
+    const [x, y, z] = v
+    const [qx, qy, qz, qw] = q
+    const ix = qw * x + qy * z - qz * y
+    const iy = qw * y + qz * x - qx * z
+    const iz = qw * z + qx * y - qy * x
+    const iw = -qx * x - qy * y - qz * z
+    return [
+      ix * qw + iw * -qx + iy * -qz - iz * -qy,
+      iy * qw + iw * -qy + iz * -qx - ix * -qz,
+      iz * qw + iw * -qz + ix * -qy - iy * -qx,
+    ]
+  }
+  const close = (a: number[], b: number[]) => a.forEach((v, i) => expect(v).toBeCloseTo(b[i], 5))
+
+  it('returns identity for the identity basis', () => {
+    expect(quaternionFromBasis([1, 0, 0], [0, 1, 0], [0, 0, 1])).toEqual([0, 0, 0, 1])
+  })
+
+  it('maps the body axes onto the given world basis', () => {
+    // body +X -> east, +Y -> north, +Z -> up
+    const east: [number, number, number] = [0, 0, -1]
+    const north: [number, number, number] = [0, 1, 0]
+    const up: [number, number, number] = [1, 0, 0]
+    const q = quaternionFromBasis(east, north, up)
+    close(rotate([1, 0, 0], q), east)
+    close(rotate([0, 1, 0], q), north)
+    close(rotate([0, 0, 1], q), up)
+  })
+
+})
+
+describe('rotateOrientationAroundWorldAxis', () => {
+  it('is a no-op for a zero angle', () => {
+    const q: [number, number, number, number] = [0, 0, 0, 1]
+    expect(rotateOrientationAroundWorldAxis(q, [0, 1, 0], 0)).toEqual(q)
+  })
+
+  it('rotates the identity orientation around the world Y axis by 90 degrees', () => {
+    const result = rotateOrientationAroundWorldAxis([0, 0, 0, 1], [0, 1, 0], Math.PI / 2)
+    // Quaternion for 90deg around +Y: (0, sin(45deg), 0, cos(45deg))
+    expect(result[0]).toBeCloseTo(0)
+    expect(result[1]).toBeCloseTo(Math.SQRT1_2)
+    expect(result[2]).toBeCloseTo(0)
+    expect(result[3]).toBeCloseTo(Math.SQRT1_2)
+  })
+
+  it('composes a body-frame rotation with a world-frame drag from the parent', () => {
+    // Start tilted 90deg around +X (body now points "up" if it started "forward").
+    const half = Math.PI / 4
+    const tilted: [number, number, number, number] = [Math.sin(half), 0, 0, Math.cos(half)]
+    // Drag the world frame 180deg around +Y. World-axis rotation pre-multiplies,
+    // so the tilt should still be visible in the result (composed, not lost).
+    const result = rotateOrientationAroundWorldAxis(tilted, [0, 1, 0], Math.PI)
+    const magnitude = Math.hypot(...result)
+    expect(magnitude).toBeCloseTo(1)
+    // q.w for a 90deg rotation has magnitude cos(45deg); composition of two pure
+    // rotations of 90deg and 180deg leaves w = 0 (orthogonal rotations).
+    expect(result[3]).toBeCloseTo(0)
   })
 })
 

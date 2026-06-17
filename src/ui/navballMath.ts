@@ -1,3 +1,5 @@
+import { surfaceFrame } from '../sim/vehicle/referenceFrame'
+
 export type Vec3 = [number, number, number]
 export type Quaternion = [number, number, number, number]
 
@@ -23,13 +25,21 @@ export interface ProjectedNavballPoint {
   visible: boolean
 }
 
-export type NavballMarkers = Record<keyof NavballFrame, ProjectedNavballPoint>
+export type NavballMarkers = Record<keyof NavballFrame, ProjectedNavballPoint> & {
+  /** Present only when a maneuver direction was provided to the navball. */
+  maneuver?: ProjectedNavballPoint
+}
 export type NavballCompassMarkers = Record<keyof NavballCompassFrame, ProjectedNavballPoint>
 
 export interface NavballState {
   markers: NavballMarkers
   compass: NavballCompassMarkers | null
   horizon: ProjectedNavballPoint[]
+  /** Great-circle meridians through the up/down poles (N-S and E-W), rotating
+   * with the sphere — the moving grid that replaces the old static cross. */
+  meridians: ProjectedNavballPoint[][]
+  /** "Sky" hemisphere polygon (toward radialOut) for attitude-indicator shading. */
+  sky: ScreenPoint[]
 }
 
 export function eulerDegreesToQuaternion({
@@ -78,15 +88,11 @@ export function computeNavballCompassFrame({
   relativePosition: Vec3
   parentRotationAxis: Vec3
 }): NavballCompassFrame | null {
-  const up = normalizeStrict(relativePosition)
-  const axis = normalizeStrict(parentRotationAxis)
-  if (!up || !axis) return null
-
-  const north = normalizeStrict(subtract(axis, scale(up, dot(axis, up))))
-  if (!north) return null
-
-  const east = normalizeStrict(cross(north, up))
-  if (!east) return null
+  // Single source of truth for the surface frame (also drives the vehicle's
+  // default orientation in the worker).
+  const frame = surfaceFrame(relativePosition, parentRotationAxis)
+  if (!frame) return null
+  const { north, east } = frame
 
   return {
     north,
@@ -96,26 +102,48 @@ export function computeNavballCompassFrame({
   }
 }
 
+/** Below this speed, prograde/retrograde have no meaningful direction — hide them. */
+export const PROGRADE_MARKER_MIN_SPEED = 0.01
+
 export function computeNavballMarkers({
   orientation,
   relativePosition,
   relativeVelocity,
   radius,
+  maneuverDirection,
+  orbitNormal,
 }: {
   orientation: Quaternion
   relativePosition: Vec3
   relativeVelocity: Vec3
   radius: number
+  maneuverDirection?: Vec3
+  orbitNormal?: Vec3
 }): NavballMarkers {
   const frame = computeNavballFrame({ relativePosition, relativeVelocity })
-  return {
-    prograde: projectNavballVector(worldToCraft(frame.prograde, orientation), radius),
-    retrograde: projectNavballVector(worldToCraft(frame.retrograde, orientation), radius),
+  const speed = Math.hypot(relativeVelocity[0], relativeVelocity[1], relativeVelocity[2])
+  const prograde = speed >= PROGRADE_MARKER_MIN_SPEED
+    ? projectNavballVector(worldToCraft(frame.prograde, orientation), radius)
+    : { x: 0, y: 0, visible: false }
+  const retrograde = speed >= PROGRADE_MARKER_MIN_SPEED
+    ? projectNavballVector(worldToCraft(frame.retrograde, orientation), radius)
+    : { x: 0, y: 0, visible: false }
+  // Prefer the true orbital normal (inertial, from the reference frame) so the
+  // normal markers stay correct near the surface, where the surface-relative
+  // velocity ≈ 0 makes cross(r, v) degenerate to an arbitrary axis.
+  const normalVec = orbitNormal ?? frame.normal
+  const markers: NavballMarkers = {
+    prograde,
+    retrograde,
     radialOut: projectNavballVector(worldToCraft(frame.radialOut, orientation), radius),
     radialIn: projectNavballVector(worldToCraft(frame.radialIn, orientation), radius),
-    normal: projectNavballVector(worldToCraft(frame.normal, orientation), radius),
-    antiNormal: projectNavballVector(worldToCraft(frame.antiNormal, orientation), radius),
+    normal: projectNavballVector(worldToCraft(normalVec, orientation), radius),
+    antiNormal: projectNavballVector(worldToCraft(scale(normalVec, -1), orientation), radius),
   }
+  if (maneuverDirection) {
+    markers.maneuver = projectNavballVector(worldToCraft(maneuverDirection, orientation), radius)
+  }
+  return markers
 }
 
 export function computeNavballState({
@@ -124,19 +152,34 @@ export function computeNavballState({
   relativeVelocity,
   parentRotationAxis,
   radius,
+  maneuverDirection,
+  orbitNormal,
 }: {
   orientation: Quaternion
   relativePosition: Vec3
   relativeVelocity: Vec3
   parentRotationAxis?: Vec3
   radius: number
+  maneuverDirection?: Vec3
+  orbitNormal?: Vec3
 }): NavballState {
   const compassFrame = parentRotationAxis
     ? computeNavballCompassFrame({ relativePosition, parentRotationAxis })
     : null
+  const radialOut = normalize(relativePosition, [0, 1, 0])
+  const horizontals = compassFrame
+    ? [compassFrame.north, compassFrame.east]
+    : fallbackMeridianAxes(radialOut)
 
   return {
-    markers: computeNavballMarkers({ orientation, relativePosition, relativeVelocity, radius }),
+    markers: computeNavballMarkers({
+      orientation,
+      relativePosition,
+      relativeVelocity,
+      radius,
+      maneuverDirection,
+      orbitNormal,
+    }),
     compass: compassFrame
       ? {
           north: projectNavballVector(worldToCraft(compassFrame.north, orientation), radius),
@@ -145,7 +188,11 @@ export function computeNavballState({
           west: projectNavballVector(worldToCraft(compassFrame.west, orientation), radius),
         }
       : null,
-    horizon: computeHorizon({ orientation, radialOut: normalize(relativePosition, [0, 1, 0]), radius }),
+    horizon: computeHorizon({ orientation, radialOut, radius }),
+    meridians: horizontals.map((horizontal) =>
+      computeMeridian({ orientation, radialOut, horizontal, radius }),
+    ),
+    sky: computeHorizonFill({ orientation, radialOut, radius }),
   }
 }
 
@@ -202,6 +249,116 @@ function computeHorizon({
   }
 
   return points
+}
+
+/**
+ * A meridian great circle: passes through the up/down poles (radialOut/In) and
+ * a horizontal axis (north or east). Traced in craft frame so it rotates with
+ * the sphere as the craft reorients.
+ */
+function computeMeridian({
+  orientation,
+  radialOut,
+  horizontal,
+  radius,
+}: {
+  orientation: Quaternion
+  radialOut: Vec3
+  horizontal: Vec3
+  radius: number
+}): ProjectedNavballPoint[] {
+  const up = worldToCraft(radialOut, orientation)
+  const side = worldToCraft(horizontal, orientation)
+  const points: ProjectedNavballPoint[] = []
+  for (let i = 0; i <= 64; i++) {
+    const angle = (Math.PI * 2 * i) / 64
+    const point = add(scale(up, Math.cos(angle)), scale(side, Math.sin(angle)))
+    points.push(projectNavballVector(point, radius))
+  }
+  return points
+}
+
+/** Two world-frame axes perpendicular to radialOut, for meridians when there's
+ * no compass frame (no parent rotation axis). */
+function fallbackMeridianAxes(radialOut: Vec3): [Vec3, Vec3] {
+  const a = normalize(cross(radialOut, Math.abs(radialOut[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]), [1, 0, 0])
+  const b = normalize(cross(radialOut, a), [0, 0, 1])
+  return [a, b]
+}
+
+export interface ScreenPoint {
+  x: number
+  y: number
+}
+
+/**
+ * The "sky" hemisphere polygon (the half toward radialOut), in screen offsets
+ * from the navball center. Bounded by the visible horizon great-circle arc and
+ * the sky-side silhouette arc, so it follows the *curved* horizon like a real
+ * attitude indicator. The rest of the disc is "ground". Empty = all ground;
+ * a full circle = all sky.
+ */
+export function computeHorizonFill({
+  orientation,
+  radialOut,
+  radius,
+}: {
+  orientation: Quaternion
+  radialOut: Vec3
+  radius: number
+}): ScreenPoint[] {
+  const up = worldToCraft(radialOut, orientation)
+  const segments = 96
+  const basisA = normalize(cross(up, Math.abs(up[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]), [1, 0, 0])
+  const basisB = normalize(cross(up, basisA), [0, 0, 1])
+
+  // Horizon great-circle samples: screen point + whether it faces the viewer.
+  const samples = Array.from({ length: segments }, (_unused, i) => {
+    const angle = (2 * Math.PI * i) / segments
+    const point = add(scale(basisA, Math.cos(angle)), scale(basisB, Math.sin(angle)))
+    return { x: point[0] * radius, y: -point[1] * radius, front: point[2] >= 0 }
+  })
+  const frontCount = samples.filter((s) => s.front).length
+  if (frontCount === 0) return up[2] > 0 ? circlePoints(radius, segments) : []
+  if (frontCount === segments) return up[2] > 0 ? circlePoints(radius, segments) : []
+
+  // Rotate to the back→front transition so the visible arc is contiguous.
+  let start = 0
+  for (let i = 0; i < segments; i++) {
+    if (samples[i].front && !samples[(i - 1 + segments) % segments].front) {
+      start = i
+      break
+    }
+  }
+  const polygon: ScreenPoint[] = []
+  for (let k = 0; k < segments; k++) {
+    const sample = samples[(start + k) % segments]
+    if (!sample.front) break
+    polygon.push({ x: sample.x, y: sample.y })
+  }
+
+  // Close along the silhouette from B back to A on the sky side (dot(·, up) > 0).
+  const a = polygon[0]
+  const b = polygon[polygon.length - 1]
+  const angleA = Math.atan2(a.y, a.x)
+  const angleB = Math.atan2(b.y, b.x)
+  const skyDot = (angle: number) => Math.cos(angle) * up[0] - Math.sin(angle) * up[1]
+  const direction = skyDot(angleB + 0.02) >= skyDot(angleB - 0.02) ? 1 : -1
+  let span = direction * (angleA - angleB)
+  span = ((span % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
+  const edgeSteps = 48
+  for (let k = 1; k <= edgeSteps; k++) {
+    const angle = angleB + direction * span * (k / edgeSteps)
+    polygon.push({ x: radius * Math.cos(angle), y: radius * Math.sin(angle) })
+  }
+  return polygon
+}
+
+function circlePoints(radius: number, count: number): ScreenPoint[] {
+  return Array.from({ length: count }, (_unused, i) => {
+    const angle = (2 * Math.PI * i) / count
+    return { x: radius * Math.cos(angle), y: radius * Math.sin(angle) }
+  })
 }
 
 function worldToCraft(vector: Vec3, orientation: Quaternion): Vec3 {
@@ -261,22 +418,8 @@ function normalize(vector: Vec3, fallback: Vec3): Vec3 {
   ]
 }
 
-function normalizeStrict(vector: Vec3): Vec3 | null {
-  const magnitude = Math.hypot(vector[0], vector[1], vector[2])
-  if (magnitude <= 0 || !Number.isFinite(magnitude)) return null
-  return [
-    cleanNumber(vector[0] / magnitude),
-    cleanNumber(vector[1] / magnitude),
-    cleanNumber(vector[2] / magnitude),
-  ]
-}
-
 function add(a: Vec3, b: Vec3): Vec3 {
   return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-}
-
-function subtract(a: Vec3, b: Vec3): Vec3 {
-  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
 function scale(vector: Vec3, scalar: number): Vec3 {
@@ -293,10 +436,6 @@ function cross(a: Vec3, b: Vec3): Vec3 {
     a[2] * b[0] - a[0] * b[2],
     a[0] * b[1] - a[1] * b[0],
   ]
-}
-
-function dot(a: Vec3, b: Vec3): number {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
 function cleanNumber(value: number): number {

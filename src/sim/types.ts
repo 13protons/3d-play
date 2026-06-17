@@ -1,3 +1,5 @@
+import type { PartDefinition } from './vehicle/parts'
+
 // ---------------------------------------------------------------------------
 // Coordinate System
 // ---------------------------------------------------------------------------
@@ -32,7 +34,7 @@ export interface TrajectoryCurve {
 export type VehicleCommand =
   | { type: 'set-throttle'; value: number; simTime: number }
   | { type: 'set-attitude'; pitch: number; yaw: number; roll: number; simTime: number }
-  | { type: 'set-attitude-mode'; mode: VehicleAttitudeMode; simTime: number }
+  | { type: 'set-attitude-target'; target: AttitudeTarget; simTime: number }
   | { type: 'stage'; simTime: number }
 
 /** Commands routed to the orbital worker */
@@ -41,7 +43,14 @@ export type SimCommand =
 
 export type Command = VehicleCommand | SimCommand
 
-export type VehicleAttitudeMode = 'manual' | 'hold-current' | 'retrograde'
+/**
+ * Vehicle-worker-level attitude target. Autopilots emit this; the worker
+ * tracks whatever is requested without knowing which autopilot produced it.
+ */
+export type AttitudeTarget =
+  | { kind: 'manual' }
+  | { kind: 'damp' }
+  | { kind: 'seek-forward'; vector: [number, number, number] }
 
 // ---------------------------------------------------------------------------
 // Gravity Sources (sent from bridge to vehicle worker)
@@ -77,11 +86,24 @@ export interface VehicleAero {
 
 export interface VehicleEngine {
   maxThrust: number
+  /** Specific impulse (s) — sets propellant flow via ṁ = F/(Isp·g₀). */
+  isp: number
 }
 
 export interface VehicleAttitude {
   momentOfInertia: [number, number, number]
   reactionWheelTorque: [number, number, number]
+}
+
+/** Per-stage ΔV readout (upper stages count as payload for the lower ones). */
+export interface StageSummary {
+  stage: number
+  /** Mass at this stage's ignition (this stage + everything above it). */
+  wetMass: number
+  /** Mass at this stage's burnout (wet minus this stage's own propellant). */
+  dryMass: number
+  isp: number
+  deltaV: number
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +127,13 @@ export type VehicleWorkerInbound =
       engine?: VehicleEngine
       attitude?: VehicleAttitude
       aero?: VehicleAero
+      /**
+       * Optional multi-part tree (authored outside the worker). When present the
+       * worker derives mass / CoM / inertia / thrust from it; otherwise it
+       * synthesizes a degenerate 1-part structure from resources/engine/attitude.
+       */
+      parts?: PartInstance[]
+      partDefs?: [id: string, def: PartDefinition][]
     }
   | {
       type: 'advance'
@@ -114,7 +143,8 @@ export type VehicleWorkerInbound =
   | { type: 'set-warp'; rate: number }
   | { type: 'set-throttle'; value: number }
   | { type: 'set-attitude'; pitch: number; yaw: number; roll: number }
-  | { type: 'set-attitude-mode'; mode: VehicleAttitudeMode }
+  | { type: 'set-attitude-target'; target: AttitudeTarget }
+  | { type: 'stage' }
 
 /** Outbound messages from the vehicle worker */
 export type VehicleWorkerOutbound =
@@ -129,18 +159,43 @@ export type VehicleWorkerOutbound =
       velocity: [number, number, number]
     }
   | {
+      /**
+       * Structural-sync event: a staging (or later, damage) change resolved in
+       * the worker. The outside render mirror deactivates these parts so both
+       * copies stay in lockstep without re-shipping the whole tree.
+       */
+      type: 'vehicle-structure'
+      id: string
+      jettisoned: string[]
+      currentStage: number
+    }
+  | {
       type: 'vehicle-controls'
       id: string
       throttle: number
       orientation: [number, number, number, number]
       angularVelocity: [number, number, number]
-      attitudeMode: VehicleAttitudeMode
+      attitudeTargetKind: AttitudeTarget['kind']
       surfaceState: 'flying' | 'landed' | 'crashed'
       reactionWheelTorque?: [number, number, number]
+      commandedTorque?: [number, number, number]
       mass?: number
+      fuelMass?: number
       maxThrust?: number
+      isp?: number
       currentThrust?: number
       aeroForceWorld?: [number, number, number]
+      currentStage?: number
+      canStage?: boolean
+      stages?: StageSummary[]
+      centerOfMass?: [number, number, number]
+      /** Net thrust force + torque (about the CoM) in the body frame — debug. */
+      thrustBody?: [number, number, number]
+      torqueBody?: [number, number, number]
+      /** Ambient pressure ratio (0 = vacuum, 1 = sea level) — debug. */
+      pressureRatio?: number
+      /** Center of pressure (body frame) — debug, for the stability arm. */
+      centerOfPressure?: [number, number, number]
     }
 
 // ---------------------------------------------------------------------------

@@ -7,11 +7,22 @@ type Vec3 = [number, number, number]
 
 export function surfaceCameraPosition(
   radialOut: Vec3,
+  tangentDirection: Vec3,
   tangentDistance: number,
   surfaceHeight: number,
 ): Vec3 {
   const up = normalize(radialOut, [0, 1, 0])
-  const tangent = normalize(cross(up, Math.abs(up[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1]), [1, 0, 0])
+  // Project the requested horizontal direction (e.g. "south") onto the surface
+  // plane; fall back to an arbitrary tangent if it's degenerate / parallel to up.
+  const dotTU = tangentDirection[0] * up[0] + tangentDirection[1] * up[1] + tangentDirection[2] * up[2]
+  const tangent = normalize(
+    [
+      tangentDirection[0] - up[0] * dotTU,
+      tangentDirection[1] - up[1] * dotTU,
+      tangentDirection[2] - up[2] * dotTU,
+    ],
+    normalize(cross(up, Math.abs(up[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1]), [1, 0, 0]),
+  )
   return [
     up[0] * surfaceHeight + tangent[0] * tangentDistance,
     up[1] * surfaceHeight + tangent[1] * tangentDistance,

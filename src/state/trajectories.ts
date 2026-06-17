@@ -1,6 +1,5 @@
 import { create } from 'zustand'
-import type { TrajectoryCurve } from '../sim/types'
-import type { VehicleAttitudeMode } from '../sim/types'
+import type { AttitudeTarget, StageSummary, TrajectoryCurve } from '../sim/types'
 
 export interface VehicleMeta {
   id: string
@@ -13,13 +12,50 @@ export interface VehicleControlMeta {
   throttle: number
   orientation: [number, number, number, number]
   angularVelocity: [number, number, number]
-  attitudeMode: VehicleAttitudeMode
+  attitudeTargetKind: AttitudeTarget['kind']
   surfaceState: 'flying' | 'landed' | 'crashed'
   reactionWheelTorque?: [number, number, number]
+  commandedTorque?: [number, number, number]
   mass?: number
+  fuelMass?: number
   maxThrust?: number
+  isp?: number
   currentThrust?: number
   aeroForceWorld?: [number, number, number]
+  currentStage?: number
+  canStage?: boolean
+  stages?: StageSummary[]
+  centerOfMass?: [number, number, number]
+  thrustBody?: [number, number, number]
+  torqueBody?: [number, number, number]
+  pressureRatio?: number
+  centerOfPressure?: [number, number, number]
+}
+
+/**
+ * Render-side atmosphere config, loaded as a per-body game asset (e.g.
+ * `/data/bodies/<id>/atmosphere.json`) — distinct from the physics
+ * `InlineAtmosphere` the sim worker uses for drag. All lengths are in metres
+ * (scene units == metres for bodies), so the per-metre scattering coefficients
+ * apply directly with no rescale.
+ */
+export interface AtmosphereRenderConfig {
+  /** Atmosphere top above the surface, in metres — radius of the scattering shell. */
+  shellHeight: number
+  rayleigh: {
+    /** Per-metre Rayleigh scattering coefficients, RGB. */
+    coefficients: [number, number, number]
+    scaleHeight: number
+  }
+  mie: {
+    coefficient: number
+    scaleHeight: number
+    /** Henyey-Greenstein anisotropy g (forward-scatter sun glow), 0..1. */
+    anisotropy: number
+  }
+  sunIntensity: number
+  viewSamples: number
+  lightSamples: number
 }
 
 export interface BodyMeta {
@@ -36,6 +72,8 @@ export interface BodyMeta {
   texture?: string
   emissive: boolean
   minimumLight: number
+  /** Present only for bodies whose plugin bundle links an atmosphere asset. */
+  atmosphereRender?: AtmosphereRenderConfig
 }
 
 interface TrajectoriesState {

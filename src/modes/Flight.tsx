@@ -13,8 +13,8 @@ import {
   reactionWheelTorqueForKeys,
   throttleCut,
   throttleFull,
-  toggledAttitudeMode,
 } from '../sim/vehicle/controls'
+import { useAutopilotStore } from '../state/autopilot'
 import {
   throttleDirectionForKeyDown,
   throttleDirectionForKeyUp,
@@ -94,6 +94,13 @@ export function Flight() {
     }
 
     function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === '?') {
+        if (!e.repeat) {
+          e.preventDefault()
+          useModeStore.getState().toggleKeyboardShortcuts()
+        }
+        return
+      }
       if (!shouldProcessFlightControlKey({ paused: pausedRef.current, key: e.key })) return
       const { warpRate, simTime } = useTrajectoriesStore.getState()
       if (e.repeat) return
@@ -121,14 +128,12 @@ export function Flight() {
       }
       if (e.key === 't' || e.key === 'T') {
         const firstVehicle = Object.values(useTrajectoriesStore.getState().vehicles)[0]
-        const currentMode = firstVehicle
-          ? (useTrajectoriesStore.getState().vehicleControls[firstVehicle.id]?.attitudeMode ?? 'manual')
-          : 'manual'
-        useInputStore.getState().push({
-          type: 'set-attitude-mode',
-          mode: toggledAttitudeMode(currentMode, 'hold-current'),
-          simTime,
-        })
+        if (firstVehicle) useAutopilotStore.getState().toggleMode(firstVehicle.id, 'damp')
+      }
+      if (e.key === ' ') {
+        // Fire the next stage (no-op in the worker if nothing is left to drop).
+        e.preventDefault()
+        useInputStore.getState().push({ type: 'stage', simTime })
       }
       const throttlePreset = throttlePresetForKeyDown(e)
       if (throttlePreset === 'full') {
