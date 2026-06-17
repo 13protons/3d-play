@@ -112,31 +112,41 @@ describe('NavballInstrument', () => {
 })
 
 describe('StatusColumn', () => {
-  it('stacks frame, orbit, and state indicators with tooltips', () => {
+  it('shows orbit and state indicators, and no reference-frame icon', () => {
     const markup = renderToStaticMarkup(
       <StatusColumn
-        mode="orbital"
         surfaceState="flying"
         orbit={{ kind: 'closed', periapsisAltitude: 100_000, apoapsisAltitude: 250_000 }}
       />
     )
 
-    expect(markup).toContain('Orbital reference frame')
     expect(markup).toContain('Closed orbit')
     expect(markup).toContain('Flying')
+    expect(markup).not.toContain('reference frame')
   })
 
-  it('reflects surface frame, impact trajectory, and crashed state', () => {
+  it('dims an impact trajectory when not flying', () => {
     const markup = renderToStaticMarkup(
       <StatusColumn
-        mode="surface"
         surfaceState="crashed"
         orbit={{ kind: 'impacting', periapsisAltitude: -5_000, apoapsisAltitude: null }}
       />
     )
 
-    expect(markup).toContain('Surface reference frame')
     expect(markup).toContain('Impact trajectory')
     expect(markup).toContain('Crashed')
+    expect(markup).toContain('opacity:0.3') // impact icon disabled on the ground
+  })
+
+  it('keeps an impact trajectory active while flying', () => {
+    const markup = renderToStaticMarkup(
+      <StatusColumn
+        surfaceState="flying"
+        orbit={{ kind: 'impacting', periapsisAltitude: -5_000, apoapsisAltitude: null }}
+      />
+    )
+
+    expect(markup).toContain('Impact trajectory')
+    expect(markup).not.toContain('opacity:0.3')
   })
 })

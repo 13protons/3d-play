@@ -18,9 +18,6 @@ import {
   ORBIT_ICONS,
   ORBIT_COLORS,
   ORBIT_LABELS,
-  FRAME_ICONS,
-  FRAME_COLORS,
-  FRAME_LABELS,
 } from './navIcons';
 import type { NavGlyph } from './navGlyphs';
 import { hoverTooltip } from './tooltipStore';
@@ -241,19 +238,16 @@ function AutopilotColumn({
   );
 }
 
-/** Vehicle-status indicators stacked beside the navball (frame, orbit, state),
- * mirroring the autopilot column on the other side. Non-interactive badges. */
+/** Vehicle-status indicators stacked beside the navball (orbit profile +
+ * vehicle state). Non-interactive badges, tucked toward the navball and sunk
+ * to the lower-right near the bottom arc. */
 export function StatusColumn({
-  mode,
   orbit,
   surfaceState,
 }: {
-  mode: FlightReferenceMode;
   orbit?: OrbitSummary;
   surfaceState: SurfaceState;
 }) {
-  // Downward triangle: frame + orbit on top, vehicle state at the point.
-  // Tucked toward the navball and sunk to the lower-right, near the bottom arc.
   return (
     <div
       style={{
@@ -267,24 +261,17 @@ export function StatusColumn({
         marginBottom: 10,
       }}
     >
-      <div style={{ display: 'flex', gap: 4 }}>
+      {orbit && (
         <CircleIcon
-          glyph={FRAME_ICONS[mode]}
-          color={FRAME_COLORS[mode]}
-          title={FRAME_LABELS[mode]}
+          glyph={ORBIT_ICONS[orbit.kind]}
+          color={ORBIT_COLORS[orbit.kind]}
+          title={ORBIT_LABELS[orbit.kind]}
           diameter={STATUS_DIAMETER}
           glyphSize={STATUS_GLYPH_SIZE}
+          // An impact trajectory is only meaningful in flight.
+          disabled={surfaceState !== 'flying' && orbit.kind === 'impacting'}
         />
-        {orbit && (
-          <CircleIcon
-            glyph={ORBIT_ICONS[orbit.kind]}
-            color={ORBIT_COLORS[orbit.kind]}
-            title={ORBIT_LABELS[orbit.kind]}
-            diameter={STATUS_DIAMETER}
-            glyphSize={STATUS_GLYPH_SIZE}
-          />
-        )}
-      </div>
+      )}
       <CircleIcon
         glyph={STATE_ICONS[surfaceState]}
         color={STATE_COLORS[surfaceState]}
@@ -599,7 +586,6 @@ export function NavballCluster({
         bottomRows={rows.slice(0, 2)}
       />
       <StatusColumn
-        mode={mode}
         orbit={orbit}
         surfaceState={surfaceState}
       />
