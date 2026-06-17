@@ -18,6 +18,7 @@ import type { PartDefinition, PartRender } from '../sim/vehicle/parts'
 import type { Mat3 } from '../sim/vehicle/mat3'
 import { RENDER_LAYERS } from './renderLayers'
 import { countRender } from './perfCounters'
+import { allFinite } from './finite'
 
 /** Metres → scene units. A ~25 m rocket renders at a few units, like the old cylinder. */
 const VEHICLE_RENDER_SCALE = 0.15
@@ -60,15 +61,17 @@ export function Vessel({ vehicleId }: { vehicleId: string }) {
     setLayerRecursively(group, RENDER_LAYERS.vehicle)
     const controls = useTrajectoriesStore.getState().vehicleControls[vehicleId]
     if (!controls) return
-    const [x, y, z, w] = controls.orientation
-    group.quaternion.set(x, y, z, w)
+    if (allFinite(controls.orientation)) {
+      const [x, y, z, w] = controls.orientation
+      group.quaternion.set(x, y, z, w)
+    }
     // Pivot about the live CoM: the tracked position is the CoM, so offset the
     // parts by −CoM (scaled into scene units) inside the rotated group. As fuel
     // burns and on staging the CoM moves, and the craft pivots about the new one.
     if (comRef.current) {
       const com = controls.centerOfMass
-      if (com) comRef.current.position.set(-com[0] * VEHICLE_RENDER_SCALE, -com[1] * VEHICLE_RENDER_SCALE, -com[2] * VEHICLE_RENDER_SCALE)
-      else comRef.current.position.set(0, 0, 0)
+      if (com && allFinite(com)) comRef.current.position.set(-com[0] * VEHICLE_RENDER_SCALE, -com[1] * VEHICLE_RENDER_SCALE, -com[2] * VEHICLE_RENDER_SCALE)
+      else if (!com) comRef.current.position.set(0, 0, 0)
     }
     if (flameRef.current) flameRef.current.visible = controls.throttle > 0
   })

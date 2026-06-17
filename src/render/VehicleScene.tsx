@@ -8,6 +8,7 @@ import { useModeStore } from '../state/mode'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useVehicleStore } from '../state/vehicle'
 import { Vessel } from './Vessel'
+import { allFinite } from './finite'
 import type { BodyMeta } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
 import { evaluateCurveVelocity } from '../sim/curves'
@@ -309,8 +310,10 @@ function VehicleMesh() {
     if (!vehicleId) return
     const controls = useTrajectoriesStore.getState().vehicleControls[vehicleId]
     if (!controls) return
-    const [x, y, z, w] = controls.orientation
-    group.quaternion.set(x, y, z, w)
+    if (allFinite(controls.orientation)) {
+      const [x, y, z, w] = controls.orientation
+      group.quaternion.set(x, y, z, w)
+    }
     if (flameRef.current) flameRef.current.visible = controls.throttle > 0
   })
 

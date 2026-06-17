@@ -565,9 +565,18 @@ function advanceAttitude(
     torqueFor: (o, w) => desiredControlTorque(o, w, reactionWheelTorque),
     externalTorque,
   })
-  orientation = result.orientation
-  angularVelocity = result.angularVelocity
-  commandedTorque = result.lastTorque
+  // Guard against a pathological blow-up (e.g. a near-singular inertia tensor
+  // through the gyroscopic term) producing a non-finite attitude. Commit only
+  // finite results; otherwise hold the last good orientation and kill the rate,
+  // so a NaN can never persist in worker state or reach the renderer.
+  if (result.orientation.every(Number.isFinite) && result.angularVelocity.every(Number.isFinite)) {
+    orientation = result.orientation
+    angularVelocity = result.angularVelocity
+    commandedTorque = result.lastTorque
+  } else {
+    angularVelocity = [0, 0, 0]
+    commandedTorque = [0, 0, 0]
+  }
 }
 
 /**
