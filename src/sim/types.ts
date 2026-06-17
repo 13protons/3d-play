@@ -189,6 +189,11 @@ export type VehicleWorkerOutbound =
       canStage?: boolean
       stages?: StageSummary[]
       centerOfMass?: [number, number, number]
+      /** Net thrust force + torque (about the CoM) in the body frame — debug. */
+      thrustBody?: [number, number, number]
+      torqueBody?: [number, number, number]
+      /** Ambient pressure ratio (0 = vacuum, 1 = sea level) — debug. */
+      pressureRatio?: number
     }
 
 // ---------------------------------------------------------------------------

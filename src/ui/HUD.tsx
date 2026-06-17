@@ -196,7 +196,7 @@ function DebugMenu() {
             View: {activeView.toUpperCase()}
           </button>
           <button onClick={toggleRotationAxes} style={controlStyle(showRotationAxes)}>
-            Rotation Axis: {showRotationAxes ? 'On' : 'Off'}
+            Flight Debug: {showRotationAxes ? 'On' : 'Off'}
           </button>
           <button onClick={toggleAttitudeDiagnostics} style={controlStyle(showAttitudeDiagnostics)}>
             Attitude Diag: {showAttitudeDiagnostics ? 'On' : 'Off'}
@@ -235,6 +235,7 @@ function FlightReadouts() {
   const node = maneuverNodes[firstVehicle.id]
   const activeAutopilotMode = useAutopilotStore.getState().modes[firstVehicle.id] ?? 'off'
   const showAttitudeDiagnostics = useModeStore.getState().showAttitudeDiagnostics
+  const showFlightDebug = useModeStore.getState().showRotationAxes
 
   const vehiclePosition = vehicleCurve ? evaluateCurve(vehicleCurve, simTime) : null
   const parentPosition = parentCurve ? evaluateCurve(parentCurve, simTime) : null
@@ -284,6 +285,7 @@ function FlightReadouts() {
       {showAttitudeDiagnostics && vehicleControl && (
         <AttitudeDiagnosticsPanel control={vehicleControl} />
       )}
+      {showFlightDebug && vehicleControl && <FlightDebugPanel control={vehicleControl} />}
       {node && (
         <ManeuverNodePanel
           vesselId={firstVehicle.id}
@@ -477,6 +479,54 @@ function StagingPanel({ control }: { control: VehicleControlMeta }) {
         </div>
       ))}
       <StageButton enabled={!!canStage} />
+    </div>
+  )
+}
+
+/**
+ * Live physics telemetry to corroborate the unit tests — thrust/Isp/pressure for
+ * the atmospheric model, torque + angular rate for gimbal vectoring, drag, and
+ * the CoM. Pairs with the 3D FlightDebugOverlay; both gated by the Flight Debug
+ * toggle. Bottom-left, viewport-fixed.
+ */
+function FlightDebugPanel({ control }: { control: VehicleControlMeta }) {
+  const mag = (v?: [number, number, number]): number => (v ? Math.hypot(v[0], v[1], v[2]) : 0)
+  const com = control.centerOfMass
+  const rows: { label: string; value: string }[] = [
+    { label: 'THROTTLE', value: `${Math.round(control.throttle * 100)}%` },
+    { label: 'THRUST', value: `${thousands(mag(control.thrustBody))} N` },
+    { label: 'ISP', value: control.isp !== undefined ? `${thousands(control.isp)} s` : '—' },
+    { label: 'PRESS', value: control.pressureRatio !== undefined ? `${(control.pressureRatio * 100).toFixed(1)}%` : '—' },
+    { label: 'TORQUE', value: `${thousands(mag(control.torqueBody))} N·m` },
+    { label: 'ω', value: `${(mag(control.angularVelocity) * 180 / Math.PI).toFixed(2)} °/s` },
+    { label: 'DRAG', value: `${thousands(mag(control.aeroForceWorld))} N` },
+    { label: 'CoM', value: com ? `${com[2].toFixed(2)} m` : '—' },
+    { label: 'STAGE', value: `${control.currentStage ?? 0}` },
+  ]
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        left: 16,
+        bottom: 16,
+        width: 190,
+        padding: 12,
+        background: 'rgba(0,0,0,0.6)',
+        border: '1px solid rgba(255,138,24,0.4)',
+        borderRadius: 4,
+        color: 'white',
+        fontFamily: 'monospace',
+        fontSize: 12,
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{ color: '#ff8a18', fontWeight: 'bold', marginBottom: 8 }}>FLIGHT DEBUG</div>
+      {rows.map((row) => (
+        <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+          <span style={{ opacity: 0.7 }}>{row.label}</span>
+          <span style={{ color: '#ffcd70' }}>{row.value}</span>
+        </div>
+      ))}
     </div>
   )
 }

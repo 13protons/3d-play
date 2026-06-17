@@ -123,6 +123,9 @@ function emitControls(): void {
     // Body-frame CoM so the renderer can pivot the craft about it (it shifts as
     // fuel burns and jumps on staging). The tracked trajectory point is the CoM.
     centerOfMass: structure ? structure.aggregate().centerOfMass : undefined,
+    thrustBody: structure ? thrustForceBody : undefined,
+    torqueBody: structure ? thrustTorqueBody : undefined,
+    pressureRatio: structure ? lastPressureRatio : undefined,
   })
 }
 

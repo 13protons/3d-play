@@ -26,6 +26,9 @@ export interface VehicleControlMeta {
   canStage?: boolean
   stages?: StageSummary[]
   centerOfMass?: [number, number, number]
+  thrustBody?: [number, number, number]
+  torqueBody?: [number, number, number]
+  pressureRatio?: number
 }
 
 export interface BodyMeta {

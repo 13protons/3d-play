@@ -317,17 +317,10 @@ function VehicleMesh() {
     if (flameRef.current) flameRef.current.visible = controls.throttle > 0
   })
 
+  // Multi-part craft: Vessel assembles the parts and (when debug is on) hosts the
+  // FlightDebugOverlay inside its oriented / CoM-pivoted / vehicle-layer group.
   if (hasParts && vehicleId) {
-    return (
-      <>
-        <Vessel vehicleId={vehicleId} />
-        {showRotationAxes && (
-          <group>
-            <VehicleDebugAxes vehicleId={vehicleId} />
-          </group>
-        )}
-      </>
-    )
+    return <Vessel vehicleId={vehicleId} />
   }
 
   return (
