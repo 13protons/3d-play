@@ -10,8 +10,9 @@ import { useManeuverStore } from './maneuver'
 import { useVehicleStore } from './vehicle'
 import { useAutopilotStore } from './autopilot'
 import type { BodyMeta } from './trajectories'
-import type { VehicleAero, VehicleAttitude, VehicleEngine, VehicleResources } from '../sim/types'
+import type { PartInstance, VehicleAero, VehicleAttitude, VehicleEngine, VehicleResources } from '../sim/types'
 import type { TrajectoryCurve } from '../sim/types'
+import type { PartDefinition } from '../sim/vehicle/parts'
 import { G } from '../sim/constants'
 import { computeAttitudeTarget } from '../sim/autopilot'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
@@ -241,6 +242,8 @@ export async function startSim(scenarioId: string): Promise<void> {
           engine: v.engine as VehicleEngine | undefined,
           attitude: v.attitude as VehicleAttitude | undefined,
           aero: v.aero as VehicleAero | undefined,
+          parts: v.parts as PartInstance[] | undefined,
+          partDefs: v.partDefs as [string, PartDefinition][] | undefined,
         })
       }
     }
@@ -295,7 +298,14 @@ export async function startSim(scenarioId: string): Promise<void> {
           isp: msg.isp,
           currentThrust: msg.currentThrust,
           aeroForceWorld: msg.aeroForceWorld,
+          currentStage: msg.currentStage,
+          canStage: msg.canStage,
+          stages: msg.stages,
         })
+      }
+      if (msg.type === 'vehicle-structure') {
+        // Structural-sync: mirror the worker's staging on the outside tree.
+        useVehicleStore.getState().applyStaging(msg.id, msg.jettisoned)
       }
     }
 
@@ -312,6 +322,8 @@ export async function startSim(scenarioId: string): Promise<void> {
       engine: useVehicleStore.getState().models[v.id as string]?.engine,
       attitude: useVehicleStore.getState().models[v.id as string]?.attitude,
       aero: useVehicleStore.getState().models[v.id as string]?.aero,
+      parts: useVehicleStore.getState().models[v.id as string]?.parts,
+      partDefs: useVehicleStore.getState().models[v.id as string]?.partDefs,
     })
   }
 
@@ -437,6 +449,9 @@ function flushCommands(): void {
     }
     if (cmd.type === 'set-attitude-target' && vehicleWorker) {
       vehicleWorker.postMessage({ type: 'set-attitude-target', target: cmd.target })
+    }
+    if (cmd.type === 'stage' && vehicleWorker) {
+      vehicleWorker.postMessage({ type: 'stage' })
     }
   }
 }

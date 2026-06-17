@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { VehicleStructure } from '../structure'
 import type { PartDefinition } from '../parts'
 import { MAT3_ZERO, type Vec3 } from '../mat3'
+import { deltaVBudget } from '../thrust'
 import type { PartInstance } from '../../types'
 
 function part(overrides: Partial<PartInstance> & Pick<PartInstance, 'instanceId' | 'defId'>): PartInstance {
@@ -47,6 +48,15 @@ describe('VehicleStructure.singleBody (legacy equivalence)', () => {
     expect(s.totalMaxThrust()).toBe(2_100_000)
     expect(s.isp()).toBe(350)
     expectVec3Close(s.reactionWheelTorque, [4800, 4800, 3200])
+  })
+
+  it('reports a single stage whose ΔV matches Tsiolkovsky', () => {
+    const s = VehicleStructure.singleBody(config)
+    const summaries = s.stageSummaries()
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0]).toMatchObject({ stage: 0, wetMass: 150_000, dryMass: 9000, isp: 350 })
+    expect(summaries[0].deltaV).toBeCloseTo(deltaVBudget(150_000, 9000, 350), 6)
+    expect(s.totalDeltaV()).toBeCloseTo(summaries[0].deltaV, 6)
   })
 
   it('draining fuel lowers total fuel and aggregate mass; clamps at empty', () => {
@@ -128,6 +138,14 @@ describe('VehicleStructure with a real tree', () => {
     expect(s.totalFuel()).toBe(5500)
     expect(s.aggregate().mass).toBe(500 + 200 + 100 + 5500)
     expect(s.canStage()).toBe(true)
+
+    // Per-stage ΔV: booster sees the upper+capsule as payload; upper sees capsule.
+    const summaries = s.stageSummaries()
+    expect(summaries.map((x) => x.stage)).toEqual([0, 1])
+    expect(summaries[0]).toMatchObject({ wetMass: 6300, dryMass: 2300, isp: 280 })
+    expect(summaries[1]).toMatchObject({ wetMass: 1800, dryMass: 300, isp: 340 })
+    expect(summaries[0].deltaV).toBeCloseTo(deltaVBudget(6300, 2300, 280), 6)
+    expect(summaries[1].deltaV).toBeCloseTo(deltaVBudget(1800, 300, 340), 6)
 
     // Fire stage 0: booster jettisoned, upper now active.
     const dropped = s.stage()

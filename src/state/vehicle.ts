@@ -6,6 +6,8 @@
  */
 
 import { create } from 'zustand'
+import type { PartInstance } from '../sim/types'
+import type { PartDefinition } from '../sim/vehicle/parts'
 
 export interface VehicleResourcesInput {
   dryMass: number
@@ -40,6 +42,9 @@ export interface VehicleModelInput {
   engine?: VehicleEngine
   attitude?: VehicleAttitude
   aero?: VehicleAero
+  /** Optional multi-part tree (authored in the scenario). */
+  parts?: PartInstance[]
+  partDefs?: [id: string, def: PartDefinition][]
 }
 
 export interface VehicleModel {
@@ -47,11 +52,20 @@ export interface VehicleModel {
   engine?: VehicleEngine
   attitude?: VehicleAttitude
   aero?: VehicleAero
+  /**
+   * The render mirror of the part tree. The worker owns the authoritative copy;
+   * structural-sync events (staging) flip `active` here to keep them in lockstep
+   * without re-shipping the tree. Undefined for single-body craft.
+   */
+  parts?: PartInstance[]
+  partDefs?: [id: string, def: PartDefinition][]
 }
 
 interface VehicleState {
   models: Record<string, VehicleModel>
   setVehicleModel: (vehicleId: string, model: VehicleModelInput) => void
+  /** Structural-sync: deactivate jettisoned parts in the render mirror. */
+  applyStaging: (vehicleId: string, jettisoned: string[]) => void
   reset: () => void
 }
 
@@ -69,9 +83,26 @@ export const useVehicleStore = create<VehicleState>((set) => ({
         engine: model.engine,
         attitude: model.attitude,
         aero: model.aero,
+        parts: model.parts,
+        partDefs: model.partDefs,
       },
     },
   })),
+
+  applyStaging: (vehicleId, jettisoned) => set((state) => {
+    const model = state.models[vehicleId]
+    if (!model?.parts || jettisoned.length === 0) return state
+    const dropped = new Set(jettisoned)
+    return {
+      models: {
+        ...state.models,
+        [vehicleId]: {
+          ...model,
+          parts: model.parts.map((p) => (dropped.has(p.instanceId) ? { ...p, active: false } : p)),
+        },
+      },
+    }
+  }),
 
   reset: () => set({ models: {} }),
 }))

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AttitudeTarget, TrajectoryCurve } from '../sim/types'
+import type { AttitudeTarget, StageSummary, TrajectoryCurve } from '../sim/types'
 
 export interface VehicleMeta {
   id: string
@@ -22,6 +22,9 @@ export interface VehicleControlMeta {
   isp?: number
   currentThrust?: number
   aeroForceWorld?: [number, number, number]
+  currentStage?: number
+  canStage?: boolean
+  stages?: StageSummary[]
 }
 
 export interface BodyMeta {

@@ -47,6 +47,7 @@ describe('appRoutes', () => {
       'sun-earth-moon',
       'inner-solar-system',
       'full-solar-system',
+      'two-stage-ascent',
     ])
     expect(isKnownScenarioId('full-solar-system')).toBe(true)
     expect(isKnownScenarioId('missing')).toBe(false)

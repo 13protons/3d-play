@@ -6,6 +6,8 @@ import type { AmbientLight, DirectionalLight, Group, Mesh, MeshBasicMaterial, Ob
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { useModeStore } from '../state/mode'
 import { useTrajectoriesStore } from '../state/trajectories'
+import { useVehicleStore } from '../state/vehicle'
+import { Vessel } from './Vessel'
 import type { BodyMeta } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
 import { evaluateCurveVelocity } from '../sim/curves'
@@ -295,6 +297,7 @@ function VehicleMesh() {
   const showRotationAxes = useModeStore((s) => s.showRotationAxes)
   const firstVehicle = Object.values(vehicles)[0]
   const vehicleId = firstVehicle?.id
+  const hasParts = useVehicleStore((s) => (vehicleId ? !!s.models[vehicleId]?.parts : false))
 
   // Read the high-frequency control state imperatively each frame instead of
   // subscribing to it (which would re-render this tree ~100x/s). Same pattern
@@ -310,6 +313,19 @@ function VehicleMesh() {
     group.quaternion.set(x, y, z, w)
     if (flameRef.current) flameRef.current.visible = controls.throttle > 0
   })
+
+  if (hasParts && vehicleId) {
+    return (
+      <>
+        <Vessel vehicleId={vehicleId} />
+        {showRotationAxes && (
+          <group>
+            <VehicleDebugAxes vehicleId={vehicleId} />
+          </group>
+        )}
+      </>
+    )
+  }
 
   return (
     <group ref={groupRef}>

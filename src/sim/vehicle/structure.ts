@@ -22,8 +22,11 @@ import {
   netThrust,
 } from './aggregation'
 import type { PartDefinition } from './parts'
-import type { PartInstance } from '../types'
+import type { PartInstance, StageSummary } from '../types'
 import type { Vec3 } from './mat3'
+import { deltaVBudget } from './thrust'
+
+export type { StageSummary }
 
 export interface SingleBodyConfig {
   dryMass: number
@@ -147,6 +150,42 @@ export class VehicleStructure {
       const fuel = this.fuel.get(t.instanceId) ?? 0
       if (fuel > 0) this.fuel.set(t.instanceId, Math.max(0, fuel - fuel * fraction))
     }
+  }
+
+  /**
+   * Per-stage ΔV for the remaining (active) stages, lowest first. Each stage's
+   * wet mass is itself + everything above it (payload); its dry mass drops its
+   * own propellant. Reflects current fuel, so a partially-burned stage shows its
+   * remaining ΔV. v1: stages fire in ascending order, one engine Isp per stage.
+   */
+  stageSummaries(): StageSummary[] {
+    const firingStages = [...new Set(
+      this.skeleton.engines.map((e) => e.stage),
+    )].sort((a, b) => a - b)
+
+    const partDryMass = (p: PartInstance): number => this.definitions.get(p.defId)?.dryMass ?? 0
+    const tankFuel = (instanceId: string): number => this.fuel.get(instanceId) ?? 0
+    const active = this.parts.filter((p) => p.active)
+
+    return firingStages.map((stage) => {
+      const attached = active.filter((p) => p.stage >= stage)
+      const dryStructure = attached.reduce((sum, p) => sum + partDryMass(p), 0)
+      const attachedFuel = this.skeleton.tanks
+        .filter((t) => t.stage >= stage)
+        .reduce((sum, t) => sum + tankFuel(t.instanceId), 0)
+      const ownFuel = this.skeleton.tanks
+        .filter((t) => t.stage === stage)
+        .reduce((sum, t) => sum + tankFuel(t.instanceId), 0)
+      const wetMass = dryStructure + attachedFuel
+      const dryMass = wetMass - ownFuel
+      const isp = this.skeleton.engines.find((e) => e.stage === stage)?.isp ?? 0
+      return { stage, wetMass, dryMass, isp, deltaV: deltaVBudget(wetMass, dryMass, isp) }
+    })
+  }
+
+  /** Total remaining ΔV across all stages. */
+  totalDeltaV(): number {
+    return this.stageSummaries().reduce((sum, s) => sum + s.deltaV, 0)
   }
 
   /** True while a later stage exists to advance to. */

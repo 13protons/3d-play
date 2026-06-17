@@ -118,6 +118,7 @@ function emitControls(): void {
     aeroForceWorld: shouldEmitAeroForce(aeroForceWorld) ? aeroForceWorld : undefined,
     currentStage: structure?.currentStage,
     canStage: structure?.canStage(),
+    stages: structure?.stageSummaries(),
   })
 }
 

@@ -48,6 +48,16 @@ export type PartModule =
   | DecouplerModule
   | ReactionWheelModule
 
+/** Render hint for the part (ignored by physics; consumed by Vessel.tsx). */
+export interface PartRender {
+  shape: 'cylinder' | 'box' | 'cone'
+  /** Radius (cylinder/cone) or half-width (box), in metres. */
+  radius?: number
+  /** Length along the part's local +Z, in metres. */
+  length?: number
+  color?: string
+}
+
 export interface PartDefinition {
   id: string
   /** Structural (dry) mass, kg. */
@@ -57,4 +67,5 @@ export interface PartDefinition {
   /** Inertia tensor about the part's own origin, in its local frame (kg·m²). */
   inertia: Mat3
   modules: PartModule[]
+  render?: PartRender
 }

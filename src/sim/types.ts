@@ -95,6 +95,17 @@ export interface VehicleAttitude {
   reactionWheelTorque: [number, number, number]
 }
 
+/** Per-stage ΔV readout (upper stages count as payload for the lower ones). */
+export interface StageSummary {
+  stage: number
+  /** Mass at this stage's ignition (this stage + everything above it). */
+  wetMass: number
+  /** Mass at this stage's burnout (wet minus this stage's own propellant). */
+  dryMass: number
+  isp: number
+  deltaV: number
+}
+
 // ---------------------------------------------------------------------------
 // Vehicle Worker Messages
 // ---------------------------------------------------------------------------
@@ -176,6 +187,7 @@ export type VehicleWorkerOutbound =
       aeroForceWorld?: [number, number, number]
       currentStage?: number
       canStage?: boolean
+      stages?: StageSummary[]
     }
 
 // ---------------------------------------------------------------------------
