@@ -107,12 +107,63 @@ function AutopilotColumn({
   )
 }
 
+/** Vehicle-status indicators stacked beside the navball (frame, orbit, state),
+ * mirroring the autopilot column on the other side. Non-interactive badges. */
+export function StatusColumn({
+  mode,
+  orbit,
+  surfaceState,
+}: {
+  mode: FlightReferenceMode
+  orbit?: OrbitSummary
+  surfaceState: SurfaceState
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center', pointerEvents: 'auto' }}>
+      <StatusBadge glyph={FRAME_ICONS[mode]} color={FRAME_COLORS[mode]} title={FRAME_LABELS[mode]} />
+      {orbit && <StatusBadge glyph={ORBIT_ICONS[orbit.kind]} color={ORBIT_COLORS[orbit.kind]} title={ORBIT_LABELS[orbit.kind]} />}
+      <StatusBadge glyph={STATE_ICONS[surfaceState]} color={STATE_COLORS[surfaceState]} title={STATE_LABELS[surfaceState]} />
+    </div>
+  )
+}
+
+function StatusBadge({ glyph, color, title }: { glyph: NavGlyph; color: string; title: string }) {
+  return (
+    <div
+      {...hoverTooltip(title)}
+      role="img"
+      aria-label={title}
+      style={{
+        width: 24,
+        height: 24,
+        boxSizing: 'border-box',
+        borderRadius: '50%',
+        display: 'grid',
+        placeItems: 'center',
+        background: 'rgba(10,16,28,0.78)',
+        border: '1px solid rgba(255,255,255,0.22)',
+      }}
+    >
+      <GlyphIcon glyph={glyph} size={20} color={color} />
+    </div>
+  )
+}
+
 interface NavballInstrumentProps extends NavballProps {
   throttle: number
   forceRatio: number
   surfaceState: SurfaceState
   autopilotMode: AutopilotMode
   orbit?: OrbitSummary
+  /** Values shown on the bottom shelf (ALT/VEL), mirroring AP/PE on top. */
+  bottomRows?: FlightTelemetryRow[]
+}
+
+/** Full names for the bottom-shelf abbreviations (hover tooltips). */
+const BOTTOM_SHELF_TITLES: Record<string, string> = {
+  ALT: 'Altitude',
+  VEL: 'Velocity',
+  VERT: 'Vertical speed',
 }
 
 interface ProximityProps {
@@ -276,7 +327,7 @@ export function NavballCluster({
         zIndex: 10, // keep the cluster (and its hover targets) above the 3D canvas
       }}
     >
-      <Proximity rows={rows.slice(0, 3)} />
+      <Proximity rows={rows.slice(2, 3)} />
       {onSelectMode && (
         <AutopilotColumn active={autopilotMode} hasNode={!!hasManeuverNode} onSelect={onSelectMode} />
       )}
@@ -293,14 +344,16 @@ export function NavballCluster({
         maneuverDirection={maneuverDirection}
         orbitNormal={orbitNormal}
         orbit={orbit}
+        bottomRows={rows.slice(0, 2)}
       />
+      <StatusColumn mode={mode} orbit={orbit} surfaceState={surfaceState} />
       <Attitude rows={rows.slice(3)} />
     </div>
   )
 }
 
 export function NavballInstrument(props: NavballInstrumentProps) {
-  const { mode, throttle, forceRatio, surfaceState, orbit } = props
+  const { throttle, forceRatio, orbit, bottomRows = [] } = props
   const throttleArc = computeArcProgressPath({ value: throttle, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45 })
   const forceArc = computeArcProgressPath({ value: forceRatio, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45, mirror: true })
   return (
@@ -337,14 +390,19 @@ export function NavballInstrument(props: NavballInstrumentProps) {
           </Shelf>
         )
       })()}
-      {/* Bottom shelf: reference frame + orbital profile + vehicle state. */}
-      <Shelf top={176}>
-        <GlyphIcon glyph={FRAME_ICONS[mode]} size={16} color={FRAME_COLORS[mode]} title={FRAME_LABELS[mode]} />
-        {orbit && (
-          <GlyphIcon glyph={ORBIT_ICONS[orbit.kind]} size={16} color={ORBIT_COLORS[orbit.kind]} title={ORBIT_LABELS[orbit.kind]} />
-        )}
-        <GlyphIcon glyph={STATE_ICONS[surfaceState]} size={16} color={STATE_COLORS[surfaceState]} title={STATE_LABELS[surfaceState]} />
-      </Shelf>
+      {/* Bottom shelf: altitude then speed (mirrors AP/PE on top). */}
+      {bottomRows.length > 0 && (
+        <Shelf top={176}>
+          {bottomRows.map((row) => (
+            <ShelfValue
+              key={row.label}
+              label={row.label}
+              value={row.value}
+              title={`${BOTTOM_SHELF_TITLES[row.label] ?? row.label}: ${row.value}`}
+            />
+          ))}
+        </Shelf>
+      )}
     </div>
   )
 }

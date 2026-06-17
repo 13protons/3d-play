@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Navball, NavballInstrument } from '../Navball'
+import { Navball, NavballInstrument, StatusColumn } from '../Navball'
 import { computeArcProgressPath, computeForceLoadRatio } from '../navballInstrumentMath'
 
 const navballProps = {
@@ -52,7 +52,7 @@ describe('computeForceLoadRatio', () => {
 })
 
 describe('NavballInstrument', () => {
-  it('renders regime/orbit/state shelves and arc progress bars', () => {
+  it('renders ap/pe and alt/vel shelves and arc progress bars', () => {
     const markup = renderToStaticMarkup(
       <NavballInstrument
         {...navballProps}
@@ -61,40 +61,26 @@ describe('NavballInstrument', () => {
         surfaceState="flying"
         autopilotMode="damp"
         orbit={{ kind: 'closed', periapsisAltitude: 100_000, apoapsisAltitude: 250_000 }}
+        bottomRows={[
+          { label: 'ALT', value: '12.0 km' },
+          { label: 'VEL', value: '250 m/s' },
+        ]}
       />
     )
 
-    expect(markup).toContain('Orbital reference frame') // frame icon (bottom shelf)
-    // State, frame, and orbital closure are icons (titles), not text labels.
-    expect(markup).not.toContain('FLY')
-    expect(markup).toContain('Flying')
-    expect(markup).toContain('Closed orbit')
     expect(markup).toContain('PE') // top shelf periapsis
+    expect(markup).toContain('ALT') // bottom shelf altitude
+    expect(markup).toContain('VEL') // bottom shelf velocity
+    expect(markup).toContain('12.0 km')
+    // Status indicators (frame/orbit/state) now live in StatusColumn, not here.
+    expect(markup).not.toContain('Closed orbit')
+    expect(markup).not.toContain('reference frame')
     expect(markup).toContain('data-indicator="throttle"')
     expect(markup).toContain('data-indicator="force"')
     expect(markup).toContain('width="190"')
     expect(markup).toContain('height="180"')
     expect(markup).toContain('M 159 154 A 90 90 0 0 0 159 26')
     expect(markup).toContain('M 31 154 A 90 90 0 0 1 31 26')
-  })
-
-  it('renders surface regime and a crashed-state icon', () => {
-    const markup = renderToStaticMarkup(
-      <NavballInstrument
-        {...navballProps}
-        mode="surface"
-        throttle={0.62}
-        forceRatio={0.18}
-        surfaceState="crashed"
-        autopilotMode="off"
-        orbit={{ kind: 'impacting', periapsisAltitude: -5_000, apoapsisAltitude: null }}
-      />
-    )
-
-    expect(markup).toContain('Surface reference frame') // frame icon (bottom shelf)
-    expect(markup).not.toContain('CRASH') // state shown as an icon, not text
-    expect(markup).toContain('Crashed')
-    expect(markup).toContain('Impact trajectory')
   })
 
   it('sizes the raw navball as a 170px drawing', () => {
@@ -122,5 +108,35 @@ describe('NavballInstrument', () => {
 
     expect(markup).not.toContain('ORBIT NAV')
     expect(markup).not.toContain('SURF NAV')
+  })
+})
+
+describe('StatusColumn', () => {
+  it('stacks frame, orbit, and state indicators with tooltips', () => {
+    const markup = renderToStaticMarkup(
+      <StatusColumn
+        mode="orbital"
+        surfaceState="flying"
+        orbit={{ kind: 'closed', periapsisAltitude: 100_000, apoapsisAltitude: 250_000 }}
+      />
+    )
+
+    expect(markup).toContain('Orbital reference frame')
+    expect(markup).toContain('Closed orbit')
+    expect(markup).toContain('Flying')
+  })
+
+  it('reflects surface frame, impact trajectory, and crashed state', () => {
+    const markup = renderToStaticMarkup(
+      <StatusColumn
+        mode="surface"
+        surfaceState="crashed"
+        orbit={{ kind: 'impacting', periapsisAltitude: -5_000, apoapsisAltitude: null }}
+      />
+    )
+
+    expect(markup).toContain('Surface reference frame')
+    expect(markup).toContain('Impact trajectory')
+    expect(markup).toContain('Crashed')
   })
 })
