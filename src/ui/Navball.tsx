@@ -67,16 +67,22 @@ const MODE_TITLES: Record<string, string> = {
 // status badges). Tweak these two numbers to dial the whole set in:
 const CIRCLE_DIAMETER = 24; // outer diameter of the round cell, px
 const CIRCLE_GLYPH_SIZE = 16; // glyph size inside the cell, px (smaller = more padding)
+// Right-side status badges: a bit smaller than the autopilot buttons.
+const STATUS_DIAMETER = 20;
+const STATUS_GLYPH_SIZE = 13;
 
 /** A round icon cell shared by the autopilot column and the status column.
  * Pass `onSelect` to make it an interactive button; omit it for a static
- * (non-interactive) badge. `active` fills the cell with its accent color. */
+ * (non-interactive) badge. `active` fills the cell with its accent color.
+ * `diameter`/`glyphSize` override the default sizing per call site. */
 function CircleIcon({
   glyph,
   color,
   title,
   active = false,
   disabled = false,
+  diameter = CIRCLE_DIAMETER,
+  glyphSize = CIRCLE_GLYPH_SIZE,
   onSelect,
 }: {
   glyph: NavGlyph;
@@ -84,11 +90,13 @@ function CircleIcon({
   title: string;
   active?: boolean;
   disabled?: boolean;
+  diameter?: number;
+  glyphSize?: number;
   onSelect?: () => void;
 }) {
   const cell = {
-    width: CIRCLE_DIAMETER,
-    height: CIRCLE_DIAMETER,
+    width: diameter,
+    height: diameter,
     boxSizing: 'border-box' as const,
     borderRadius: '50%',
     display: 'grid',
@@ -101,7 +109,7 @@ function CircleIcon({
   const inner = (
     <GlyphIcon
       glyph={glyph}
-      size={CIRCLE_GLYPH_SIZE}
+      size={glyphSize}
       color={glyphColor}
     />
   );
@@ -146,7 +154,16 @@ function AutopilotColumn({
   // only while flying; maneuver also needs a node.
   const rowStyle = { display: 'flex', gap: 4 } as const;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center', pointerEvents: 'auto' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 7,
+        alignItems: 'end',
+        pointerEvents: 'auto',
+        marginRight: '-1.8em',
+      }}
+    >
       <div style={rowStyle}>
         <CircleIcon
           glyph={HOLD_MODE_ICONS.damp!}
@@ -156,7 +173,7 @@ function AutopilotColumn({
           onSelect={() => onSelect('damp')}
         />
       </div>
-      <div style={rowStyle}>
+      <div style={{ paddingRight: '.8em', ...rowStyle }}>
         <CircleIcon
           glyph={HOLD_MODE_ICONS.prograde!}
           color={HOLD_MODE_COLORS.prograde!}
@@ -174,7 +191,7 @@ function AutopilotColumn({
           onSelect={() => onSelect('retrograde')}
         />
       </div>
-      <div style={rowStyle}>
+      <div style={{ paddingRight: '1.2em', ...rowStyle }}>
         <CircleIcon
           glyph={HOLD_MODE_ICONS.normal!}
           color={HOLD_MODE_COLORS.normal!}
@@ -192,7 +209,7 @@ function AutopilotColumn({
           onSelect={() => onSelect('antinormal')}
         />
       </div>
-      <div style={rowStyle}>
+      <div style={{ paddingRight: '.8em', ...rowStyle }}>
         <CircleIcon
           glyph={HOLD_MODE_ICONS['radial-out']!}
           color={HOLD_MODE_COLORS['radial-out']!}
@@ -235,24 +252,45 @@ export function StatusColumn({
   orbit?: OrbitSummary;
   surfaceState: SurfaceState;
 }) {
+  // Downward triangle: frame + orbit on top, vehicle state at the point.
+  // Tucked toward the navball and sunk to the lower-right, near the bottom arc.
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center', pointerEvents: 'auto' }}>
-      <CircleIcon
-        glyph={FRAME_ICONS[mode]}
-        color={FRAME_COLORS[mode]}
-        title={FRAME_LABELS[mode]}
-      />
-      {orbit && (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 4,
+        pointerEvents: 'auto',
+        alignSelf: 'flex-end',
+        marginLeft: '-1.4em',
+        marginBottom: 10,
+      }}
+    >
+      <div style={{ display: 'flex', gap: 4 }}>
         <CircleIcon
-          glyph={ORBIT_ICONS[orbit.kind]}
-          color={ORBIT_COLORS[orbit.kind]}
-          title={ORBIT_LABELS[orbit.kind]}
+          glyph={FRAME_ICONS[mode]}
+          color={FRAME_COLORS[mode]}
+          title={FRAME_LABELS[mode]}
+          diameter={STATUS_DIAMETER}
+          glyphSize={STATUS_GLYPH_SIZE}
         />
-      )}
+        {orbit && (
+          <CircleIcon
+            glyph={ORBIT_ICONS[orbit.kind]}
+            color={ORBIT_COLORS[orbit.kind]}
+            title={ORBIT_LABELS[orbit.kind]}
+            diameter={STATUS_DIAMETER}
+            glyphSize={STATUS_GLYPH_SIZE}
+          />
+        )}
+      </div>
       <CircleIcon
         glyph={STATE_ICONS[surfaceState]}
         color={STATE_COLORS[surfaceState]}
         title={STATE_LABELS[surfaceState]}
+        diameter={STATUS_DIAMETER}
+        glyphSize={STATUS_GLYPH_SIZE}
       />
     </div>
   );
