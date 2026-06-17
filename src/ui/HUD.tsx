@@ -275,6 +275,7 @@ function FlightReadouts() {
   return (
     <>
       {vehicleControl && <ResourcesPanel control={vehicleControl} />}
+      {vehicleControl && <StagingPanel control={vehicleControl} />}
       {showAttitudeDiagnostics && vehicleControl && (
         <AttitudeDiagnosticsPanel control={vehicleControl} />
       )}
@@ -387,7 +388,7 @@ function AttitudeAxisRow({ row }: { row: AttitudeAxisDiagnostic }) {
  * while burning). Mirrors the old MASS card but as a standalone floating panel.
  */
 function ResourcesPanel({ control }: { control: VehicleControlMeta }) {
-  const { mass, fuelMass, isp, currentThrust, stages, currentStage, canStage } = control
+  const { mass, fuelMass, isp, currentThrust, stages } = control
   if (mass === undefined || fuelMass === undefined) return null
   const flow = isp && currentThrust ? currentThrust / exhaustVelocity(isp) : 0
   // Per-stage ΔV when the craft is multi-part; otherwise the single-body budget.
@@ -406,10 +407,15 @@ function ResourcesPanel({ control }: { control: VehicleControlMeta }) {
   return (
     <div
       style={{
-        position: 'absolute',
+        // `fixed` so it anchors to the viewport, not the short top HUD strip
+        // (which is only as tall as its content — `absolute` here floated up and
+        // ran off the top of the screen).
+        position: 'fixed',
         right: 16,
-        bottom: 16,
+        top: 96,
         width: 170,
+        maxHeight: 'calc(100vh - 120px)',
+        overflowY: 'auto',
         padding: 12,
         background: 'rgba(0,0,0,0.6)',
         border: '1px solid rgba(210,225,255,0.3)',
@@ -427,22 +433,44 @@ function ResourcesPanel({ control }: { control: VehicleControlMeta }) {
           <span style={{ color: row.warn ? '#ff7777' : '#ffcd70' }}>{row.value}</span>
         </div>
       ))}
-      {stages && stages.length > 0 && (
-        <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid rgba(210,225,255,0.2)' }}>
-          {stages.map((s) => (
-            <div
-              key={s.stage}
-              style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2, opacity: s.stage === currentStage ? 1 : 0.55 }}
-            >
-              <span style={{ color: s.stage === currentStage ? '#9cd8ff' : 'inherit' }}>
-                {s.stage === currentStage ? '▶ ' : '  '}S{s.stage}
-              </span>
-              <span style={{ color: '#ffcd70' }}>{s.deltaV.toFixed(0)} m/s</span>
-            </div>
-          ))}
-          <StageButton enabled={!!canStage} />
+    </div>
+  )
+}
+
+/** Per-stage ΔV breakdown + the STAGE control, pinned to the bottom-right. */
+function StagingPanel({ control }: { control: VehicleControlMeta }) {
+  const { stages, currentStage, canStage } = control
+  if (!stages || stages.length === 0) return null
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        right: 16,
+        bottom: 16,
+        width: 170,
+        padding: 12,
+        background: 'rgba(0,0,0,0.6)',
+        border: '1px solid rgba(210,225,255,0.3)',
+        borderRadius: 4,
+        color: 'white',
+        fontFamily: 'monospace',
+        fontSize: 12,
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{ color: '#9cd8ff', fontWeight: 'bold', marginBottom: 8 }}>STAGING</div>
+      {stages.map((s) => (
+        <div
+          key={s.stage}
+          style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2, opacity: s.stage === currentStage ? 1 : 0.55 }}
+        >
+          <span style={{ color: s.stage === currentStage ? '#9cd8ff' : 'inherit' }}>
+            {s.stage === currentStage ? '▶ ' : '  '}S{s.stage}
+          </span>
+          <span style={{ color: '#ffcd70' }}>{s.deltaV.toFixed(0)} m/s</span>
         </div>
-      )}
+      ))}
+      <StageButton enabled={!!canStage} />
     </div>
   )
 }
