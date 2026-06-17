@@ -320,17 +320,19 @@ export function NavballInstrument(props: NavballInstrumentProps) {
       <div style={{ position: 'absolute', left: 10, top: 5 }}>
         <Navball {...props} />
       </div>
-      {/* Top shelf: orbital closure + periapsis/apoapsis. */}
+      {/* Top shelf: periapsis/apoapsis. */}
       {orbit && (
         <Shelf top={-2}>
-          <GlyphIcon glyph={ORBIT_ICONS[orbit.kind]} size={16} color={ORBIT_COLORS[orbit.kind]} title={ORBIT_LABELS[orbit.kind]} />
           <ShelfValue label="PE" value={formatFlightNumber(orbit.periapsisAltitude, 'm')} />
           <ShelfValue label="AP" value={orbit.apoapsisAltitude === null ? '--' : formatFlightNumber(orbit.apoapsisAltitude, 'm')} />
         </Shelf>
       )}
-      {/* Bottom shelf: reference frame + vehicle state. */}
+      {/* Bottom shelf: reference frame + orbital profile + vehicle state. */}
       <Shelf top={176}>
         <span style={{ color: '#ffc260', fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>{flightRegimeLabel(mode)}</span>
+        {orbit && (
+          <GlyphIcon glyph={ORBIT_ICONS[orbit.kind]} size={16} color={ORBIT_COLORS[orbit.kind]} title={ORBIT_LABELS[orbit.kind]} />
+        )}
         <GlyphIcon glyph={STATE_ICONS[surfaceState]} size={16} color={STATE_COLORS[surfaceState]} title={STATE_LABELS[surfaceState]} />
       </Shelf>
     </div>
