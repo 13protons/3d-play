@@ -60,14 +60,39 @@ deep space"**:
   vehicle. These share one depth buffer and are composited by `AerialPerspective`.
   The spike proved cm-scale parts and a 6,360 km surface coexist here without
   precision z-fighting at `near:0.1 far:1e9`.
-- **Deep space (NOT fogged):** stars, the sun, the moon, and **distant celestial
-  body disks** (other planets via `projectDistantSphere`, the emissive sun at
-  `SUN_RENDER_DISTANCE`). takram's `Sky`/effect already render stars + sun + moon
-  correctly. Distant *planet disks* drawn as geometry must bypass aerial-perspective
-  fogging (otherwise they're fogged as if at atmosphere-grazing distance — wrong).
-  See open question Q1.
+- **Deep space (sun/moon/stars):** takram renders its own atmosphere-aware sun, moon,
+  and stars, so in vehicle view we drop our emissive-sun disk (`projectDistantSphere`)
+  and drei `<Stars>` and let takram own them. Distant *planet disks* (other planets)
+  still render as geometry and are correctly fogged by the `topRadius`-bounded
+  integral — no exclusion pass needed (see D2 / Q1).
 
 ## Key design decisions
+
+### D0 — `atmosphere.json` is the body's single atmosphere asset (render + physics)
+A body has two atmosphere facets, **consolidated** into one network-loaded plugin
+asset with two sections:
+
+```jsonc
+{
+  "render":  { "shellHeight": 100000, "rayleighScattering": [...], "rayleighScaleHeight": 8000,
+               "mieScattering": ..., "mieScaleHeight": 1200, "miePhaseFunctionG": 0.76 },
+  "physics": { "model": "exponential", "surfaceDensity": 1.225, "scaleHeight": 8500,
+               "maxAltitude": 120000, "loadRadiusMultiplier": 1.25 }
+}
+```
+
+- `render` — takram scattering params (D3); the takram coupling is quarantined here.
+- `physics` — the exponential drag model that feeds aero / orbital decay
+  (`aero.ts` / `dynamics.ts` / vehicle `worker.ts`). Renderer-agnostic SI, fed to the
+  drag model directly — no converter.
+
+This **moves the `physics` block out of `manifest.json`** (where it lives inline today)
+into `atmosphere.json`. The manifest just links the asset; the bridge loads it and
+distributes `physics` → sim and `render` → takram. Because the drag model is
+sim-critical, a body that declares an `atmosphere.json` whose load fails is a **hard
+error**, not a silent no-atmosphere fallback. `scenarioValidation` validates both
+sections in the asset. The body radius is **not** duplicated — `bottomRadius` comes
+from `manifest.physics.radius` (single source of truth).
 
 ### D1 — Depth buffer
 Use one coherent depth buffer (drop the inter-pass `clearDepth`). The spike showed a
@@ -75,28 +100,38 @@ standard buffer is sufficient at `near:0.1 far:1e9` for the near field. Keep
 `logarithmicDepthBuffer` in reserve (spike confirmed it doesn't break takram's depth
 reconstruction) — only adopt it if a real vehicle exposes sub-mm part precision
 issues the standard buffer can't hold. Prefer instead a **sane far plane for the
-fogged pass** + distant bodies in their own pass (D2).
+fogged pass** (and let takram own sun/moon/stars, D2).
 
 ### D2 — Distant bodies
-Render distant celestial disks + stars in a pass that is **not** consumed by
-`AerialPerspective` (e.g. rendered after the composite, or on a layer the effect's
-depth treats as background). Recommended: let takram render sun/moon/stars; render
-other-planet disks as a thin overlay pass on top of the composite. Validate against
-`sun-earth-moon` (Moon visible from Earth surface) and `inner-solar-system`.
+takram's aerial perspective integrates scattering only between the camera and where
+the view ray exits `topRadius`, so a distant body disk (drawn at a fake ~5e8 m) is
+fogged by *only the real atmosphere along its ray* — physically correct: reddened
+near the horizon, untouched from orbit. So distant bodies do **not** need a
+fog-exclusion pass. The real concern is **duplication**: takram renders its own
+(atmosphere-aware) sun, moon, and stars, so in vehicle view we drop our emissive-sun
+disk (`projectDistantSphere`) and drei `<Stars>` and let takram own them; everything
+else (parent body, other-planet disks, terrain, vehicle) flows through the one
+coherent buffer and the effect. Add a fog-exclusion overlay pass only if validation
+(`sun-earth-moon` Moon-from-surface, `inner-solar-system`) shows a body looks wrong.
 
-### D3 — Per-body params (`atmosphere.json` → `AtmosphereParameters`)
-Map the plugin asset to Bruneton params:
+### D3 — The `render` section → `AtmosphereParameters` map
+The `render` section is a **direct serialization of takram's params** (Q2 resolved:
+option A — takram's own units, no converter), so the map is field-for-field:
 
-| atmosphere.json | AtmosphereParameters | notes |
+| atmosphere.json `render` | AtmosphereParameters | notes |
 |---|---|---|
-| (body `physics.radius`) | `bottomRadius` | ground radius — must match the rendered surface |
-| `shellHeight` | `topRadius = bottomRadius + shellHeight` | |
-| `rayleigh.coefficients` | `rayleighScattering` (Vector3) | **unit calibration needed** (see Q2) |
-| `rayleigh.scaleHeight` | `rayleighDensity` profile (exp) | build `DensityProfileLayer` |
-| `mie.coefficient` | `mieScattering` / `mieExtinction` | |
-| `mie.scaleHeight` | `mieDensity` profile (exp) | |
-| `mie.anisotropy` | `miePhaseFunctionG` | |
-| `sunIntensity` | `solarIrradiance` / light intensity | calibrate to takram's luminance units |
+| (manifest `physics.radius`) | `bottomRadius` | from the manifest, not duplicated in the asset |
+| `shellHeight` | `topRadius = radius + shellHeight` | |
+| `rayleighScattering` (per-km) | `rayleighScattering` (Vector3) | takram units — **no conversion** |
+| `rayleighScaleHeight` | `rayleighDensity` profile (exp) | build `DensityProfileLayer` |
+| `mieScattering` | `mieScattering` / `mieExtinction` | |
+| `mieScaleHeight` | `mieDensity` profile (exp) | |
+| `miePhaseFunctionG` | `miePhaseFunctionG` | anisotropy |
+| (optional) `solarIrradiance`, `groundAlbedo` | same | fall back to takram `DEFAULT` if absent |
+
+Earth's `render` section = takram `DEFAULT`'s values (with `topRadius` from our
+`shellHeight`). The `physics` section is unrelated to this map — it feeds the drag
+model directly (D0).
 
 ### D4 — LUT generation & caching
 Bake LUTs at runtime with `PrecomputedTexturesGenerator(gl).update(params)` (spike
@@ -122,37 +157,48 @@ gating `SunLight` intensity with the existing `isSunOccluded` check.
 
 ## Implementation phases
 
-1. **Composer skeleton.** Stand up `EffectComposer` in `VehicleScene`, render the
+1. **Data-layer consolidation + v1 teardown** (D0). Restructure `atmosphere.json` into
+   `render` (takram-native, D3) + `physics` sections; move the `physics` block out of
+   each `manifest.json` into its asset; update the bridge (load + distribute, hard-error
+   on declared-but-failed asset), `BodyMeta`/types, and `scenarioValidation` (validate
+   both sections in the asset). Delete the v1 `AtmosphereShell.tsx`, `atmosphereScatter.ts`,
+   and the `atmosphere` render layer/pass; update `renderLayers` + its test. *Rationale:
+   the `render` section becomes takram-native, which the v1 shell can't read — so v1 comes
+   out now. Atmosphere visuals are intentionally absent until phase 5.* Green gates.
+2. **Composer skeleton.** Stand up `EffectComposer` in `VehicleScene`, render the
    existing layers into it as one coherent pass (drop the depth clear), no atmosphere
-   yet. Verify the vehicle + terrain + distant bodies still look right and the
-   `activeView` gating still works. *Checkpoint: parity with today, minus the v1 shell.*
-2. **atmosphere.json → AtmosphereParameters mapper** + per-body LUT cache (D3, D4).
-   Unit-tested pure mapping function. Calibrate against `AtmosphereParameters.DEFAULT`.
-3. **Place + light.** Wire `worldToECEFMatrix` + `sunDirection` per frame (D5);
+   yet. Verify the vehicle + terrain + distant bodies still look right and `activeView`
+   gating still works. *Checkpoint: parity with today, minus atmosphere.*
+3. **`render` → `AtmosphereParameters` mapper** + per-body LUT cache (D3, D4).
+   Unit-tested pure mapping function; calibrate Earth against `AtmosphereParameters.DEFAULT`.
+4. **Place + light.** Wire `worldToECEFMatrix` + `sunDirection` per frame (D5);
    swap in `SunLight` + `skyLight`, preserve eclipse gating (D6).
-4. **Atmosphere on.** Add `Sky` + `AerialPerspective`; confirm aerial perspective over
-   terrain + vehicle and the sky/horizon. Tune exposure/tone-map.
-5. **Distant bodies pass** (D2); validate Moon-from-Earth and multi-body scenarios.
-6. **Remove v1.** Delete `AtmosphereShell.tsx`, `atmosphereScatter.ts`, the
-   `atmosphere` render layer/pass; update `renderLayers` + its test. Keep
-   `atmosphere.json` schema + plugin model.
+5. **Atmosphere on.** Add `Sky` + `AerialPerspective`; confirm aerial perspective over
+   terrain + vehicle and the sky/horizon. Tune exposure/tone-map. Confirm the
+   `topRadius`-bounded fog handles distant bodies (Q1) and drop our sun-disk/drei stars.
+6. **Validate distant bodies / multi-body** (D2): Moon-from-Earth, `inner-solar-system`,
+   eclipse gating. Add a fog-exclusion overlay pass only if something looks wrong.
 7. **Spike teardown.** Remove `/_spike/atmosphere` + its menu link once the real path
    lands (or keep as a dev sandbox — decide at the end).
 
 ## Open questions to resolve during implementation
 
-- **Q1 (distant bodies):** cleanest way to exclude distant planet disks from
-  aerial-perspective fogging within one composer — separate overlay pass vs. a
-  depth/stencil trick. Lean overlay pass.
-- **Q2 (units):** takram's `AtmosphereParameters.DEFAULT.rayleighScattering` is
-  `~0.0058` while our `atmosphere.json` uses `5.8e-6` (per-metre) with
-  `bottomRadius` in metres — implying an internal length-unit (km?) scale. Pin the
-  exact conversion before trusting custom params; DEFAULT is self-consistent (spike
-  used it and looked right), so calibrate the mapper against DEFAULT.
-- **Q3 (terrain limb):** confirm `PlanetTerrainTiles` LOD covers the horizon cleanly
-  so we don't reintroduce the spike's facet-sag seam at real altitudes.
-- **Q4 (perf):** measure composer + effect cost vs. the v1 shell's 28 fps; the LUT
-  approach should be far cheaper per frame, but verify on the planet-fills-screen case.
+- **Q1 (distant bodies) — Does takram's `topRadius`-bounded integration already fog
+  distant bodies correctly, so no fog-exclusion pass is needed (per D2)?** Expected
+  yes (the integral stops at the atmosphere shell); confirm in code during phase 4
+  before relying on it, and that dropping our sun-disk/stars in favour of takram's
+  leaves no gaps.
+- **Q2 (units) — RESOLVED: both, in sections (D0).** `atmosphere.json` carries a
+  `render` section serialized in takram's own units (option A — no converter, coupling
+  quarantined) and a `physics` section in renderer-agnostic SI fed straight to the drag
+  model (no converter either). Each section dodges the unit trap for a different reason,
+  so the `~0.0058` per-km vs `5.8e-6` per-metre mismatch never needs reconciling.
+- **Q3 (terrain limb) — Does `PlanetTerrainTiles` LOD cover the horizon cleanly at
+  real altitudes, or does the spike's facet-sag seam reappear?** Verify before
+  assuming the tile system owns the limb.
+- **Q4 (perf) — Is the composer + effect actually cheaper per frame than the v1
+  shell's ~28 fps (planet-fills-screen)?** Expected far cheaper (LUT lookups vs a
+  128-iteration raymarch); measure on that case to confirm.
 
 ## Testing
 
