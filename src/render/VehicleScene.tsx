@@ -48,6 +48,12 @@ import { countRender } from './perfCounters'
 
 const SUN_RENDER_DISTANCE = 5e8
 
+// Vehicle view is for near-vehicle flight, not surveying the whole planet. Cap how
+// far the camera can orbit out — beyond a few hundred km the atmosphere effect's
+// ground->space transition degrades (floating-origin precision), and that wide a
+// view is the orbital map's job. Tunable.
+const VEHICLE_VIEW_MAX_DISTANCE = 3e5
+
 /**
  * Walk up from vehicleParentId to root, collecting ancestors and their direct children.
  * Example: vehicle parentId='earth' -> returns ['earth', 'sun', 'moon']
@@ -529,7 +535,7 @@ function VehicleViewControls() {
     controlsRef.current?.update()
   })
 
-  return <OrbitControls ref={controlsRef} minDistance={SURFACE_CAMERA_MIN_HEIGHT * 2} maxDistance={1e9} />
+  return <OrbitControls ref={controlsRef} minDistance={SURFACE_CAMERA_MIN_HEIGHT * 2} maxDistance={VEHICLE_VIEW_MAX_DISTANCE} />
 }
 
 export function VehicleScene() {

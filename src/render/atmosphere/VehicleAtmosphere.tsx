@@ -3,7 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { EffectComposer } from '@react-three/postprocessing'
 import { Vector3 } from 'three'
 import type { PrecomputedTextures } from '@takram/three-atmosphere'
-import { AerialPerspective, Atmosphere, AtmosphereContext } from '@takram/three-atmosphere/r3f'
+import { AerialPerspective, Atmosphere, AtmosphereContext, Sky } from '@takram/three-atmosphere/r3f'
 import { Ellipsoid } from '@takram/three-geospatial'
 import { useTrajectoriesStore } from '../../state/trajectories'
 import { evaluateCurve } from '../../sim/curves'
@@ -95,11 +95,14 @@ function AtmosphereTransientDriver({
 /**
  * Owns the vehicle scene's EffectComposer and, for a body with an atmosphere,
  * mounts takram's `<Atmosphere>` provider with per-body LUTs + floating-origin
- * placement and the `AerialPerspective` effect (sky + aerial perspective). Airless
- * bodies get a bare composer (scene only). Our own lights + celestial bodies are
- * unchanged (decision A / D2): takram's sun/moon disks stay off — we render the
- * sim's sun/moon/planets ourselves, eclipse-aware — and our directional sun + sky
- * ambient light the scene, so takram's sunLight/skyLight stay off too.
+ * placement. The sky/atmosphere visual is the `<Sky>` MESH (SkyMaterial), which is
+ * what correctly transitions from "sky from within" to "atmosphere from space" —
+ * `AerialPerspective` is left with its default `sky:false` and only fogs geometry
+ * (this is takram's canonical pattern; `sky:true` on the effect fills the
+ * background with inscatter and doesn't recede to space). Airless bodies get a bare
+ * composer. Our own lights + celestial bodies are unchanged (decision A / D2):
+ * takram's sun/moon disks stay off — we render the sim's bodies, eclipse-aware —
+ * and our directional sun + ambient light the scene, so takram's lights stay off.
  */
 export function VehicleAtmosphere({
   bodyId,
@@ -133,9 +136,10 @@ export function VehicleAtmosphere({
   return (
     <Atmosphere textures={textures ?? undefined} ellipsoid={ellipsoid} correctAltitude>
       <AtmosphereTransientDriver bodyId={bodyId} vehicleId={vehicleId} />
+      {textures && <Sky sun={false} moon={false} />}
       <EffectComposer>
         {textures ? (
-          <AerialPerspective sky sun={false} moon={false} />
+          <AerialPerspective sun={false} moon={false} />
         ) : (
           <></>
         )}
