@@ -1,8 +1,14 @@
 # From-space planetary atmosphere — research & design (2026-06-17)
 
-How to render a planet's atmosphere **seen from outside** (orbital view, and the
-zoomed-out vehicle view), as a distinct model from takram's in-atmosphere
-aerial-perspective. Decision record + recommendation, to review before building.
+How to render the **parent planet's** atmosphere **seen from above** in the
+**vehicle view** (camera pushed up, above the shell), as a distinct model from
+takram's in-atmosphere aerial-perspective. Decision record + recommendation.
+
+**Scope (refined):** "good" atmospheric rendering happens **only in the vehicle
+view**. The orbital `Scene` canvas (orbit traces, maneuver nodes, system map) stays
+intentionally **stylized / game-like** — it's already non-photoreal, so no realistic
+atmosphere there. That means this model is **single-body** (the vehicle's parent),
+not a whole-solar-system concern, and it lives entirely in the vehicle canvas.
 
 ## Acceptance criterion — the orbital sunrise
 
@@ -28,18 +34,17 @@ The two viewpoints are different physics problems:
 - **Inside the atmosphere** (ground / low flight): you look *through* the air.
   Solved — takram `Sky` + `AerialPerspective`, driven by `worldToECEFMatrix` +
   `sunDirection`, looks great in this regime.
-- **From space** (orbital view, zoomed-out vehicle view): you look *at* a planet's
-  atmosphere edge-on — a bright **limb glow**, a blue day-side wash, a red sunset
-  ring at the terminator, against black space. takram fits this poorly here:
-  - It models **one** atmosphere via a single global `worldToECEFMatrix`; the
-    orbital view shows the **whole solar system** (Earth, Venus, Mars, Titan, gas
-    giants), each wanting its own atmosphere. One-at-a-time doesn't scale.
-  - Its aerial-perspective post pass fogs the **background/space** at our scale
-    (the maroon-fill bug), and the ground↔space transition hits documented
-    floating-point/horizon limits.
+- **From space** (zoomed-out vehicle view, camera above the shell): you look *at*
+  the parent planet's atmosphere edge-on — a bright **limb glow**, a blue day-side
+  wash, a red sunset ring at the terminator, against black space. takram fits this
+  poorly here: its aerial-perspective post pass fogs the **background/space** at our
+  scale (the maroon-fill bug), and the ground↔space transition hits documented
+  floating-point/horizon limits. Multiple attempts (sky-on-effect → Sky mesh →
+  altitude gate) didn't clear it — it's the hard transition takram's docs flag.
 
-So: a **per-planet, localized** atmosphere — exactly the user's instinct — that is
-tied to each body's model and only costs where that body is on screen.
+So: a **localized shell** atmosphere tied to the parent body's model — the user's
+instinct — that only costs where that body is on screen, swapped in for takram once
+the camera leaves the atmosphere.
 
 ## Technique landscape
 
@@ -75,7 +80,7 @@ Why this one:
 - It's the **from-space twin of takram's look**, driven by the **same**
   `atmosphere.json` params, so the two models read as one atmosphere across the
   transition.
-- **Scales** per body (one shell each), only costs where a body is on screen.
+- **Single shell** (the parent body), cheap from space (small screen coverage).
 - We have a **starting point**: the removed v1 shell (`AtmosphereShell.tsx` +
   `atmosphereScatter.ts`, in git history before the phase-1 teardown) is ~80% of
   this; the work is the optical-depth LUT + from-space compositing + day/night.
@@ -83,14 +88,15 @@ Why this one:
 
 ## Where it lives + the swap
 
-- **Orbital view** (`Scene` canvas): always the shell model — the camera is always
-  "from space" there. This is the primary home and the cleanest place to build it.
-- **Zoomed-out vehicle view**: **swap** on camera altitude. We already compute the
-  boolean in `CameraAtmosphereGate` (camera above/below `topRadius`):
-  - **below the shell** → takram aerial perspective + Sky (in-atmosphere);
-  - **above the shell** → the per-planet limb shell (and takram off).
-  Crossfade over a thin altitude band to hide the switch. This is the user's
-  "swap between the two atmospheric rendering models."
+It lives **only in the vehicle view**, swapped against takram on camera altitude —
+we already compute the boolean in `CameraAtmosphereGate` (camera above/below
+`topRadius`):
+- **below the shell** → takram aerial perspective + Sky (in-atmosphere);
+- **above the shell** → the parent-body limb shell (and takram off).
+
+Crossfade over a thin altitude band to hide the switch. This is the user's "swap
+between the two atmospheric rendering models." The orbital `Scene` canvas is out of
+scope — it stays stylized.
 
 ## Implementation sketch (our stack: R3F 9 / three r0.183 / WebGL2)
 
@@ -112,14 +118,14 @@ Why this one:
 
 ## Open questions / risks
 
-- **Q1 — LUT sharing**: one LUT per body, or one normalized LUT scaled per body?
-  (Affects bake cost with many atmospheric bodies.)
-- **Q2 — units**: reconcile the shell shader's needs with the takram-native `render`
+- **Q1 — units**: reconcile the shell shader's needs with the takram-native `render`
   section (per-km vs per-m), as with the phase-3 mapper.
-- **Q3 — crossfade**: the altitude band + blend so the vehicle-view swap isn't a pop.
-- **Q4 — multi-planet perf** in the orbital view: N shells × raymarch; the LUT and
-  small screen coverage should keep it cheap, but measure with the full solar system.
-- **Q5 — gas giants**: no surface; the shell still works (thick haze), tune params.
+- **Q2 — crossfade**: the altitude band + blend so the vehicle-view swap isn't a pop
+  (this is the trickiest UX bit — the two models must hand off seamlessly).
+- **Q3 — sun + bloom**: ensure our emissive sun disk cresting the limb reads as the
+  sunrise flare (compositing order vs bloom).
+- **Q4 — terminator quality**: the red sunset ring is the hard look to nail — it
+  needs enough samples / a good Mie phase near the grazing day/night edge.
 
 ## References
 
