@@ -9,6 +9,7 @@ import { computeArcProgressPath } from './navballInstrumentMath'
 import {
   MARKER_ICONS, MARKER_COLORS, MARKER_LABELS, HOLD_MODE_ICONS, HOLD_MODE_COLORS,
   STATE_ICONS, STATE_COLORS, STATE_LABELS, ORBIT_ICONS, ORBIT_COLORS, ORBIT_LABELS,
+  FRAME_ICONS, FRAME_COLORS, FRAME_LABELS,
 } from './navIcons'
 import type { NavGlyph } from './navGlyphs'
 import { hoverTooltip } from './tooltipStore'
@@ -338,12 +339,7 @@ export function NavballInstrument(props: NavballInstrumentProps) {
       })()}
       {/* Bottom shelf: reference frame + orbital profile + vehicle state. */}
       <Shelf top={176}>
-        <span
-          {...hoverTooltip(mode === 'surface' ? 'Surface reference frame' : 'Orbital reference frame')}
-          style={{ color: '#ffc260', fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}
-        >
-          {flightRegimeLabel(mode)}
-        </span>
+        <GlyphIcon glyph={FRAME_ICONS[mode]} size={16} color={FRAME_COLORS[mode]} title={FRAME_LABELS[mode]} />
         {orbit && (
           <GlyphIcon glyph={ORBIT_ICONS[orbit.kind]} size={16} color={ORBIT_COLORS[orbit.kind]} title={ORBIT_LABELS[orbit.kind]} />
         )}
@@ -416,10 +412,6 @@ function InstrumentArc({
       <path d={paths.progressPath} fill="none" stroke="#ffc260" strokeWidth="6" />
     </g>
   )
-}
-
-function flightRegimeLabel(mode: FlightReferenceMode) {
-  return mode === 'surface' ? 'SUR' : 'ORB'
 }
 
 export function Proximity({ rows }: ProximityProps) {

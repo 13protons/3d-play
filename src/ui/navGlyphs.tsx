@@ -108,6 +108,29 @@ export const Crashed: NavGlyph = ({ color }) => (
   </g>
 )
 
+// --- Reference-frame glyphs ----------------------------------------------
+
+/** Surface frame: a hatched ground / horizon. */
+export const SurfaceFrame: NavGlyph = ({ color }) => (
+  <g {...stroke(color)}>
+    <line x1={-9} y1={-2} x2={9} y2={-2} />
+    <line x1={-8} y1={-2} x2={-10} y2={3} />
+    <line x1={-4} y1={-2} x2={-6} y2={3} />
+    <line x1={0} y1={-2} x2={-2} y2={3} />
+    <line x1={4} y1={-2} x2={2} y2={3} />
+    <line x1={8} y1={-2} x2={6} y2={3} />
+  </g>
+)
+
+/** Orbital frame: a body with a satellite on its orbit ring. */
+export const OrbitalFrame: NavGlyph = ({ color }) => (
+  <g {...stroke(color)}>
+    <circle cx={0} cy={0} r={8.5} />
+    <circle cx={0} cy={0} r={2.8} fill={color} stroke="none" />
+    <circle cx={8.5} cy={0} r={1.9} fill={color} stroke="none" />
+  </g>
+)
+
 // --- Orbital-closure glyphs ----------------------------------------------
 
 /** Closed orbit: an ellipse around the body. */

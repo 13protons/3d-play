@@ -92,7 +92,9 @@ export interface SurfaceFrame {
 export function surfaceFrame(relativePosition: Vec3, spinAxis: Vec3): SurfaceFrame | null {
   const posMag = magnitude(relativePosition)
   const axisMag = magnitude(spinAxis)
-  if (posMag <= 0 || axisMag <= 0) return null
+  if (!Number.isFinite(posMag) || !Number.isFinite(axisMag) || posMag <= 0 || axisMag <= 0) {
+    return null
+  }
   const up = scale(relativePosition, 1 / posMag)
   const axis = scale(spinAxis, 1 / axisMag)
   const northRaw = subtract(axis, scale(up, dot(axis, up)))

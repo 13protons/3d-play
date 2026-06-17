@@ -64,9 +64,8 @@ describe('NavballInstrument', () => {
       />
     )
 
-    expect(markup).toContain('ORB') // orbital regime label (bottom shelf)
-    expect(markup).not.toContain('ORBITAL')
-    // State and orbital closure are icons (titles), not text labels.
+    expect(markup).toContain('Orbital reference frame') // frame icon (bottom shelf)
+    // State, frame, and orbital closure are icons (titles), not text labels.
     expect(markup).not.toContain('FLY')
     expect(markup).toContain('Flying')
     expect(markup).toContain('Closed orbit')
@@ -92,8 +91,7 @@ describe('NavballInstrument', () => {
       />
     )
 
-    expect(markup).toContain('SUR')
-    expect(markup).not.toContain('SURFACE')
+    expect(markup).toContain('Surface reference frame') // frame icon (bottom shelf)
     expect(markup).not.toContain('CRASH') // state shown as an icon, not text
     expect(markup).toContain('Crashed')
     expect(markup).toContain('Impact trajectory')

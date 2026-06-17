@@ -1,5 +1,5 @@
 import type { AutopilotMode } from '../sim/autopilot'
-import type { OrbitKind } from '../sim/vehicle/referenceFrame'
+import type { OrbitKind, FlightReferenceMode } from '../sim/vehicle/referenceFrame'
 import {
   Antinormal,
   Crashed,
@@ -11,10 +11,12 @@ import {
   Maneuver,
   Normal,
   OrbitClosed,
+  OrbitalFrame,
   Prograde,
   RadialIn,
   RadialOut,
   Retrograde,
+  SurfaceFrame,
   type NavGlyph,
 } from './navGlyphs'
 
@@ -79,6 +81,20 @@ export const STATE_LABELS: Record<SurfaceState, string> = {
   flying: 'Flying',
   landed: 'Landed',
   crashed: 'Crashed',
+}
+
+/** Reference frame → glyph + color + label (bottom shelf). */
+export const FRAME_ICONS: Record<FlightReferenceMode, NavGlyph> = {
+  surface: SurfaceFrame,
+  orbital: OrbitalFrame,
+}
+export const FRAME_COLORS: Record<FlightReferenceMode, string> = {
+  surface: '#ffc260',
+  orbital: '#9cd8ff',
+}
+export const FRAME_LABELS: Record<FlightReferenceMode, string> = {
+  surface: 'Surface reference frame',
+  orbital: 'Orbital reference frame',
 }
 
 /** Orbital closure → glyph + color (top shelf). */
