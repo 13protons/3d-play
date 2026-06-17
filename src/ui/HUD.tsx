@@ -9,6 +9,7 @@ import { maneuverBurnDirection, type ManeuverDeltaV, type ManeuverNode } from '.
 import { attitudeDiagnostics, type AttitudeAxisDiagnostic } from './attitudeDiagnostics'
 import { countRender } from '../render/perfCounters'
 import { useThrottledRender } from './useThrottledRender'
+import { TooltipOverlay } from './Tooltip'
 import type { VehicleControlMeta } from '../state/trajectories'
 import { WARP_RATES } from '../sim/warp'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
@@ -228,6 +229,7 @@ export function HUD() {
         &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
       </div>
       <FlightReadouts />
+      <TooltipOverlay />
     </div>
   )
 }

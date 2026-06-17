@@ -11,6 +11,7 @@ import {
   STATE_ICONS, STATE_COLORS, STATE_LABELS, ORBIT_ICONS, ORBIT_COLORS, ORBIT_LABELS,
 } from './navIcons'
 import type { NavGlyph } from './navGlyphs'
+import { hoverTooltip } from './tooltipStore'
 import { formatFlightNumber, type FlightTelemetryRow } from './flightReadout'
 import type { FlightReferenceMode, OrbitSummary } from '../sim/vehicle/referenceFrame'
 import type { AutopilotMode } from '../sim/autopilot'
@@ -81,7 +82,7 @@ function AutopilotColumn({
               <button
                 key={mode}
                 onClick={() => onSelect(mode)}
-                title={MODE_TITLES[mode] ?? mode}
+                {...hoverTooltip(MODE_TITLES[mode] ?? mode)}
                 style={{
                   width: 24,
                   height: 24,
@@ -222,6 +223,7 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
                 key={key}
                 transform={`translate(${CENTER + point.x} ${CENTER + point.y}) scale(0.85)`}
                 style={{ pointerEvents: 'auto' }}
+                {...(MARKER_LABELS[key] ? hoverTooltip(MARKER_LABELS[key]) : {})}
               >
                 {MARKER_LABELS[key] && <title>{MARKER_LABELS[key]}</title>}
                 <circle r={11} fill="rgba(0,0,0,0.55)" />
@@ -270,6 +272,7 @@ export function NavballCluster({
         alignItems: 'center',
         gap: 12,
         pointerEvents: 'none',
+        zIndex: 10, // keep the cluster (and its hover targets) above the 3D canvas
       }}
     >
       <Proximity rows={rows.slice(0, 3)} />
@@ -336,7 +339,7 @@ export function NavballInstrument(props: NavballInstrumentProps) {
       {/* Bottom shelf: reference frame + orbital profile + vehicle state. */}
       <Shelf top={176}>
         <span
-          title={mode === 'surface' ? 'Surface reference frame' : 'Orbital reference frame'}
+          {...hoverTooltip(mode === 'surface' ? 'Surface reference frame' : 'Orbital reference frame')}
           style={{ color: '#ffc260', fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}
         >
           {flightRegimeLabel(mode)}
@@ -350,10 +353,17 @@ export function NavballInstrument(props: NavballInstrumentProps) {
   )
 }
 
-/** Render a navball glyph as a standalone HTML icon. */
+/** Render a navball glyph as a standalone HTML icon, with a hover tooltip. */
 function GlyphIcon({ glyph: Glyph, size, color, title }: { glyph: NavGlyph; size: number; color: string; title?: string }) {
   return (
-    <svg width={size} height={size} viewBox="-12 -12 24 24" aria-hidden={title ? undefined : true} focusable={false}>
+    <svg
+      width={size}
+      height={size}
+      viewBox="-12 -12 24 24"
+      aria-label={title}
+      focusable={false}
+      {...(title ? hoverTooltip(title) : {})}
+    >
       {title && <title>{title}</title>}
       <Glyph color={color} />
     </svg>
@@ -387,7 +397,7 @@ function Shelf({ top, children }: { top: number; children: React.ReactNode }) {
 
 function ShelfValue({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
-    <span title={title} style={{ fontSize: 9, color: 'rgba(210,250,255,0.62)' }}>
+    <span {...(title ? hoverTooltip(title) : {})} style={{ fontSize: 9, color: 'rgba(210,250,255,0.62)' }}>
       {label} <span style={{ color: 'rgba(255,205,112,0.94)' }}>{value}</span>
     </span>
   )
