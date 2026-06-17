@@ -60,6 +60,54 @@ const MODE_TITLES: Record<string, string> = {
   maneuver: 'Maneuver',
 }
 
+// --- Circular icon cell --------------------------------------------------
+// Sizing knobs for every round icon beside the navball (autopilot buttons +
+// status badges). Tweak these two numbers to dial the whole set in:
+const CIRCLE_DIAMETER = 20 // outer diameter of the round cell, px
+const CIRCLE_GLYPH_SIZE = 13 // glyph size inside the cell, px (smaller = more padding)
+
+/** A round icon cell shared by the autopilot column and the status column.
+ * Pass `onSelect` to make it an interactive button; omit it for a static
+ * (non-interactive) badge. `active` fills the cell with its accent color. */
+function CircleIcon({
+  glyph,
+  color,
+  title,
+  active = false,
+  onSelect,
+}: {
+  glyph: NavGlyph
+  color: string
+  title: string
+  active?: boolean
+  onSelect?: () => void
+}) {
+  const cell = {
+    width: CIRCLE_DIAMETER,
+    height: CIRCLE_DIAMETER,
+    boxSizing: 'border-box' as const,
+    borderRadius: '50%',
+    display: 'grid',
+    placeItems: 'center' as const,
+    background: active ? color : 'rgba(10,16,28,0.78)',
+    border: `1px solid ${active ? color : 'rgba(255,255,255,0.22)'}`,
+  }
+  const glyphColor = active ? '#0a0e1c' : color
+  const inner = <GlyphIcon glyph={glyph} size={CIRCLE_GLYPH_SIZE} color={glyphColor} />
+  if (onSelect) {
+    return (
+      <button onClick={onSelect} {...hoverTooltip(title)} style={{ ...cell, padding: 0, cursor: 'pointer' }}>
+        {inner}
+      </button>
+    )
+  }
+  return (
+    <div {...hoverTooltip(title)} role="img" aria-label={title} style={cell}>
+      {inner}
+    </div>
+  )
+}
+
 function AutopilotColumn({
   active,
   hasNode,
@@ -77,28 +125,15 @@ function AutopilotColumn({
             if (mode === 'maneuver' && !hasNode) return null
             const Glyph = HOLD_MODE_ICONS[mode]
             if (!Glyph) return null
-            const color = HOLD_MODE_COLORS[mode] ?? '#cfe0ff'
-            const isActive = active === mode
             return (
-              <button
+              <CircleIcon
                 key={mode}
-                onClick={() => onSelect(mode)}
-                {...hoverTooltip(MODE_TITLES[mode] ?? mode)}
-                style={{
-                  width: 24,
-                  height: 24,
-                  boxSizing: 'border-box',
-                  borderRadius: '50%',
-                  display: 'grid',
-                  placeItems: 'center',
-                  padding: 0,
-                  cursor: 'pointer',
-                  background: isActive ? color : 'rgba(10,16,28,0.78)',
-                  border: `1px solid ${isActive ? color : 'rgba(255,255,255,0.22)'}`,
-                }}
-              >
-                <GlyphIcon glyph={Glyph} size={22} color={isActive ? '#0a0e1c' : color} />
-              </button>
+                glyph={Glyph}
+                color={HOLD_MODE_COLORS[mode] ?? '#cfe0ff'}
+                title={MODE_TITLES[mode] ?? mode}
+                active={active === mode}
+                onSelect={() => onSelect(mode)}
+              />
             )
           })}
         </div>
@@ -120,31 +155,9 @@ export function StatusColumn({
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center', pointerEvents: 'auto' }}>
-      <StatusBadge glyph={FRAME_ICONS[mode]} color={FRAME_COLORS[mode]} title={FRAME_LABELS[mode]} />
-      {orbit && <StatusBadge glyph={ORBIT_ICONS[orbit.kind]} color={ORBIT_COLORS[orbit.kind]} title={ORBIT_LABELS[orbit.kind]} />}
-      <StatusBadge glyph={STATE_ICONS[surfaceState]} color={STATE_COLORS[surfaceState]} title={STATE_LABELS[surfaceState]} />
-    </div>
-  )
-}
-
-function StatusBadge({ glyph, color, title }: { glyph: NavGlyph; color: string; title: string }) {
-  return (
-    <div
-      {...hoverTooltip(title)}
-      role="img"
-      aria-label={title}
-      style={{
-        width: 24,
-        height: 24,
-        boxSizing: 'border-box',
-        borderRadius: '50%',
-        display: 'grid',
-        placeItems: 'center',
-        background: 'rgba(10,16,28,0.78)',
-        border: '1px solid rgba(255,255,255,0.22)',
-      }}
-    >
-      <GlyphIcon glyph={glyph} size={20} color={color} />
+      <CircleIcon glyph={FRAME_ICONS[mode]} color={FRAME_COLORS[mode]} title={FRAME_LABELS[mode]} />
+      {orbit && <CircleIcon glyph={ORBIT_ICONS[orbit.kind]} color={ORBIT_COLORS[orbit.kind]} title={ORBIT_LABELS[orbit.kind]} />}
+      <CircleIcon glyph={STATE_ICONS[surfaceState]} color={STATE_COLORS[surfaceState]} title={STATE_LABELS[surfaceState]} />
     </div>
   )
 }
