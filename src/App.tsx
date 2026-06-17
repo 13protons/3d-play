@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { useModeStore } from './state/mode'
@@ -6,7 +6,12 @@ import { startSim, stopSim } from './state/bridge'
 import { MainMenu } from './ui/MainMenu'
 import { HudTestPage } from './ui/HudTestPage'
 import { Flight } from './modes/Flight'
-import { isKnownScenarioId, mainPath, missionPath, testHudPath } from './appRoutes'
+import { isKnownScenarioId, mainPath, missionPath, spikeAtmospherePath, testHudPath } from './appRoutes'
+
+// Lazy so the takram/postprocessing spike deps stay out of the main flight bundle.
+const AtmosphereSpikePage = lazy(() =>
+  import('./spike/AtmosphereSpike').then((m) => ({ default: m.AtmosphereSpikePage })),
+)
 
 export default function App() {
   return (
@@ -14,6 +19,14 @@ export default function App() {
       <Route path="/" element={<Navigate to={mainPath} replace />} />
       <Route path={mainPath} element={<MainRoute />} />
       <Route path={testHudPath} element={<HudTestPage />} />
+      <Route
+        path={spikeAtmospherePath}
+        element={
+          <Suspense fallback={<Shell><div>LOADING SPIKE</div></Shell>}>
+            <AtmosphereSpikePage />
+          </Suspense>
+        }
+      />
       <Route path="/mission/:scenarioId" element={<MissionRoute />} />
       <Route path="*" element={<NotFound />} />
     </Routes>

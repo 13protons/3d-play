@@ -122,21 +122,54 @@ can absorb later spec items. Building our own would be strictly worse on every
 axis that matters here. (Hillaire from scratch was the only "better" option and
 has no WebGL2 port — multi-day work for marginal gain over takram's results.)
 
-## The one real integration risk to de-risk first
+## The one real integration risk — spiked, and it did not bite
 
-Our vehicle renderer **intentionally clears the depth buffer between the planet
-pass and the vehicle pass** (`clearDepthBefore: true`, `renderLayers.ts`) — that's
-how it avoids z-fighting between a 6,371 km planet and a ~10 m rocket under one
-camera (`near: 0.1, far: 1e9`). But takram's **aerial-perspective effect reads a
-single coherent depth buffer** to fog terrain/objects. Those facts are in tension
-and could look fine in a demo yet break in our scene.
+**The risk.** Our vehicle renderer **intentionally clears the depth buffer between
+the planet pass and the vehicle pass** (`clearDepthBefore: true`, `renderLayers.ts`)
+to avoid z-fighting between a 6,371 km planet and a ~10 m rocket under one camera
+(`near: 0.1, far: 1e9`). takram's **aerial-perspective effect reconstructs world
+position from a single coherent depth buffer** (`inverseProjectionMatrix` /
+`inverseViewMatrix` / `cameraPosition` uniforms; optional `reconstructNormal`, no
+normal buffer needed) to fog terrain/objects. Those facts are in tension: the
+refactor must drop the depth clear and feed takram one coherent buffer — which
+could look fine in a demo yet z-fight in our scene.
 
-**Plan: a contained spike before the full refactor.** Add the deps, stand up a
-pmndrs `EffectComposer` in `VehicleScene` *alongside* (not replacing) the manual
-multi-pass, drop in takram's `Sky` + `AerialPerspectiveEffect`, place Earth via
-`worldToECEFMatrix` from our curve data and the sun from the emissive body, and
-see how it composites against our split-depth multi-pass. If it works, roll into
-a full plan; if the depth tension bites, we learn it cheaply.
+**The spike** (`src/spike/AtmosphereSpike.tsx`, route `/_spike/atmosphere`, isolated
+from `VehicleScene`). Stood up the exact pipeline the refactor would produce, in
+miniature: takram `<Atmosphere>` + `<AerialPerspective>` (sky + aerial perspective)
+inside a pmndrs `<EffectComposer>` with `<SunLight>`; LUTs baked at runtime on the
+GPU via `PrecomputedTexturesGenerator` (no CDN/EXR fetch); a real-scale planet
+(radius = takram's `bottomRadius` = 6,360 km, **not** 6,371 km — they must match or
+the surface floats) placed by **floating origin** (scene origin on the surface,
+`worldToECEFMatrix` a pure translation, camera near origin); and a multi-part near
+"vehicle" sharing **one coherent depth buffer** with the planet under `near:0.1
+far:1e9`. A `?log=1` toggle switches on `logarithmicDepthBuffer`.
+
+**Findings — all positive:**
+
+| Question | Result |
+|---|---|
+| takram renders in our exact stack (R3F 9.5 / three r0.183 / WebGL2)? | **Yes**, with runtime-baked LUTs — no external assets |
+| Aerial-perspective + sky compositing over real geometry, real metre scale, floating-origin placement? | **Correct** and good-looking |
+| **The flagged risk** — planet + near vehicle in one coherent depth buffer at `near:0.1 far:1e9`? | **No precision z-fighting.** 24-bit depth resolves cm-gaps at ~15 m with ~750 levels to spare; math and the spike agree |
+| Does logarithmic depth break takram's depth→position reconstruction? | **No** — atmosphere stays correct with log depth on, so it's available if ever needed |
+
+**Two red herrings, both rig artifacts (not takram):**
+
+1. *Near-object "flicker."* Initial test geometry had a body cylinder whose base was
+   **coincident** with the top plate (equal radius + overlapping height). Coincident
+   surfaces z-fight regardless of depth precision or log mode. Separating the parts
+   with clean air gaps removed it entirely — confirming the coherent buffer is fine.
+2. *Black horizon line.* A single low-poly `sphereGeometry` approximates the 6,360 km
+   limb with flat facets that sag below the true horizon by `R·½·(π/N)²` — ~7.6 km at
+   N=64 — exposing a dark grazing-ground sliver. Cranking tessellation shrank it ~60×.
+   **The real renderer never fakes a planet with one sphere** — near ground is the
+   tiled terrain (`PlanetTerrainTiles`), so the limb is the tile LOD's job.
+
+**Verdict: green light for the full pipeline refactor.** The depth tension is real
+but resolvable simply (one coherent buffer with a sane depth config; distant bodies
+in a separate non-fogged pass), and every "does it even work" unknown is retired.
+See `docs/atmosphere-pipeline-refactor-plan-2026-06-17.md` for the refactor plan.
 
 ## What landed in this PR (progress so far)
 
@@ -154,13 +187,17 @@ a full plan; if the depth tension bites, we learn it cheaply.
   when takram lands. The `atmosphere.json` schema and the per-body plugin model
   carry forward.
 
-## Follow-up work (not in this PR)
+## Follow-up work
 
-1. **Spike** the takram + `postprocessing` integration against our split-depth
-   multi-pass (the risk above).
-2. If green, **adopt the pipeline**: migrate `VehicleScene`'s manual multi-pass
-   into a pmndrs `EffectComposer`; map per-body `atmosphere.json` →
-   `AtmosphereParameters` (+ runtime LUT gen, cached per body); place bodies via
+1. ~~**Spike** the takram + `postprocessing` integration against our split-depth
+   multi-pass.~~ **Done — green** (see "spiked" section above). Deps added
+   (`@takram/three-atmosphere`, `@takram/three-geospatial`,
+   `@react-three/postprocessing`, `postprocessing`); spike lives at
+   `/_spike/atmosphere`, lazy-loaded and out of the main bundle.
+2. **Adopt the pipeline** — see the dedicated plan,
+   `docs/atmosphere-pipeline-refactor-plan-2026-06-17.md`: migrate `VehicleScene`'s
+   manual multi-pass into a pmndrs `EffectComposer`; map per-body `atmosphere.json`
+   → `AtmosphereParameters` (+ runtime LUT gen, cached per body); place bodies via
    `worldToECEFMatrix`; replace the v1 shell and ad-hoc sun light with takram's
    `Sky` / `SunDirectionalLight` / `AerialPerspectiveEffect`.
 3. **Bloom (Priority 2)** on the same composer.
