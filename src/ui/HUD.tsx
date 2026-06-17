@@ -315,6 +315,8 @@ function FlightReadouts() {
             mass: vehicleControl.mass,
           })}
           atmosphereRatio={vehicleControl.pressureRatio ?? 0}
+          // TODO: fraction of the maneuver-node ΔV delivered (remaining/total) once wired.
+          maneuverRatio={0}
           surfaceState={vehicleControl.surfaceState}
           autopilotMode={activeAutopilotMode}
           maneuverDirection={node ? maneuverBurnDirection(node) ?? undefined : undefined}

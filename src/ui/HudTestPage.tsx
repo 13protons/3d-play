@@ -123,6 +123,7 @@ export function HudTestPage() {
                 mass: params.massKg,
               })}
               atmosphereRatio={0.5}
+              maneuverRatio={0.3}
               surfaceState={params.surfaceState}
               autopilotMode={params.autopilotMode}
               orbit={orbitFromParams(params)}

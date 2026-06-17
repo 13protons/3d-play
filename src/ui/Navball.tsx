@@ -43,6 +43,8 @@ interface NavballClusterProps extends NavballProps {
   forceRatio: number;
   /** Ambient atmospheric density ratio (0 = vacuum, 1 = surface). */
   atmosphereRatio: number;
+  /** Fraction of the active maneuver's ΔV already delivered (0 if no node). */
+  maneuverRatio: number;
   surfaceState: SurfaceState;
   autopilotMode: AutopilotMode;
   orbit?: OrbitSummary;
@@ -285,6 +287,7 @@ interface NavballInstrumentProps extends NavballProps {
   throttle: number;
   forceRatio: number;
   atmosphereRatio: number;
+  maneuverRatio: number;
   surfaceState: SurfaceState;
   autopilotMode: AutopilotMode;
   orbit?: OrbitSummary;
@@ -540,6 +543,7 @@ export function NavballCluster({
   throttle,
   forceRatio,
   atmosphereRatio,
+  maneuverRatio,
   surfaceState,
   autopilotMode,
   maneuverDirection,
@@ -590,6 +594,7 @@ export function NavballCluster({
           throttle={throttle}
           forceRatio={forceRatio}
           atmosphereRatio={atmosphereRatio}
+          maneuverRatio={maneuverRatio}
           surfaceState={surfaceState}
           autopilotMode={autopilotMode}
           maneuverDirection={maneuverDirection}
@@ -606,20 +611,29 @@ export function NavballCluster({
 }
 
 export function NavballInstrument(props: NavballInstrumentProps) {
-  const { throttle, forceRatio, atmosphereRatio, orbit, bottomRows = [] } = props;
-  const throttleArc = computeArcProgressPath({
-    value: throttle,
+  const { throttle, forceRatio, atmosphereRatio, maneuverRatio, orbit, bottomRows = [] } = props;
+  // Right side mirrors the left: maneuver ΔV delivered (outer, radius 90) +
+  // throttle (inner, radius 87) — two touching thin arcs.
+  const maneuverArc = computeArcProgressPath({
+    value: maneuverRatio,
     radius: 90,
     cx: 95,
     cy: 90,
     startDegrees: 135,
     endDegrees: 45,
   });
-  // Left side splits into two thin concentric arcs that touch: g-load (outer,
-  // radius 90 to match the throttle arc) and ambient atmospheric density (inner,
-  // radius 87 — 3 apart so the 3-wide strokes meet). Both mirror the throttle.
-  const forceArc = computeArcProgressPath({
-    value: forceRatio,
+  const throttleArc = computeArcProgressPath({
+    value: throttle,
+    radius: 87,
+    cx: 95,
+    cy: 90,
+    startDegrees: 135,
+    endDegrees: 45,
+  });
+  // Left side: two touching thin concentric arcs — atmospheric density (outer,
+  // radius 90) and g-load (inner, radius 87, 3 apart so the 3-wide strokes meet).
+  const atmosphereArc = computeArcProgressPath({
+    value: atmosphereRatio,
     radius: 90,
     cx: 95,
     cy: 90,
@@ -627,8 +641,8 @@ export function NavballInstrument(props: NavballInstrumentProps) {
     endDegrees: 45,
     mirror: true,
   });
-  const atmosphereArc = computeArcProgressPath({
-    value: atmosphereRatio,
+  const forceArc = computeArcProgressPath({
+    value: forceRatio,
     radius: 87,
     cx: 95,
     cy: 90,
@@ -655,7 +669,8 @@ export function NavballInstrument(props: NavballInstrumentProps) {
       >
         <InstrumentArc paths={forceArc} width={3} trackColor='#2c4446' color='#ffc260' />
         <InstrumentArc paths={atmosphereArc} width={3} trackColor='#2c4a5c' color='#9cd8ff' />
-        <InstrumentArc paths={throttleArc} width={6} trackColor='#406568' color='#ffc260' />
+        <InstrumentArc paths={throttleArc} width={3} trackColor='#2c4446' color='#ffc260' />
+        <InstrumentArc paths={maneuverArc} width={3} trackColor='#2c4a44' color='#7ee0c0' />
       </svg>
       <div style={{ position: 'absolute', left: 10, top: 5 }}>
         <Navball {...props} />

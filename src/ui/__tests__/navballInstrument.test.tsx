@@ -73,6 +73,7 @@ describe('NavballInstrument', () => {
         throttle={0.62}
         forceRatio={0.18}
         atmosphereRatio={0.4}
+        maneuverRatio={0.25}
         surfaceState="flying"
         autopilotMode="damp"
         orbit={{ kind: 'closed', periapsisAltitude: 100_000, apoapsisAltitude: 250_000 }}
@@ -92,16 +93,17 @@ describe('NavballInstrument', () => {
     expect(markup).not.toContain('reference frame')
     expect(markup).toContain('width="190"')
     expect(markup).toContain('height="180"')
-    // Right: throttle arc (thick, radius 90, sweep 0).
-    expect(markup).toContain('A 90 90 0 0 0')
-    expect(markup).toContain('stroke-width="6"')
-    // Left: g-load arc (thin, radius 90, mirrored sweep 1) + atmosphere arc
-    // (thin, radius 87, blue). Both 3-wide so they touch.
-    expect(markup).toContain('A 90 90 0 0 1')
-    expect(markup).toContain('A 87 87 0 0 1')
-    expect(markup).toContain('stroke="#9cd8ff"')
-    expect(markup).toContain('stroke="#2c4a5c"') // atmosphere track background
+    // Four thin (3-wide) touching arcs. Right (sweep 0): maneuver ΔV outer
+    // (radius 90), throttle inner (radius 87). Left (mirrored, sweep 1):
+    // atmosphere outer (radius 90), g-load inner (radius 87).
+    expect(markup).toContain('A 90 90 0 0 0') // maneuver (right outer)
+    expect(markup).toContain('A 87 87 0 0 0') // throttle (right inner)
+    expect(markup).toContain('A 90 90 0 0 1') // atmosphere (left outer)
+    expect(markup).toContain('A 87 87 0 0 1') // g-load (left inner)
+    expect(markup).toContain('stroke="#9cd8ff"') // atmosphere
+    expect(markup).toContain('stroke="#7ee0c0"') // maneuver ΔV
     expect(markup).toContain('stroke-width="3"')
+    expect(markup).not.toContain('stroke-width="6"') // all arcs are thin now
   })
 
   it('sizes the raw navball as a 170px drawing', () => {
