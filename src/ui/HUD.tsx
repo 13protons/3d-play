@@ -27,6 +27,11 @@ const DELTA_V_AXES: { key: keyof ManeuverDeltaV; positive: string; negative: str
   { key: 'radial', positive: 'Rad+', negative: 'Rad-' },
 ]
 
+/** Fixed-decimal number with thousands separators, e.g. 141000 → "141,000". */
+function thousands(value: number, decimals = 0): string {
+  return value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+}
+
 function formatTime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
   const h = Math.floor((seconds % 86400) / 3600)
@@ -397,10 +402,10 @@ function ResourcesPanel({ control }: { control: VehicleControlMeta }) {
     : isp ? deltaVBudget(mass, mass - fuelMass, isp) : 0
   const burnLeft = flow > 0 ? fuelMass / flow : null
   const rows: { label: string; value: string; warn?: boolean }[] = [
-    { label: 'MASS', value: `${mass.toFixed(0)} kg` },
-    { label: 'FUEL', value: `${fuelMass.toFixed(0)} kg`, warn: fuelMass <= 0 },
-    { label: 'ΔV', value: `${totalDv.toFixed(0)} m/s` },
-    { label: 'FLOW', value: `${flow.toFixed(1)} kg/s` },
+    { label: 'MASS', value: `${thousands(mass)} kg` },
+    { label: 'FUEL', value: `${thousands(fuelMass)} kg`, warn: fuelMass <= 0 },
+    { label: 'ΔV', value: `${thousands(totalDv)} m/s` },
+    { label: 'FLOW', value: `${thousands(flow, 1)} kg/s` },
   ]
   if (burnLeft !== null) rows.push({ label: 'BURN', value: formatBurnDuration(burnLeft) })
 
@@ -468,7 +473,7 @@ function StagingPanel({ control }: { control: VehicleControlMeta }) {
           <span style={{ color: s.stage === currentStage ? '#9cd8ff' : 'inherit' }}>
             {s.stage === currentStage ? '▶ ' : '  '}S{s.stage}
           </span>
-          <span style={{ color: '#ffcd70' }}>{s.deltaV.toFixed(0)} m/s</span>
+          <span style={{ color: '#ffcd70' }}>{thousands(s.deltaV)} m/s</span>
         </div>
       ))}
       <StageButton enabled={!!canStage} />
