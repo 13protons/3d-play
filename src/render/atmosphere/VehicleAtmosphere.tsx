@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { EffectComposer } from '@react-three/postprocessing'
 import { Vector3 } from 'three'
@@ -93,6 +93,54 @@ function AtmosphereTransientDriver({
 }
 
 /**
+ * Reports whether the camera has climbed above the atmosphere shell (topRadius).
+ * Aerial perspective is "look through the air" — only valid from inside the
+ * atmosphere — so above the shell we switch it off and let the Sky mesh carry the
+ * from-space look (limb + black space). Hysteresis (2%/-2%) keeps orbiting near the
+ * edge from thrashing the effect pass. Camera ECEF position: the scene origin is the
+ * vehicle, so cameraECEF = cameraScenePos + (vehiclePos - bodyPos).
+ */
+function CameraAtmosphereGate({
+  bodyId,
+  vehicleId,
+  topRadius,
+  onAboveChange,
+}: {
+  bodyId: string
+  vehicleId: string
+  topRadius: number
+  onAboveChange: (above: boolean) => void
+}) {
+  const camera = useThree((s) => s.camera)
+  const aboveRef = useRef<boolean | null>(null)
+  useFrame(() => {
+    const store = useTrajectoriesStore.getState()
+    const { curves } = store
+    const t = store.getSimTime()
+    const bodyCurve = curves[bodyId]
+    const vehicleCurve = curves[vehicleId]
+    if (!bodyCurve || !vehicleCurve) return
+    const bodyPos = evaluateCurve(bodyCurve, t) as Vec3
+    const vehiclePos = evaluateCurve(vehicleCurve, t) as Vec3
+    const ex = camera.position.x + (vehiclePos[0] - bodyPos[0])
+    const ey = camera.position.y + (vehiclePos[1] - bodyPos[1])
+    const ez = camera.position.z + (vehiclePos[2] - bodyPos[2])
+    const cameraRadius = Math.hypot(ex, ey, ez)
+    const above =
+      aboveRef.current == null
+        ? cameraRadius > topRadius
+        : aboveRef.current
+          ? cameraRadius > topRadius * 0.98
+          : cameraRadius > topRadius * 1.02
+    if (above !== aboveRef.current) {
+      aboveRef.current = above
+      onAboveChange(above)
+    }
+  })
+  return null
+}
+
+/**
  * Owns the vehicle scene's EffectComposer and, for a body with an atmosphere,
  * mounts takram's `<Atmosphere>` provider with per-body LUTs + floating-origin
  * placement. The sky/atmosphere visual is the `<Sky>` MESH (SkyMaterial), which is
@@ -123,6 +171,8 @@ export function VehicleAtmosphere({
     [radius],
   )
   const textures = useAtmosphereTextures(bodyId, params)
+  // Camera above the atmosphere shell → switch off aerial perspective (see gate).
+  const [cameraAbove, setCameraAbove] = useState(false)
 
   // Airless body: composer renders the scene with no atmosphere effect.
   if (!params || !ellipsoid) {
@@ -136,9 +186,15 @@ export function VehicleAtmosphere({
   return (
     <Atmosphere textures={textures ?? undefined} ellipsoid={ellipsoid} correctAltitude>
       <AtmosphereTransientDriver bodyId={bodyId} vehicleId={vehicleId} />
+      <CameraAtmosphereGate
+        bodyId={bodyId}
+        vehicleId={vehicleId}
+        topRadius={params.topRadius}
+        onAboveChange={setCameraAbove}
+      />
       {textures && <Sky sun={false} moon={false} />}
       <EffectComposer>
-        {textures ? (
+        {textures && !cameraAbove ? (
           <AerialPerspective sun={false} moon={false} />
         ) : (
           <></>
