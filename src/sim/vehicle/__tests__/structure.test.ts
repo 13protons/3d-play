@@ -166,6 +166,25 @@ describe('VehicleStructure with a real tree', () => {
     expect(s.stage()).toEqual([]) // nothing left to stage
   })
 
+  it('flows engine sea-level thrust/Isp through to the structure by pressure ratio', () => {
+    const atmoDefs = new Map<string, PartDefinition>([
+      ['booster', { id: 'booster', dryMass: 1000, inertia: MAT3_ZERO, modules: [
+        { kind: 'engine', maxThrust: 2000, isp: 320, thrustSeaLevel: 1600, ispSeaLevel: 280 },
+        { kind: 'tank', capacity: 5000 },
+      ] }],
+    ])
+    const s = new VehicleStructure([part({ instanceId: 'b', defId: 'booster' })], atmoDefs)
+
+    // Vacuum (ratio 0) → vacuum values; sea level (ratio 1) → sea-level values.
+    expect(s.totalMaxThrust(0)).toBe(2000)
+    expect(s.isp(0)).toBe(320)
+    expect(s.totalMaxThrust(1)).toBe(1600)
+    expect(s.isp(1)).toBe(280)
+    expect(s.totalMaxThrust(0.5)).toBe(1800)
+    // Default arg is vacuum.
+    expect(s.totalMaxThrust()).toBe(2000)
+  })
+
   it('drains proportionally across multiple tanks', () => {
     const s = new VehicleStructure(
       [
