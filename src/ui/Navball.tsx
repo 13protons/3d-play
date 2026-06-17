@@ -76,12 +76,14 @@ function CircleIcon({
   color,
   title,
   active = false,
+  disabled = false,
   onSelect,
 }: {
   glyph: NavGlyph;
   color: string;
   title: string;
   active?: boolean;
+  disabled?: boolean;
   onSelect?: () => void;
 }) {
   const cell = {
@@ -93,6 +95,7 @@ function CircleIcon({
     placeItems: 'center' as const,
     background: active ? color : 'rgba(10,16,28,0.78)',
     border: `1px solid ${active ? color : 'rgba(255,255,255,0.22)'}`,
+    opacity: disabled ? 0.3 : 1,
   };
   const glyphColor = active ? '#0a0e1c' : color;
   const inner = (
@@ -106,8 +109,9 @@ function CircleIcon({
     return (
       <button
         onClick={onSelect}
+        disabled={disabled}
         {...hoverTooltip(title)}
-        style={{ ...cell, padding: 0, cursor: 'pointer' }}
+        style={{ ...cell, padding: 0, cursor: disabled ? 'not-allowed' : 'pointer' }}
       >
         {inner}
       </button>
@@ -128,15 +132,18 @@ function CircleIcon({
 function AutopilotColumn({
   active,
   hasNode,
+  flying,
   onSelect,
 }: {
   active: AutopilotMode;
   hasNode: boolean;
+  flying: boolean;
   onSelect: (mode: AutopilotMode) => void;
 }) {
   // Each button is rendered explicitly so individual icons/rows are easy to
   // reposition. Rows: Hold, prograde/retrograde, normal/antinormal,
-  // radial out/in, and (only with a node) maneuver.
+  // radial out/in, maneuver. Hold is always available; the steering modes
+  // only while flying; maneuver also needs a node.
   const rowStyle = { display: 'flex', gap: 4 } as const;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center', pointerEvents: 'auto' }}>
@@ -155,6 +162,7 @@ function AutopilotColumn({
           color={HOLD_MODE_COLORS.prograde!}
           title={MODE_TITLES.prograde}
           active={active === 'prograde'}
+          disabled={!flying}
           onSelect={() => onSelect('prograde')}
         />
         <CircleIcon
@@ -162,6 +170,7 @@ function AutopilotColumn({
           color={HOLD_MODE_COLORS.retrograde!}
           title={MODE_TITLES.retrograde}
           active={active === 'retrograde'}
+          disabled={!flying}
           onSelect={() => onSelect('retrograde')}
         />
       </div>
@@ -171,6 +180,7 @@ function AutopilotColumn({
           color={HOLD_MODE_COLORS.normal!}
           title={MODE_TITLES.normal}
           active={active === 'normal'}
+          disabled={!flying}
           onSelect={() => onSelect('normal')}
         />
         <CircleIcon
@@ -178,6 +188,7 @@ function AutopilotColumn({
           color={HOLD_MODE_COLORS.antinormal!}
           title={MODE_TITLES.antinormal}
           active={active === 'antinormal'}
+          disabled={!flying}
           onSelect={() => onSelect('antinormal')}
         />
       </div>
@@ -187,6 +198,7 @@ function AutopilotColumn({
           color={HOLD_MODE_COLORS['radial-out']!}
           title={MODE_TITLES['radial-out']}
           active={active === 'radial-out'}
+          disabled={!flying}
           onSelect={() => onSelect('radial-out')}
         />
         <CircleIcon
@@ -194,20 +206,20 @@ function AutopilotColumn({
           color={HOLD_MODE_COLORS['radial-in']!}
           title={MODE_TITLES['radial-in']}
           active={active === 'radial-in'}
+          disabled={!flying}
           onSelect={() => onSelect('radial-in')}
         />
       </div>
-      {hasNode && (
-        <div style={rowStyle}>
-          <CircleIcon
-            glyph={HOLD_MODE_ICONS.maneuver!}
-            color={HOLD_MODE_COLORS.maneuver!}
-            title={MODE_TITLES.maneuver}
-            active={active === 'maneuver'}
-            onSelect={() => onSelect('maneuver')}
-          />
-        </div>
-      )}
+      <div style={rowStyle}>
+        <CircleIcon
+          glyph={HOLD_MODE_ICONS.maneuver!}
+          color={HOLD_MODE_COLORS.maneuver!}
+          title={MODE_TITLES.maneuver}
+          active={active === 'maneuver'}
+          disabled={!flying || !hasNode}
+          onSelect={() => onSelect('maneuver')}
+        />
+      </div>
     </div>
   );
 }
@@ -529,6 +541,7 @@ export function NavballCluster({
         <AutopilotColumn
           active={autopilotMode}
           hasNode={!!hasManeuverNode}
+          flying={surfaceState === 'flying'}
           onSelect={onSelectMode}
         />
       )}
