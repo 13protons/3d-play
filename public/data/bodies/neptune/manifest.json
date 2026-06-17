@@ -3,11 +3,11 @@
   "name": "Neptune",
   "parentId": "sun",
   "physics": {
-    "mass": 1.02413e26,
-    "gm": 6.83509997e15,
+    "mass": 1.02413e+26,
+    "gm": 6835099970000000.0,
     "radius": 24622000,
     "axialTilt": 28.32,
-    "angularVelocity": 1.083e-4,
+    "angularVelocity": 0.0001083,
     "soiRadius": 86600000000
   },
   "render": {

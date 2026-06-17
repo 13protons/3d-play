@@ -3,16 +3,16 @@
   "name": "Mars",
   "parentId": "sun",
   "physics": {
-    "mass": 6.4171e23,
-    "gm": 4.2828375662e13,
+    "mass": 6.4171e+23,
+    "gm": 42828375662000.0,
     "radius": 3389500,
     "axialTilt": 25.19,
-    "angularVelocity": 7.088e-5,
+    "angularVelocity": 7.088e-05,
     "soiRadius": 577000000
   },
   "render": {
     "color": "#c65f3a",
-    "texture": "/data/textures/Martian.png",
+    "texture": "/data/bodies/mars/textures/surface.png",
     "emissive": false,
     "minimumLight": 0.03
   }

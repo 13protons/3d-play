@@ -1,0 +1,16 @@
+{
+  "$comment": "Render-side single-scattering config for Earth. All lengths in metres (scene units == metres for bodies). Coefficients are real per-metre extinction values, so no rescale is needed. Loaded over the network as a game asset; not bundled.",
+  "shellHeight": 100000,
+  "rayleigh": {
+    "coefficients": [5.8e-6, 13.5e-6, 33.1e-6],
+    "scaleHeight": 8000
+  },
+  "mie": {
+    "coefficient": 21e-6,
+    "scaleHeight": 1200,
+    "anisotropy": 0.76
+  },
+  "sunIntensity": 22,
+  "viewSamples": 16,
+  "lightSamples": 8
+}

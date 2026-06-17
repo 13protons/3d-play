@@ -3,16 +3,16 @@
   "name": "Moon",
   "parentId": "earth",
   "physics": {
-    "mass": 7.342e22,
-    "gm": 4.902800066e12,
+    "mass": 7.342e+22,
+    "gm": 4902800066000.0,
     "radius": 1737000,
     "axialTilt": 1.54,
-    "angularVelocity": 2.662e-6,
+    "angularVelocity": 2.662e-06,
     "soiRadius": 66100000
   },
   "render": {
     "color": "#C0C0C0",
-    "texture": "/data/textures/moon.png",
+    "texture": "/data/bodies/moon/textures/surface.png",
     "emissive": false,
     "minimumLight": 0.02
   }

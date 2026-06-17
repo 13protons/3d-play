@@ -9,7 +9,7 @@ import { useInputStore } from './input'
 import { useManeuverStore } from './maneuver'
 import { useVehicleStore } from './vehicle'
 import { useAutopilotStore } from './autopilot'
-import type { BodyMeta } from './trajectories'
+import type { AtmosphereRenderConfig, BodyMeta } from './trajectories'
 import type { PartInstance, VehicleAero, VehicleAttitude, VehicleEngine, VehicleResources } from '../sim/types'
 import type { TrajectoryCurve } from '../sim/types'
 import type { PartDefinition } from '../sim/vehicle/parts'
@@ -26,6 +26,43 @@ import {
 let orbitalWorker: Worker | null = null
 let vehicleWorker: Worker | null = null
 let animFrameId: number | null = null
+
+/**
+ * Load a body's plugin bundle (`/data/bodies/<id>/manifest.json`). Only the
+ * bodies a scenario references are loaded (the caller maps over
+ * `scenario.bodies`), and linked render assets — e.g. the atmosphere config —
+ * are fetched separately as game assets, never bundled into the JS. The
+ * resolved atmosphere config is attached as `atmosphereRender` for the BodyMeta
+ * mapping to pick up.
+ */
+async function loadBodyDef(id: string): Promise<Record<string, unknown>> {
+  const manifest = await fetchJsonOrNull(`/data/bodies/${id}/manifest.json`)
+  if (!manifest) throw new Error(`Failed to load body: ${id}`)
+  const render = manifest.render as Record<string, unknown> | undefined
+  const atmospherePath = render?.atmosphere
+  if (typeof atmospherePath === 'string') {
+    const atmosphere = await fetchJsonOrNull(atmospherePath)
+    if (atmosphere) manifest.atmosphereRender = atmosphere
+  }
+  return manifest
+}
+
+/**
+ * Fetch a JSON asset, returning null when it's absent. Guards against dev/SPA
+ * servers that answer a missing path with a 200 `index.html` fallback, so a
+ * missing manifest yields null (→ a clean "Failed to load body" error) rather
+ * than an HTML parse failure, and an optional missing asset stays optional.
+ */
+async function fetchJsonOrNull(url: string): Promise<Record<string, unknown> | null> {
+  const resp = await fetch(url)
+  if (!resp.ok) return null
+  if (!(resp.headers.get('content-type') ?? '').includes('json')) return null
+  try {
+    return (await resp.json()) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
 
 // Bridge-owned clock
 /** Max real-time advanced per frame (s) — caps backgrounded-tab catch-up. */
@@ -100,13 +137,7 @@ export async function startSim(scenarioId: string): Promise<void> {
   const isJplEclipticFrame = scenario.coordinateFrame === 'jpl-ecliptic'
 
   const bodyIds = Object.keys(scenario.bodies)
-  const bodyDefs = await Promise.all(
-    bodyIds.map(async (id: string) => {
-      const resp = await fetch(`/data/bodies/${id}.json`)
-      if (!resp.ok) throw new Error(`Failed to load body: ${id} (${resp.status})`)
-      return resp.json()
-    }),
-  )
+  const bodyDefs = await Promise.all(bodyIds.map(loadBodyDef))
 
   // Populate body metadata in the trajectory store
   const bodyMetas: BodyMeta[] = bodyDefs.map(
@@ -127,6 +158,7 @@ export async function startSim(scenarioId: string): Promise<void> {
         texture: render.texture as string | undefined,
         emissive: (render.emissive as boolean) ?? false,
         minimumLight: (render.minimumLight as number | undefined) ?? 0,
+        atmosphereRender: def.atmosphereRender as AtmosphereRenderConfig | undefined,
       }
     },
   )

@@ -3,16 +3,16 @@
   "name": "Saturn",
   "parentId": "sun",
   "physics": {
-    "mass": 5.6834e26,
-    "gm": 3.7931206234e16,
+    "mass": 5.6834e+26,
+    "gm": 3.7931206234e+16,
     "radius": 58232000,
     "axialTilt": 26.73,
-    "angularVelocity": 1.6379e-4,
+    "angularVelocity": 0.00016379,
     "soiRadius": 54800000000
   },
   "render": {
     "color": "#c8b27a",
-    "texture": "/data/textures/saturn.png",
+    "texture": "/data/bodies/saturn/textures/surface.png",
     "emissive": false,
     "minimumLight": 0.03
   }

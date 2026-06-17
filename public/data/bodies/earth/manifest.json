@@ -12,9 +12,10 @@
   },
   "render": {
     "color": "#4169E1",
-    "texture": "/data/textures/earthish.png",
+    "texture": "/data/bodies/earth/textures/surface.png",
     "emissive": false,
-    "minimumLight": 0.04
+    "minimumLight": 0.04,
+    "atmosphere": "/data/bodies/earth/atmosphere.json"
   },
   "atmosphere": {
     "loadRadiusMultiplier": 1.25,

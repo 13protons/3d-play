@@ -32,6 +32,32 @@ export interface VehicleControlMeta {
   centerOfPressure?: [number, number, number]
 }
 
+/**
+ * Render-side atmosphere config, loaded as a per-body game asset (e.g.
+ * `/data/bodies/<id>/atmosphere.json`) — distinct from the physics
+ * `InlineAtmosphere` the sim worker uses for drag. All lengths are in metres
+ * (scene units == metres for bodies), so the per-metre scattering coefficients
+ * apply directly with no rescale.
+ */
+export interface AtmosphereRenderConfig {
+  /** Atmosphere top above the surface, in metres — radius of the scattering shell. */
+  shellHeight: number
+  rayleigh: {
+    /** Per-metre Rayleigh scattering coefficients, RGB. */
+    coefficients: [number, number, number]
+    scaleHeight: number
+  }
+  mie: {
+    coefficient: number
+    scaleHeight: number
+    /** Henyey-Greenstein anisotropy g (forward-scatter sun glow), 0..1. */
+    anisotropy: number
+  }
+  sunIntensity: number
+  viewSamples: number
+  lightSamples: number
+}
+
 export interface BodyMeta {
   id: string
   name: string
@@ -46,6 +72,8 @@ export interface BodyMeta {
   texture?: string
   emissive: boolean
   minimumLight: number
+  /** Present only for bodies whose plugin bundle links an atmosphere asset. */
+  atmosphereRender?: AtmosphereRenderConfig
 }
 
 interface TrajectoriesState {

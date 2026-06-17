@@ -3,11 +3,11 @@
   "name": "Uranus",
   "parentId": "sun",
   "physics": {
-    "mass": 8.6810e25,
-    "gm": 5.7939506103e15,
+    "mass": 8.681e+25,
+    "gm": 5793950610300000.0,
     "radius": 25362000,
     "axialTilt": 97.77,
-    "angularVelocity": 1.012e-4,
+    "angularVelocity": 0.0001012,
     "soiRadius": 51800000000
   },
   "render": {

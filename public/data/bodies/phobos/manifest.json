@@ -3,11 +3,11 @@
   "name": "Phobos",
   "parentId": "mars",
   "physics": {
-    "mass": 1.0659e16,
+    "mass": 1.0659e+16,
     "gm": 711338.337,
     "radius": 11266,
     "axialTilt": 0,
-    "angularVelocity": 2.280e-4,
+    "angularVelocity": 0.000228,
     "soiRadius": 16000
   },
   "render": {

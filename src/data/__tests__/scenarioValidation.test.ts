@@ -6,7 +6,7 @@ import {
 } from '../scenarioValidation'
 import sunEarthMoon from '../../../public/data/scenarios/sun-earth-moon.json'
 import innerSolarSystem from '../../../public/data/scenarios/inner-solar-system.json'
-import earth from '../../../public/data/bodies/earth.json'
+import earth from '../../../public/data/bodies/earth/manifest.json'
 
 describe('validateScenarioAssets', () => {
   it.each([
