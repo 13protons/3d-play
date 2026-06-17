@@ -60,11 +60,12 @@ deep space"**:
   vehicle. These share one depth buffer and are composited by `AerialPerspective`.
   The spike proved cm-scale parts and a 6,360 km surface coexist here without
   precision z-fighting at `near:0.1 far:1e9`.
-- **Deep space (sun/moon/stars):** takram renders its own atmosphere-aware sun, moon,
-  and stars, so in vehicle view we drop our emissive-sun disk (`projectDistantSphere`)
-  and drei `<Stars>` and let takram own them. Distant *planet disks* (other planets)
-  still render as geometry and are correctly fogged by the `topRadius`-bounded
-  integral — no exclusion pass needed (see D2 / Q1).
+- **Celestial bodies stay ours.** takram knows only a generic `sunDirection` + one
+  generic `moonDirection` — it has no concept of our solar system, so it cannot render
+  the sim's sun/moon/planets (and its sun/moon would be un-positioned, un-textured, and
+  not eclipse-aware). All bodies remain our sim-driven, textured, occlusion-aware
+  geometry, rendered into the coherent buffer as today, and are correctly fogged by the
+  `topRadius`-bounded integral — no exclusion pass needed (see D2 / Q1).
 
 ## Key design decisions
 
@@ -102,17 +103,24 @@ reconstruction) — only adopt it if a real vehicle exposes sub-mm part precisio
 issues the standard buffer can't hold. Prefer instead a **sane far plane for the
 fogged pass** (and let takram own sun/moon/stars, D2).
 
-### D2 — Distant bodies
+### D2 — Bodies vs. takram's sky
+**takram owns the sky scattering + aerial perspective only; we own every celestial
+body.** takram's sky model knows a single generic `sunDirection` and one generic
+`moonDirection` — it has no API for arbitrary solar-system bodies, and its sun/moon
+would not be sim-positioned, textured, or eclipse-aware. So all bodies (sun, moon,
+planets) stay our geometry, sim-driven and occlusion-aware, rendered into the coherent
+buffer as today. We feed takram our `sunDirection` (and optionally `moonDirection` for
+night) for the scattering, and **disable takram's sun/moon disks** (`sun:false,
+moon:false`) — the bright circumsolar *glow* is still rendered (it's inscatter,
+independent of the disk), so no second sun.
+
 takram's aerial perspective integrates scattering only between the camera and where
-the view ray exits `topRadius`, so a distant body disk (drawn at a fake ~5e8 m) is
-fogged by *only the real atmosphere along its ray* — physically correct: reddened
-near the horizon, untouched from orbit. So distant bodies do **not** need a
-fog-exclusion pass. The real concern is **duplication**: takram renders its own
-(atmosphere-aware) sun, moon, and stars, so in vehicle view we drop our emissive-sun
-disk (`projectDistantSphere`) and drei `<Stars>` and let takram own them; everything
-else (parent body, other-planet disks, terrain, vehicle) flows through the one
-coherent buffer and the effect. Add a fog-exclusion overlay pass only if validation
-(`sun-earth-moon` Moon-from-surface, `inner-solar-system`) shows a body looks wrong.
+the view ray exits `topRadius`, so our body disks (the sun drawn at a fake ~5e8 m,
+distant planets) are fogged by *only the real atmosphere along the ray* — physically
+correct: our sun reddens/dims near the horizon for free, untouched from orbit. **No
+fog-exclusion pass needed.** Add one only if validation (`sun-earth-moon`
+Moon-from-surface, `inner-solar-system`) shows a body looks wrong. Stars: keep drei's
+for now; takram's twilight-fading stars are a later nicety, not a body.
 
 ### D3 — The `render` section → `AtmosphereParameters` map
 The `render` section is a **direct serialization of takram's params** (Q2 resolved:
@@ -173,11 +181,14 @@ gating `SunLight` intensity with the existing `isSunOccluded` check.
    Unit-tested pure mapping function; calibrate Earth against `AtmosphereParameters.DEFAULT`.
 4. **Place + light.** Wire `worldToECEFMatrix` + `sunDirection` per frame (D5);
    swap in `SunLight` + `skyLight`, preserve eclipse gating (D6).
-5. **Atmosphere on.** Add `Sky` + `AerialPerspective`; confirm aerial perspective over
-   terrain + vehicle and the sky/horizon. Tune exposure/tone-map. Confirm the
-   `topRadius`-bounded fog handles distant bodies (Q1) and drop our sun-disk/drei stars.
+5. **Atmosphere on.** Add `Sky` + `AerialPerspective` driven by our `sunDirection`,
+   with takram's sun/moon disks **off** (`sun:false, moon:false`); keep all our body
+   rendering. Confirm aerial perspective over terrain + vehicle and the sky/horizon,
+   and that the `topRadius`-bounded fog reddens our sun at the horizon (Q1). Tune
+   exposure/tone-map.
 6. **Validate distant bodies / multi-body** (D2): Moon-from-Earth, `inner-solar-system`,
-   eclipse gating. Add a fog-exclusion overlay pass only if something looks wrong.
+   eclipse gating still correct. Add a fog-exclusion overlay pass only if something
+   looks wrong.
 7. **Spike teardown.** Remove `/_spike/atmosphere` + its menu link once the real path
    lands (or keep as a dev sandbox — decide at the end).
 
