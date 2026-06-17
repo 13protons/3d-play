@@ -28,6 +28,8 @@ let vehicleWorker: Worker | null = null
 let animFrameId: number | null = null
 
 // Bridge-owned clock
+/** Max real-time advanced per frame (s) — caps backgrounded-tab catch-up. */
+const MAX_FRAME_DELTA = 0.25
 let simTime = 0
 let warpRate = 1
 let lastWallTime = 0
@@ -335,7 +337,13 @@ export async function startSim(scenarioId: string): Promise<void> {
 
   function loop() {
     const now = performance.now()
-    const wallDelta = (now - lastWallTime) / 1000
+    // Clamp the wall-clock delta: a backgrounded tab pauses rAF, so on refocus
+    // `now - lastWallTime` can be minutes. Unclamped, that single frame would
+    // hand the workers an enormous step (the attitude integrator substeps at
+    // 1/60 s and would grind synchronously, hanging the tab). Capping it means
+    // the sim effectively idles while hidden and resumes with a small hitch
+    // rather than fast-forwarding. Normal slow frames stay well under the cap.
+    const wallDelta = Math.min((now - lastWallTime) / 1000, MAX_FRAME_DELTA)
     lastWallTime = now
 
     // Flush input commands (warp changes)
