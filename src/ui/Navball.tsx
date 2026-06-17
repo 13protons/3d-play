@@ -7,7 +7,7 @@ import {
 } from './navballMath'
 import { computeArcProgressPath } from './navballInstrumentMath'
 import {
-  MARKER_ICONS, MARKER_COLORS, HOLD_MODE_ICONS, HOLD_MODE_COLORS,
+  MARKER_ICONS, MARKER_COLORS, MARKER_LABELS, HOLD_MODE_ICONS, HOLD_MODE_COLORS,
   STATE_ICONS, STATE_COLORS, STATE_LABELS, ORBIT_ICONS, ORBIT_COLORS, ORBIT_LABELS,
 } from './navIcons'
 import type { NavGlyph } from './navGlyphs'
@@ -221,7 +221,9 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
               <g
                 key={key}
                 transform={`translate(${CENTER + point.x} ${CENTER + point.y}) scale(0.85)`}
+                style={{ pointerEvents: 'auto' }}
               >
+                {MARKER_LABELS[key] && <title>{MARKER_LABELS[key]}</title>}
                 <circle r={11} fill="rgba(0,0,0,0.55)" />
                 <Glyph color={color} />
               </g>
@@ -321,15 +323,24 @@ export function NavballInstrument(props: NavballInstrumentProps) {
         <Navball {...props} />
       </div>
       {/* Top shelf: apoapsis then periapsis. */}
-      {orbit && (
-        <Shelf top={-2}>
-          <ShelfValue label="AP" value={orbit.apoapsisAltitude === null ? '--' : formatFlightNumber(orbit.apoapsisAltitude, 'm')} />
-          <ShelfValue label="PE" value={orbit.periapsisAltitude < 0 ? '--' : formatFlightNumber(orbit.periapsisAltitude, 'm')} />
-        </Shelf>
-      )}
+      {orbit && (() => {
+        const ap = orbit.apoapsisAltitude === null ? '--' : formatFlightNumber(orbit.apoapsisAltitude, 'm')
+        const pe = orbit.periapsisAltitude < 0 ? '--' : formatFlightNumber(orbit.periapsisAltitude, 'm')
+        return (
+          <Shelf top={-2}>
+            <ShelfValue label="AP" value={ap} title={`Apoapsis: ${ap}`} />
+            <ShelfValue label="PE" value={pe} title={`Periapsis: ${pe}`} />
+          </Shelf>
+        )
+      })()}
       {/* Bottom shelf: reference frame + orbital profile + vehicle state. */}
       <Shelf top={176}>
-        <span style={{ color: '#ffc260', fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>{flightRegimeLabel(mode)}</span>
+        <span
+          title={mode === 'surface' ? 'Surface reference frame' : 'Orbital reference frame'}
+          style={{ color: '#ffc260', fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}
+        >
+          {flightRegimeLabel(mode)}
+        </span>
         {orbit && (
           <GlyphIcon glyph={ORBIT_ICONS[orbit.kind]} size={16} color={ORBIT_COLORS[orbit.kind]} title={ORBIT_LABELS[orbit.kind]} />
         )}
@@ -366,6 +377,7 @@ function Shelf({ top, children }: { top: number; children: React.ReactNode }) {
         border: '1px solid rgba(210,225,255,0.22)',
         borderRadius: 10,
         whiteSpace: 'nowrap',
+        pointerEvents: 'auto', // so the per-item hover tooltips register
       }}
     >
       {children}
@@ -373,9 +385,9 @@ function Shelf({ top, children }: { top: number; children: React.ReactNode }) {
   )
 }
 
-function ShelfValue({ label, value }: { label: string; value: string }) {
+function ShelfValue({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
-    <span style={{ fontSize: 9, color: 'rgba(210,250,255,0.62)' }}>
+    <span title={title} style={{ fontSize: 9, color: 'rgba(210,250,255,0.62)' }}>
       {label} <span style={{ color: 'rgba(255,205,112,0.94)' }}>{value}</span>
     </span>
   )

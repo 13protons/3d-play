@@ -98,6 +98,17 @@ export const ORBIT_LABELS: Record<OrbitKind, string> = {
   open: 'Escape trajectory',
 }
 
+/** Marker-key → hover label (keys match navballMath's marker set). */
+export const MARKER_LABELS: Record<string, string> = {
+  prograde: 'Prograde',
+  retrograde: 'Retrograde',
+  normal: 'Normal',
+  antiNormal: 'Anti-normal',
+  radialOut: 'Radial out',
+  radialIn: 'Radial in',
+  maneuver: 'Maneuver',
+}
+
 /** Marker-key → color (keys match navballMath's marker set). */
 export const MARKER_COLORS: Record<string, string> = {
   prograde: '#9cff8f',
