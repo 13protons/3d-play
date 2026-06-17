@@ -4,67 +4,69 @@ import {
   visibleNavballSegments,
   type Quaternion,
   type Vec3,
-} from './navballMath'
-import { computeArcProgressPath } from './navballInstrumentMath'
+} from './navballMath';
+import { computeArcProgressPath } from './navballInstrumentMath';
 import {
-  MARKER_ICONS, MARKER_COLORS, MARKER_LABELS, HOLD_MODE_ICONS, HOLD_MODE_COLORS,
-  STATE_ICONS, STATE_COLORS, STATE_LABELS, ORBIT_ICONS, ORBIT_COLORS, ORBIT_LABELS,
-  FRAME_ICONS, FRAME_COLORS, FRAME_LABELS,
-} from './navIcons'
-import type { NavGlyph } from './navGlyphs'
-import { hoverTooltip } from './tooltipStore'
-import { formatFlightNumber, type FlightTelemetryRow } from './flightReadout'
-import type { FlightReferenceMode, OrbitSummary } from '../sim/vehicle/referenceFrame'
-import type { AutopilotMode } from '../sim/autopilot'
+  MARKER_ICONS,
+  MARKER_COLORS,
+  MARKER_LABELS,
+  HOLD_MODE_ICONS,
+  HOLD_MODE_COLORS,
+  STATE_ICONS,
+  STATE_COLORS,
+  STATE_LABELS,
+  ORBIT_ICONS,
+  ORBIT_COLORS,
+  ORBIT_LABELS,
+  FRAME_ICONS,
+  FRAME_COLORS,
+  FRAME_LABELS,
+} from './navIcons';
+import type { NavGlyph } from './navGlyphs';
+import { hoverTooltip } from './tooltipStore';
+import { formatFlightNumber, type FlightTelemetryRow } from './flightReadout';
+import type { FlightReferenceMode, OrbitSummary } from '../sim/vehicle/referenceFrame';
+import type { AutopilotMode } from '../sim/autopilot';
 
 interface NavballProps {
-  orientation: Quaternion
-  relativePosition: Vec3
-  relativeVelocity: Vec3
-  parentRotationAxis: Vec3
-  mode: FlightReferenceMode
-  maneuverDirection?: Vec3
+  orientation: Quaternion;
+  relativePosition: Vec3;
+  relativeVelocity: Vec3;
+  parentRotationAxis: Vec3;
+  mode: FlightReferenceMode;
+  maneuverDirection?: Vec3;
   /** True orbital-plane normal (inertial). Used for the normal markers so they
    * stay correct near the surface where the surface-relative velocity ≈ 0. */
-  orbitNormal?: Vec3
+  orbitNormal?: Vec3;
 }
 
 interface NavballClusterProps extends NavballProps {
-  rows: FlightTelemetryRow[]
-  throttle: number
-  forceRatio: number
-  surfaceState: SurfaceState
-  autopilotMode: AutopilotMode
-  orbit?: OrbitSummary
-  onSelectMode?: (mode: AutopilotMode) => void
-  hasManeuverNode?: boolean
+  rows: FlightTelemetryRow[];
+  throttle: number;
+  forceRatio: number;
+  surfaceState: SurfaceState;
+  autopilotMode: AutopilotMode;
+  orbit?: OrbitSummary;
+  onSelectMode?: (mode: AutopilotMode) => void;
+  hasManeuverNode?: boolean;
 }
-
-/** Autopilot modes as matched +/- pairs (top to bottom), Hold and Man as singles. */
-const AUTOPILOT_GROUPS: AutopilotMode[][] = [
-  ['damp'],
-  ['prograde', 'retrograde'],
-  ['normal', 'antinormal'],
-  ['radial-out', 'radial-in'],
-  ['maneuver'],
-]
 
 const MODE_TITLES: Record<string, string> = {
-  damp: 'Hold (kill rotation)',
-  prograde: 'Prograde',
-  retrograde: 'Retrograde',
-  normal: 'Normal',
-  antinormal: 'Anti-normal',
+  'damp': 'Hold (kill rotation)',
+  'prograde': 'Prograde',
+  'retrograde': 'Retrograde',
+  'normal': 'Normal',
+  'antinormal': 'Anti-normal',
   'radial-out': 'Radial out',
   'radial-in': 'Radial in',
-  maneuver: 'Maneuver',
-}
+  'maneuver': 'Maneuver',
+};
 
 // --- Circular icon cell --------------------------------------------------
 // Sizing knobs for every round icon beside the navball (autopilot buttons +
 // status badges). Tweak these two numbers to dial the whole set in:
-const CIRCLE_DIAMETER = 20 // outer diameter of the round cell, px
-const CIRCLE_GLYPH_SIZE = 13 // glyph size inside the cell, px (smaller = more padding)
+const CIRCLE_DIAMETER = 24; // outer diameter of the round cell, px
+const CIRCLE_GLYPH_SIZE = 16; // glyph size inside the cell, px (smaller = more padding)
 
 /** A round icon cell shared by the autopilot column and the status column.
  * Pass `onSelect` to make it an interactive button; omit it for a static
@@ -76,11 +78,11 @@ function CircleIcon({
   active = false,
   onSelect,
 }: {
-  glyph: NavGlyph
-  color: string
-  title: string
-  active?: boolean
-  onSelect?: () => void
+  glyph: NavGlyph;
+  color: string;
+  title: string;
+  active?: boolean;
+  onSelect?: () => void;
 }) {
   const cell = {
     width: CIRCLE_DIAMETER,
@@ -91,21 +93,36 @@ function CircleIcon({
     placeItems: 'center' as const,
     background: active ? color : 'rgba(10,16,28,0.78)',
     border: `1px solid ${active ? color : 'rgba(255,255,255,0.22)'}`,
-  }
-  const glyphColor = active ? '#0a0e1c' : color
-  const inner = <GlyphIcon glyph={glyph} size={CIRCLE_GLYPH_SIZE} color={glyphColor} />
+  };
+  const glyphColor = active ? '#0a0e1c' : color;
+  const inner = (
+    <GlyphIcon
+      glyph={glyph}
+      size={CIRCLE_GLYPH_SIZE}
+      color={glyphColor}
+    />
+  );
   if (onSelect) {
     return (
-      <button onClick={onSelect} {...hoverTooltip(title)} style={{ ...cell, padding: 0, cursor: 'pointer' }}>
+      <button
+        onClick={onSelect}
+        {...hoverTooltip(title)}
+        style={{ ...cell, padding: 0, cursor: 'pointer' }}
+      >
         {inner}
       </button>
-    )
+    );
   }
   return (
-    <div {...hoverTooltip(title)} role="img" aria-label={title} style={cell}>
+    <div
+      {...hoverTooltip(title)}
+      role='img'
+      aria-label={title}
+      style={cell}
+    >
       {inner}
     </div>
-  )
+  );
 }
 
 function AutopilotColumn({
@@ -113,33 +130,86 @@ function AutopilotColumn({
   hasNode,
   onSelect,
 }: {
-  active: AutopilotMode
-  hasNode: boolean
-  onSelect: (mode: AutopilotMode) => void
+  active: AutopilotMode;
+  hasNode: boolean;
+  onSelect: (mode: AutopilotMode) => void;
 }) {
+  // Each button is rendered explicitly so individual icons/rows are easy to
+  // reposition. Rows: Hold, prograde/retrograde, normal/antinormal,
+  // radial out/in, and (only with a node) maneuver.
+  const rowStyle = { display: 'flex', gap: 4 } as const;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center', pointerEvents: 'auto' }}>
-      {AUTOPILOT_GROUPS.map((group, index) => (
-        <div key={index} style={{ display: 'flex', gap: 4 }}>
-          {group.map((mode) => {
-            if (mode === 'maneuver' && !hasNode) return null
-            const Glyph = HOLD_MODE_ICONS[mode]
-            if (!Glyph) return null
-            return (
-              <CircleIcon
-                key={mode}
-                glyph={Glyph}
-                color={HOLD_MODE_COLORS[mode] ?? '#cfe0ff'}
-                title={MODE_TITLES[mode] ?? mode}
-                active={active === mode}
-                onSelect={() => onSelect(mode)}
-              />
-            )
-          })}
+      <div style={rowStyle}>
+        <CircleIcon
+          glyph={HOLD_MODE_ICONS.damp!}
+          color={HOLD_MODE_COLORS.damp!}
+          title={MODE_TITLES.damp}
+          active={active === 'damp'}
+          onSelect={() => onSelect('damp')}
+        />
+      </div>
+      <div style={rowStyle}>
+        <CircleIcon
+          glyph={HOLD_MODE_ICONS.prograde!}
+          color={HOLD_MODE_COLORS.prograde!}
+          title={MODE_TITLES.prograde}
+          active={active === 'prograde'}
+          onSelect={() => onSelect('prograde')}
+        />
+        <CircleIcon
+          glyph={HOLD_MODE_ICONS.retrograde!}
+          color={HOLD_MODE_COLORS.retrograde!}
+          title={MODE_TITLES.retrograde}
+          active={active === 'retrograde'}
+          onSelect={() => onSelect('retrograde')}
+        />
+      </div>
+      <div style={rowStyle}>
+        <CircleIcon
+          glyph={HOLD_MODE_ICONS.normal!}
+          color={HOLD_MODE_COLORS.normal!}
+          title={MODE_TITLES.normal}
+          active={active === 'normal'}
+          onSelect={() => onSelect('normal')}
+        />
+        <CircleIcon
+          glyph={HOLD_MODE_ICONS.antinormal!}
+          color={HOLD_MODE_COLORS.antinormal!}
+          title={MODE_TITLES.antinormal}
+          active={active === 'antinormal'}
+          onSelect={() => onSelect('antinormal')}
+        />
+      </div>
+      <div style={rowStyle}>
+        <CircleIcon
+          glyph={HOLD_MODE_ICONS['radial-out']!}
+          color={HOLD_MODE_COLORS['radial-out']!}
+          title={MODE_TITLES['radial-out']}
+          active={active === 'radial-out'}
+          onSelect={() => onSelect('radial-out')}
+        />
+        <CircleIcon
+          glyph={HOLD_MODE_ICONS['radial-in']!}
+          color={HOLD_MODE_COLORS['radial-in']!}
+          title={MODE_TITLES['radial-in']}
+          active={active === 'radial-in'}
+          onSelect={() => onSelect('radial-in')}
+        />
+      </div>
+      {hasNode && (
+        <div style={rowStyle}>
+          <CircleIcon
+            glyph={HOLD_MODE_ICONS.maneuver!}
+            color={HOLD_MODE_COLORS.maneuver!}
+            title={MODE_TITLES.maneuver}
+            active={active === 'maneuver'}
+            onSelect={() => onSelect('maneuver')}
+          />
         </div>
-      ))}
+      )}
     </div>
-  )
+  );
 }
 
 /** Vehicle-status indicators stacked beside the navball (frame, orbit, state),
@@ -149,27 +219,41 @@ export function StatusColumn({
   orbit,
   surfaceState,
 }: {
-  mode: FlightReferenceMode
-  orbit?: OrbitSummary
-  surfaceState: SurfaceState
+  mode: FlightReferenceMode;
+  orbit?: OrbitSummary;
+  surfaceState: SurfaceState;
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center', pointerEvents: 'auto' }}>
-      <CircleIcon glyph={FRAME_ICONS[mode]} color={FRAME_COLORS[mode]} title={FRAME_LABELS[mode]} />
-      {orbit && <CircleIcon glyph={ORBIT_ICONS[orbit.kind]} color={ORBIT_COLORS[orbit.kind]} title={ORBIT_LABELS[orbit.kind]} />}
-      <CircleIcon glyph={STATE_ICONS[surfaceState]} color={STATE_COLORS[surfaceState]} title={STATE_LABELS[surfaceState]} />
+      <CircleIcon
+        glyph={FRAME_ICONS[mode]}
+        color={FRAME_COLORS[mode]}
+        title={FRAME_LABELS[mode]}
+      />
+      {orbit && (
+        <CircleIcon
+          glyph={ORBIT_ICONS[orbit.kind]}
+          color={ORBIT_COLORS[orbit.kind]}
+          title={ORBIT_LABELS[orbit.kind]}
+        />
+      )}
+      <CircleIcon
+        glyph={STATE_ICONS[surfaceState]}
+        color={STATE_COLORS[surfaceState]}
+        title={STATE_LABELS[surfaceState]}
+      />
     </div>
-  )
+  );
 }
 
 interface NavballInstrumentProps extends NavballProps {
-  throttle: number
-  forceRatio: number
-  surfaceState: SurfaceState
-  autopilotMode: AutopilotMode
-  orbit?: OrbitSummary
+  throttle: number;
+  forceRatio: number;
+  surfaceState: SurfaceState;
+  autopilotMode: AutopilotMode;
+  orbit?: OrbitSummary;
   /** Values shown on the bottom shelf (ALT/VEL), mirroring AP/PE on top. */
-  bottomRows?: FlightTelemetryRow[]
+  bottomRows?: FlightTelemetryRow[];
 }
 
 /** Full names for the bottom-shelf abbreviations (hover tooltips). */
@@ -177,24 +261,31 @@ const BOTTOM_SHELF_TITLES: Record<string, string> = {
   ALT: 'Altitude',
   VEL: 'Velocity',
   VERT: 'Vertical speed',
-}
+};
 
 interface ProximityProps {
-  rows: FlightTelemetryRow[]
+  rows: FlightTelemetryRow[];
 }
 
 interface AttitudeProps {
-  rows: FlightTelemetryRow[]
+  rows: FlightTelemetryRow[];
 }
 
-type SurfaceState = 'flying' | 'landed' | 'crashed'
+type SurfaceState = 'flying' | 'landed' | 'crashed';
 
-const RADIUS = 85
-const VISIBLE_RADIUS = 83.5
-const SIZE = 170
-const CENTER = SIZE / 2
+const RADIUS = 85;
+const VISIBLE_RADIUS = 83.5;
+const SIZE = 170;
+const CENTER = SIZE / 2;
 
-export function Navball({ orientation, relativePosition, relativeVelocity, parentRotationAxis, maneuverDirection, orbitNormal }: NavballProps) {
+export function Navball({
+  orientation,
+  relativePosition,
+  relativeVelocity,
+  parentRotationAxis,
+  maneuverDirection,
+  orbitNormal,
+}: NavballProps) {
   const state = computeNavballState({
     orientation,
     relativePosition,
@@ -203,17 +294,18 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
     radius: RADIUS,
     maneuverDirection,
     orbitNormal,
-  })
-  const toPath = (segment: { x: number; y: number }[]) => segment
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${CENTER + point.x} ${CENTER + point.y}`)
-    .join(' ')
+  });
+  const toPath = (segment: { x: number; y: number }[]) =>
+    segment.map((point, index) => `${index === 0 ? 'M' : 'L'} ${CENTER + point.x} ${CENTER + point.y}`).join(' ');
   const horizonPaths = visibleNavballSegments(state.horizon)
     .filter((segment) => segment.length > 1)
-    .map(toPath)
+    .map(toPath);
   const meridianPaths = state.meridians.flatMap((meridian) =>
-    visibleNavballSegments(meridian).filter((segment) => segment.length > 1).map(toPath),
-  )
-  const skyPath = state.sky.length > 1 ? `${toPath(state.sky)} Z` : null
+    visibleNavballSegments(meridian)
+      .filter((segment) => segment.length > 1)
+      .map(toPath),
+  );
+  const skyPath = state.sky.length > 1 ? `${toPath(state.sky)} Z` : null;
 
   return (
     <div
@@ -223,66 +315,125 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
         pointerEvents: 'none',
       }}
     >
-      <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label="Orbital navball">
+      <svg
+        width={SIZE}
+        height={SIZE}
+        viewBox={`0 0 ${SIZE} ${SIZE}`}
+        role='img'
+        aria-label='Orbital navball'
+      >
         <defs>
-          <clipPath id="navball-clip">
-            <circle cx={CENTER} cy={CENTER} r={RADIUS} />
+          <clipPath id='navball-clip'>
+            <circle
+              cx={CENTER}
+              cy={CENTER}
+              r={RADIUS}
+            />
           </clipPath>
-          <radialGradient id="navball-shade" cx="35%" cy="25%" r="70%">
-            <stop offset="0%" stopColor="#34476b" />
-            <stop offset="55%" stopColor="#17233e" />
-            <stop offset="100%" stopColor="#050912" />
+          <radialGradient
+            id='navball-shade'
+            cx='35%'
+            cy='25%'
+            r='70%'
+          >
+            <stop
+              offset='0%'
+              stopColor='#34476b'
+            />
+            <stop
+              offset='55%'
+              stopColor='#17233e'
+            />
+            <stop
+              offset='100%'
+              stopColor='#050912'
+            />
           </radialGradient>
         </defs>
-        <circle cx={CENTER} cy={CENTER} r={VISIBLE_RADIUS} fill="url(#navball-shade)" stroke="#d9e3ff" strokeWidth="2" />
-        <g clipPath="url(#navball-clip)">
+        <circle
+          cx={CENTER}
+          cy={CENTER}
+          r={VISIBLE_RADIUS}
+          fill='url(#navball-shade)'
+          stroke='#d9e3ff'
+          strokeWidth='2'
+        />
+        <g clipPath='url(#navball-clip)'>
           {/* Attitude-indicator shading: brown ground base, blue sky hemisphere
               following the curved horizon (toward radial-out). */}
-          <circle cx={CENTER} cy={CENTER} r={RADIUS} fill="rgba(120,80,46,0.5)" />
-          {skyPath && <path d={skyPath} fill="rgba(60,116,170,0.5)" />}
+          <circle
+            cx={CENTER}
+            cy={CENTER}
+            r={RADIUS}
+            fill='rgba(120,80,46,0.5)'
+          />
+          {skyPath && (
+            <path
+              d={skyPath}
+              fill='rgba(60,116,170,0.5)'
+            />
+          )}
           {horizonPaths.map((path, index) => (
-            <path key={index} d={path} fill="none" stroke="#f3f0d0" strokeWidth="2" strokeDasharray="6 5" opacity="0.8" />
+            <path
+              key={index}
+              d={path}
+              fill='none'
+              stroke='#f3f0d0'
+              strokeWidth='2'
+              strokeDasharray='6 5'
+              opacity='0.8'
+            />
           ))}
           {meridianPaths.map((path, index) => (
-            <path key={`meridian-${index}`} d={path} fill="none" stroke="rgba(217,227,255,0.18)" strokeWidth="1" />
+            <path
+              key={`meridian-${index}`}
+              d={path}
+              fill='none'
+              stroke='rgba(217,227,255,0.18)'
+              strokeWidth='1'
+            />
           ))}
-          {state.compass && Object.entries(state.compass).map(([key, point]) => {
-            if (!point.visible) return null
-            const label = key[0].toUpperCase()
-            const length = 8
-            const magnitude = Math.hypot(point.x, point.y) || 1
-            const ux = point.x / magnitude
-            const uy = point.y / magnitude
+          {state.compass &&
+            Object.entries(state.compass).map(([key, point]) => {
+              if (!point.visible) return null;
+              const label = key[0].toUpperCase();
+              const length = 8;
+              const magnitude = Math.hypot(point.x, point.y) || 1;
+              const ux = point.x / magnitude;
+              const uy = point.y / magnitude;
 
-            return (
-              <g key={key} opacity="0.72">
-                <line
-                  x1={CENTER + point.x - ux * length}
-                  y1={CENTER + point.y - uy * length}
-                  x2={CENTER + point.x}
-                  y2={CENTER + point.y}
-                  stroke="rgba(220,235,255,0.65)"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-                <text
-                  x={CENTER + point.x - ux * (length + 7)}
-                  y={CENTER + point.y - uy * (length + 7) + 3}
-                  textAnchor="middle"
-                  fontFamily="monospace"
-                  fontSize="7"
-                  fill="rgba(220,235,255,0.72)"
+              return (
+                <g
+                  key={key}
+                  opacity='0.72'
                 >
-                  {label}
-                </text>
-              </g>
-            )
-          })}
+                  <line
+                    x1={CENTER + point.x - ux * length}
+                    y1={CENTER + point.y - uy * length}
+                    x2={CENTER + point.x}
+                    y2={CENTER + point.y}
+                    stroke='rgba(220,235,255,0.65)'
+                    strokeWidth='1.5'
+                    strokeLinecap='round'
+                  />
+                  <text
+                    x={CENTER + point.x - ux * (length + 7)}
+                    y={CENTER + point.y - uy * (length + 7) + 3}
+                    textAnchor='middle'
+                    fontFamily='monospace'
+                    fontSize='7'
+                    fill='rgba(220,235,255,0.72)'
+                  >
+                    {label}
+                  </text>
+                </g>
+              );
+            })}
           {Object.entries(state.markers).map(([key, point]) => {
-            if (!shouldRenderNavballMarker(point)) return null
-            const Glyph = MARKER_ICONS[key]
-            if (!Glyph) return null
-            const color = MARKER_COLORS[key] ?? '#d9e3ff'
+            if (!shouldRenderNavballMarker(point)) return null;
+            const Glyph = MARKER_ICONS[key];
+            if (!Glyph) return null;
+            const color = MARKER_COLORS[key] ?? '#d9e3ff';
             return (
               <g
                 key={key}
@@ -291,22 +442,56 @@ export function Navball({ orientation, relativePosition, relativeVelocity, paren
                 {...(MARKER_LABELS[key] ? hoverTooltip(MARKER_LABELS[key]) : {})}
               >
                 {MARKER_LABELS[key] && <title>{MARKER_LABELS[key]}</title>}
-                <circle r={11} fill="rgba(0,0,0,0.55)" />
+                <circle
+                  r={11}
+                  fill='rgba(0,0,0,0.55)'
+                />
                 <Glyph color={color} />
               </g>
-            )
+            );
           })}
         </g>
-        <circle cx={CENTER} cy={CENTER} r={VISIBLE_RADIUS} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="1" />
-        <g stroke="#ffffff" strokeWidth="2" strokeLinecap="round">
-          <line x1={CENTER - 14} y1={CENTER} x2={CENTER - 4} y2={CENTER} />
-          <line x1={CENTER + 4} y1={CENTER} x2={CENTER + 14} y2={CENTER} />
-          <line x1={CENTER} y1={CENTER - 14} x2={CENTER} y2={CENTER - 4} />
-          <line x1={CENTER} y1={CENTER + 4} x2={CENTER} y2={CENTER + 14} />
+        <circle
+          cx={CENTER}
+          cy={CENTER}
+          r={VISIBLE_RADIUS}
+          fill='none'
+          stroke='rgba(255,255,255,0.35)'
+          strokeWidth='1'
+        />
+        <g
+          stroke='#ffffff'
+          strokeWidth='2'
+          strokeLinecap='round'
+        >
+          <line
+            x1={CENTER - 14}
+            y1={CENTER}
+            x2={CENTER - 4}
+            y2={CENTER}
+          />
+          <line
+            x1={CENTER + 4}
+            y1={CENTER}
+            x2={CENTER + 14}
+            y2={CENTER}
+          />
+          <line
+            x1={CENTER}
+            y1={CENTER - 14}
+            x2={CENTER}
+            y2={CENTER - 4}
+          />
+          <line
+            x1={CENTER}
+            y1={CENTER + 4}
+            x2={CENTER}
+            y2={CENTER + 14}
+          />
         </g>
       </svg>
     </div>
-  )
+  );
 }
 
 export function NavballCluster({
@@ -341,7 +526,11 @@ export function NavballCluster({
       }}
     >
       {onSelectMode && (
-        <AutopilotColumn active={autopilotMode} hasNode={!!hasManeuverNode} onSelect={onSelectMode} />
+        <AutopilotColumn
+          active={autopilotMode}
+          hasNode={!!hasManeuverNode}
+          onSelect={onSelectMode}
+        />
       )}
       <NavballInstrument
         orientation={orientation}
@@ -358,15 +547,34 @@ export function NavballCluster({
         orbit={orbit}
         bottomRows={rows.slice(0, 2)}
       />
-      <StatusColumn mode={mode} orbit={orbit} surfaceState={surfaceState} />
+      <StatusColumn
+        mode={mode}
+        orbit={orbit}
+        surfaceState={surfaceState}
+      />
     </div>
-  )
+  );
 }
 
 export function NavballInstrument(props: NavballInstrumentProps) {
-  const { throttle, forceRatio, orbit, bottomRows = [] } = props
-  const throttleArc = computeArcProgressPath({ value: throttle, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45 })
-  const forceArc = computeArcProgressPath({ value: forceRatio, radius: 90, cx: 95, cy: 90, startDegrees: 135, endDegrees: 45, mirror: true })
+  const { throttle, forceRatio, orbit, bottomRows = [] } = props;
+  const throttleArc = computeArcProgressPath({
+    value: throttle,
+    radius: 90,
+    cx: 95,
+    cy: 90,
+    startDegrees: 135,
+    endDegrees: 45,
+  });
+  const forceArc = computeArcProgressPath({
+    value: forceRatio,
+    radius: 90,
+    cx: 95,
+    cy: 90,
+    startDegrees: 135,
+    endDegrees: 45,
+    mirror: true,
+  });
   return (
     <div
       style={{
@@ -378,29 +586,44 @@ export function NavballInstrument(props: NavballInstrumentProps) {
       }}
     >
       <svg
-        width="190"
-        height="180"
-        viewBox="0 0 190 180"
-        aria-hidden="true"
+        width='190'
+        height='180'
+        viewBox='0 0 190 180'
+        aria-hidden='true'
         style={{ position: 'absolute', left: 0, top: 0 }}
       >
-        <InstrumentArc indicator="force" paths={forceArc} />
-        <InstrumentArc indicator="throttle" paths={throttleArc} />
+        <InstrumentArc
+          indicator='force'
+          paths={forceArc}
+        />
+        <InstrumentArc
+          indicator='throttle'
+          paths={throttleArc}
+        />
       </svg>
       <div style={{ position: 'absolute', left: 10, top: 5 }}>
         <Navball {...props} />
       </div>
       {/* Top shelf: apoapsis then periapsis. */}
-      {orbit && (() => {
-        const ap = orbit.apoapsisAltitude === null ? '--' : formatFlightNumber(orbit.apoapsisAltitude, 'm')
-        const pe = orbit.periapsisAltitude < 0 ? '--' : formatFlightNumber(orbit.periapsisAltitude, 'm')
-        return (
-          <Shelf top={-2}>
-            <ShelfValue label="AP" value={ap} title={`Apoapsis: ${ap}`} />
-            <ShelfValue label="PE" value={pe} title={`Periapsis: ${pe}`} />
-          </Shelf>
-        )
-      })()}
+      {orbit &&
+        (() => {
+          const ap = orbit.apoapsisAltitude === null ? '--' : formatFlightNumber(orbit.apoapsisAltitude, 'm');
+          const pe = orbit.periapsisAltitude < 0 ? '--' : formatFlightNumber(orbit.periapsisAltitude, 'm');
+          return (
+            <Shelf top={-2}>
+              <ShelfValue
+                label='AP'
+                value={ap}
+                title={`Apoapsis: ${ap}`}
+              />
+              <ShelfValue
+                label='PE'
+                value={pe}
+                title={`Periapsis: ${pe}`}
+              />
+            </Shelf>
+          );
+        })()}
       {/* Bottom shelf: altitude then speed, overlapping the navball's bottom
           edge symmetrically with the AP/PE shelf on top (which uses top:-2). */}
       {bottomRows.length > 0 && (
@@ -416,16 +639,26 @@ export function NavballInstrument(props: NavballInstrumentProps) {
         </Shelf>
       )}
     </div>
-  )
+  );
 }
 
 /** Render a navball glyph as a standalone HTML icon, with a hover tooltip. */
-function GlyphIcon({ glyph: Glyph, size, color, title }: { glyph: NavGlyph; size: number; color: string; title?: string }) {
+function GlyphIcon({
+  glyph: Glyph,
+  size,
+  color,
+  title,
+}: {
+  glyph: NavGlyph;
+  size: number;
+  color: string;
+  title?: string;
+}) {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="-12 -12 24 24"
+      viewBox='-12 -12 24 24'
       aria-label={title}
       focusable={false}
       {...(title ? hoverTooltip(title) : {})}
@@ -433,7 +666,7 @@ function GlyphIcon({ glyph: Glyph, size, color, title }: { glyph: NavGlyph; size
       {title && <title>{title}</title>}
       <Glyph color={color} />
     </svg>
-  )
+  );
 }
 
 /** A small panel that slightly overlaps the navball's top or bottom edge.
@@ -460,38 +693,61 @@ function Shelf({ top, bottom, children }: { top?: number; bottom?: number; child
     >
       {children}
     </div>
-  )
+  );
 }
 
 function ShelfValue({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
-    <span {...(title ? hoverTooltip(title) : {})} style={{ fontSize: 9, color: 'rgba(210,250,255,0.62)' }}>
+    <span
+      {...(title ? hoverTooltip(title) : {})}
+      style={{ fontSize: 9, color: 'rgba(210,250,255,0.62)' }}
+    >
       {label} <span style={{ color: 'rgba(255,205,112,0.94)' }}>{value}</span>
     </span>
-  )
+  );
 }
 
 function InstrumentArc({
   indicator,
   paths,
 }: {
-  indicator: 'force' | 'throttle'
-  paths: { trackPath: string; progressPath: string }
+  indicator: 'force' | 'throttle';
+  paths: { trackPath: string; progressPath: string };
 }) {
   return (
     <g data-indicator={indicator}>
-      <path d={paths.trackPath} fill="none" stroke="#406568" strokeWidth="6" />
-      <path d={paths.progressPath} fill="none" stroke="#ffc260" strokeWidth="6" />
+      <path
+        d={paths.trackPath}
+        fill='none'
+        stroke='#406568'
+        strokeWidth='6'
+      />
+      <path
+        d={paths.progressPath}
+        fill='none'
+        stroke='#ffc260'
+        strokeWidth='6'
+      />
     </g>
-  )
+  );
 }
 
 export function Proximity({ rows }: ProximityProps) {
-  return <TelemetryPanel rows={rows} align="right" />
+  return (
+    <TelemetryPanel
+      rows={rows}
+      align='right'
+    />
+  );
 }
 
 export function Attitude({ rows }: AttitudeProps) {
-  return <TelemetryPanel rows={rows} align="left" />
+  return (
+    <TelemetryPanel
+      rows={rows}
+      align='left'
+    />
+  );
 }
 
 function TelemetryPanel({ rows, align }: { rows: FlightTelemetryRow[]; align: 'left' | 'right' }) {
@@ -513,11 +769,14 @@ function TelemetryPanel({ rows, align }: { rows: FlightTelemetryRow[]; align: 'l
       }}
     >
       {rows.map((row) => (
-        <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+        <div
+          key={row.label}
+          style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}
+        >
           <span style={{ color: 'rgba(210,250,255,0.62)' }}>{row.label}</span>
           <span style={{ color: 'rgba(255,205,112,0.94)' }}>{row.value}</span>
         </div>
       ))}
     </div>
-  )
+  );
 }
