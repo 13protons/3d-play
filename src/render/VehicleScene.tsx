@@ -38,7 +38,8 @@ import {
   bodySurfaceOrientationEuler,
   vehicleBodyTransform,
 } from './rotation'
-import { RENDER_LAYERS, TERRAIN_RENDER_PASSES } from './renderLayers'
+import { EffectComposer } from '@react-three/postprocessing'
+import { RENDER_LAYERS } from './renderLayers'
 import { PlanetTerrainTiles } from './terrain/PlanetTerrainTiles'
 import { vehiclePlanetSurfaceRenderDecision } from './terrain/terrainLodPolicy'
 import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
@@ -351,22 +352,19 @@ function VehicleDebugAxes({ vehicleId }: { vehicleId: string }) {
   )
 }
 
-function VehicleSceneRenderPasses() {
-  const gl = useThree((s) => s.gl)
-  const scene = useThree((s) => s.scene)
+/**
+ * Enable every render layer on the main camera so the EffectComposer's single
+ * scene render draws base body, terrain overlay, and vehicle into one coherent
+ * depth buffer — replacing the old manual per-layer multi-pass + inter-pass depth
+ * clear (the spike confirmed a near vehicle and a far planet coexist here without
+ * z-fighting). baseBody (layer 0) is enabled by default.
+ */
+function EnableSceneLayers() {
   const camera = useThree((s) => s.camera)
-
-  useFrame(() => {
-    if (useModeStore.getState().activeView !== 'vehicle') return
-
-    gl.clear()
-    for (const pass of TERRAIN_RENDER_PASSES) {
-      if (pass.clearDepthBefore) gl.clearDepth()
-      camera.layers.set(pass.layer)
-      gl.render(scene, camera)
-    }
-  }, 1)
-
+  useEffect(() => {
+    camera.layers.enable(RENDER_LAYERS.terrainOverlay)
+    camera.layers.enable(RENDER_LAYERS.vehicle)
+  }, [camera])
   return null
 }
 
@@ -388,7 +386,7 @@ function VehicleSceneContent() {
       <VehicleAmbientLight />
       <Stars radius={1e8} depth={1e8} count={3000} factor={1e6} fade />
       <VehicleViewControls />
-      <VehicleSceneRenderPasses />
+      <EnableSceneLayers />
       <VehicleMesh />
       {firstVehicle && (
         <VehicleSunLight
@@ -410,6 +408,10 @@ function VehicleSceneContent() {
       {firstVehicle && (
         <PlanetTerrainTiles bodyId={firstVehicle.parentId} vehicleId={firstVehicle.id} />
       )}
+      {/* The composer owns the render loop — one coherent scene render, no per-layer
+          multi-pass, no depth clear. Skeleton phase: no effects yet (empty child);
+          takram's Sky/AerialPerspective + bloom land in later phases. */}
+      <EffectComposer><></></EffectComposer>
     </>
   )
 }
@@ -543,7 +545,7 @@ export function VehicleScene() {
     >
       <Canvas
         camera={{ position: [0, 10, 30], near: 0.1, far: 1e9, fov: 60 }}
-        gl={{ autoClear: false }}
+        frameloop={active ? 'always' : 'never'}
         style={{ width: '100%', height: '100%' }}
       >
         <PerfLogger view="vehicle" />
