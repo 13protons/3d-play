@@ -87,6 +87,14 @@ export interface DrySkeleton {
   engines: EngineTerm[]
   /** Sum of reaction-wheel torque per body axis. */
   reactionWheelTorque: Vec3
+  /** Total drag reference area of the active parts (m²). */
+  dragArea: number
+  /**
+   * Center of pressure (body frame) — area-weighted mean of the parts' drag
+   * areas. Its offset from the CoM is what makes the craft weathervane (stable)
+   * or tumble (unstable). Origin when there's no drag area.
+   */
+  centerOfPressure: Vec3
 }
 
 /** Mass properties for one step, about the current center of mass. */
@@ -180,6 +188,8 @@ export function buildSkeleton(
   let dryFirstMoment: Vec3 = [0, 0, 0]
   let dryInertiaOrigin: Mat3 = MAT3_ZERO
   let reactionWheelTorque: Vec3 = [0, 0, 0]
+  let dragArea = 0
+  let areaFirstMoment: Vec3 = [0, 0, 0]
   const tanks: TankTerm[] = []
   const engines: EngineTerm[] = []
 
@@ -199,6 +209,11 @@ export function buildSkeleton(
       dryInertiaOrigin,
       mat3Add(inertiaBody, parallelAxisTerm(def.dryMass, position)),
     )
+
+    if (def.dragArea) {
+      dragArea += def.dragArea
+      areaFirstMoment = vec3Add(areaFirstMoment, vec3Scale(position, def.dragArea))
+    }
 
     for (const mod of def.modules) {
       if (mod.kind === 'tank') {
@@ -221,7 +236,8 @@ export function buildSkeleton(
     }
   }
 
-  return { dryMass, dryFirstMoment, dryInertiaOrigin, tanks, engines, reactionWheelTorque }
+  const centerOfPressure: Vec3 = dragArea > 0 ? vec3Scale(areaFirstMoment, 1 / dragArea) : [0, 0, 0]
+  return { dryMass, dryFirstMoment, dryInertiaOrigin, tanks, engines, reactionWheelTorque, dragArea, centerOfPressure }
 }
 
 /**

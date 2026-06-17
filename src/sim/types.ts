@@ -194,6 +194,8 @@ export type VehicleWorkerOutbound =
       torqueBody?: [number, number, number]
       /** Ambient pressure ratio (0 = vacuum, 1 = sea level) — debug. */
       pressureRatio?: number
+      /** Center of pressure (body frame) — debug, for the stability arm. */
+      centerOfPressure?: [number, number, number]
     }
 
 // ---------------------------------------------------------------------------

@@ -135,6 +135,44 @@ describe('buildSkeleton + aggregate', () => {
   })
 })
 
+describe('drag area + center of pressure', () => {
+  it('sums active part drag areas and area-weights the center of pressure', () => {
+    const skeleton = buildSkeleton(
+      [
+        part({ instanceId: 'aft', defId: 'big', localPosition: [0, 0, 0] }),
+        part({ instanceId: 'fwd', defId: 'small', localPosition: [0, 0, 10] }),
+      ],
+      defs(
+        { id: 'big', dryMass: 100, inertia: MAT3_ZERO, dragArea: 9, modules: [] },
+        { id: 'small', dryMass: 100, inertia: MAT3_ZERO, dragArea: 1, modules: [] },
+      ),
+    )
+    expect(skeleton.dragArea).toBe(10)
+    // CoP = (9·0 + 1·10) / 10 = 1 → pulled toward the big aft area.
+    expectVec3Close(skeleton.centerOfPressure, [0, 0, 1])
+  })
+
+  it('has zero area and origin CoP when no part declares drag area', () => {
+    const skeleton = buildSkeleton(
+      [part({ instanceId: 'p', defId: 'none' })],
+      defs({ id: 'none', dryMass: 100, inertia: MAT3_ZERO, modules: [] }),
+    )
+    expect(skeleton.dragArea).toBe(0)
+    expectVec3Close(skeleton.centerOfPressure, [0, 0, 0])
+  })
+
+  it('drag area drops when a part is inactive (jettisoned)', () => {
+    const skeleton = buildSkeleton(
+      [
+        part({ instanceId: 'keep', defId: 'a' }),
+        part({ instanceId: 'drop', defId: 'a', localPosition: [0, 0, 5], active: false }),
+      ],
+      defs({ id: 'a', dryMass: 100, inertia: MAT3_ZERO, dragArea: 4, modules: [] }),
+    )
+    expect(skeleton.dragArea).toBe(4)
+  })
+})
+
 describe('skeleton engine + reaction wheel collection', () => {
   it('collects engines with body-frame direction and reaction-wheel torque', () => {
     const skeleton = buildSkeleton(

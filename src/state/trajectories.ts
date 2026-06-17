@@ -29,6 +29,7 @@ export interface VehicleControlMeta {
   thrustBody?: [number, number, number]
   torqueBody?: [number, number, number]
   pressureRatio?: number
+  centerOfPressure?: [number, number, number]
 }
 
 export interface BodyMeta {

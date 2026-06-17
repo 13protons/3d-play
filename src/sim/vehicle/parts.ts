@@ -76,6 +76,12 @@ export interface PartDefinition {
   meshId?: string
   /** Inertia tensor about the part's own origin, in its local frame (kg·m²). */
   inertia: Mat3
+  /**
+   * Drag reference area (m²). Summed across active parts for the vehicle's drag,
+   * and area-weighted by position for the center of pressure. Omit for parts
+   * that don't meaningfully contribute frontal area.
+   */
+  dragArea?: number
   modules: PartModule[]
   render?: PartRender
 }

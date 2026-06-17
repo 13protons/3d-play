@@ -109,6 +109,16 @@ export class VehicleStructure {
     return this.skeleton.reactionWheelTorque
   }
 
+  /** Total drag reference area of the active parts (m²); 0 if none authored. */
+  get dragArea(): number {
+    return this.skeleton.dragArea
+  }
+
+  /** Center of pressure (body frame), area-weighted across the active parts. */
+  get centerOfPressure(): Vec3 {
+    return this.skeleton.centerOfPressure
+  }
+
   /** Total propellant across every tank (for display / total ΔV). */
   totalFuel(): number {
     let sum = 0

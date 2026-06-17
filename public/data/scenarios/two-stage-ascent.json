@@ -80,6 +80,7 @@
           "id": "booster",
           "dryMass": 5000,
           "inertia": [200000, 0, 0, 0, 200000, 0, 0, 0, 10000],
+          "dragArea": 12,
           "modules": [
             { "kind": "engine", "maxThrust": 2100000, "isp": 300, "thrustSeaLevel": 1850000, "ispSeaLevel": 265, "gimbalRange": 5 },
             { "kind": "tank", "capacity": 90000 }
@@ -90,6 +91,7 @@
           "id": "upper",
           "dryMass": 2000,
           "inertia": [60000, 0, 0, 0, 60000, 0, 0, 0, 4000],
+          "dragArea": 2,
           "modules": [
             { "kind": "engine", "maxThrust": 600000, "isp": 340, "thrustSeaLevel": 480000, "ispSeaLevel": 270, "gimbalRange": 4 },
             { "kind": "tank", "capacity": 30000 }
@@ -100,6 +102,7 @@
           "id": "capsule",
           "dryMass": 1000,
           "inertia": [8000, 0, 0, 0, 8000, 0, 0, 0, 3000],
+          "dragArea": 1,
           "modules": [
             { "kind": "reactionWheel", "torque": [40000, 40000, 20000] }
           ],

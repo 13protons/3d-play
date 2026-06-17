@@ -34,7 +34,7 @@ import { exponentialAtmosphereDensity } from './aero'
 import { fuelBurned, fuelLimitedThrottle } from './thrust'
 import { surfaceFrame } from './referenceFrame'
 import { VehicleStructure } from './structure'
-import type { Mat3 } from './mat3'
+import { type Mat3, mat3FromQuaternion, mat3MulVec, mat3Transpose, vec3Add, vec3Cross, vec3Sub } from './mat3'
 import type { VehicleAttitude } from '../types'
 import {
   classifySurfaceContact,
@@ -79,6 +79,8 @@ let inertiaTensorStep: Mat3 | undefined
 let inertiaInverseStep: Mat3 | null | undefined
 /** Ambient pressure ratio (0 = vacuum, 1 = sea level) from the last advance. */
 let lastPressureRatio = 0
+/** Body-frame CoM from the last advance — for the aero (CoP−CoM) torque arm. */
+let lastCenterOfMass: Vec3 = [0, 0, 0]
 let simTime = 0
 let warpRate = 1
 let throttle = 0
@@ -126,6 +128,7 @@ function emitControls(): void {
     thrustBody: structure ? thrustForceBody : undefined,
     torqueBody: structure ? thrustTorqueBody : undefined,
     pressureRatio: structure ? lastPressureRatio : undefined,
+    centerOfPressure: structure && structure.dragArea > 0 ? structure.centerOfPressure : undefined,
   })
 }
 
@@ -203,6 +206,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     inertiaTensorStep = undefined
     inertiaInverseStep = undefined
     lastPressureRatio = 0
+    lastCenterOfMass = [0, 0, 0]
 
     simTime = 0
     warpRate = 1
@@ -358,6 +362,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     inertiaInverseStep = undefined
     if (structure) {
       const agg = structure.aggregate()
+      lastCenterOfMass = agg.centerOfMass
       if (resources) resources = { dryMass: resources.dryMass, fuelMass: structure.totalFuel(), mass: agg.mass }
       effectiveThrottle = fuelLimitedThrottle({
         maxThrust: structure.totalMaxThrust(pressureRatio),
@@ -434,6 +439,12 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       }
     }
 
+    // Drag reference area follows the active parts (so it shrinks on staging
+    // instead of flying the whole rocket's frontal area on a bare capsule).
+    const stepAero = aero && structure && structure.dragArea > 0
+      ? { ...aero, referenceArea: structure.dragArea }
+      : aero
+
     const deriv = vehicleDerivatives({
       gravity: pointMassDerivatives(msg.bodyCurves, bodyGMs),
       parentId,
@@ -441,7 +452,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       bodySurfaces,
       resources,
       engine,
-      aero,
+      aero: stepAero,
       orientation,
       angularVelocity,
       throttle: effectiveThrottle,
@@ -455,7 +466,10 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     })
 
     advanceTo(stateVec, simTime, targetTime, deriv, 1e-10)
-    advanceAttitude(elapsedSeconds, thrustTorqueBody, inertiaTensorStep, inertiaInverseStep)
+    // Aerodynamic torque: drag acts at the center of pressure, so its offset from
+    // the CoM (rotated into the body frame) gives a torque that weathervanes the
+    // craft prograde when the CoP is behind the CoM, or tumbles it when ahead.
+    advanceAttitude(elapsedSeconds, vec3Add(thrustTorqueBody, aeroTorqueBody()), inertiaTensorStep, inertiaInverseStep)
     // Burn the propellant this step consumed and drop the vehicle's mass to
     // match (the rocket equation in action).
     if (structure && effectiveThrottle > 0) {
@@ -524,6 +538,19 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
     emitCurves(prevTime, prevState)
     emitControls()
   }
+}
+
+/**
+ * Aerodynamic torque in the body frame: drag (a world-frame force) acting at the
+ * center of pressure produces (CoP − CoM) × F about the CoM. Zero without a
+ * structural aero model. The drag force was captured during the last derivative
+ * evaluation; rotate it into the body frame for the (body-frame) attitude step.
+ */
+function aeroTorqueBody(): Vec3 {
+  if (!structure || structure.dragArea <= 0) return [0, 0, 0]
+  const arm = vec3Sub(structure.centerOfPressure, lastCenterOfMass)
+  const forceBody = mat3MulVec(mat3Transpose(mat3FromQuaternion(orientation)), aeroForceWorld)
+  return vec3Cross(arm, forceBody)
 }
 
 /**

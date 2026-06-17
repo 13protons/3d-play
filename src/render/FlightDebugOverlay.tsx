@@ -32,6 +32,7 @@ interface FlightDebugOverlayProps {
 
 const COLORS = {
   com: '#ffffff',
+  cop: '#ff4df8',
   axisX: '#ff6b6b',
   axisY: '#7dff7a',
   axisZ: '#5ecbff',
@@ -104,6 +105,14 @@ export function FlightDebugOverlay({ vehicleId, scale, engines }: FlightDebugOve
         <sphereGeometry args={[0.4, 12, 8]} />
         <meshBasicMaterial color={COLORS.com} depthTest={false} />
       </mesh>
+      {/* Center of pressure: drag acts here; its offset from the CoM (origin) is
+          the stability arm — behind the CoM weathervanes, ahead tumbles. */}
+      {controls.centerOfPressure && (
+        <mesh position={at(controls.centerOfPressure)}>
+          <sphereGeometry args={[0.35, 12, 8]} />
+          <meshBasicMaterial color={COLORS.cop} depthTest={false} />
+        </mesh>
+      )}
       <Line points={[[-AXIS_LEN, 0, 0], [AXIS_LEN, 0, 0]]} color={COLORS.axisX} lineWidth={1.5} depthTest={false} depthWrite={false} />
       <Line points={[[0, -AXIS_LEN, 0], [0, AXIS_LEN, 0]]} color={COLORS.axisY} lineWidth={1.5} depthTest={false} depthWrite={false} />
       <Line points={[[0, 0, -AXIS_LEN], [0, 0, AXIS_LEN]]} color={COLORS.axisZ} lineWidth={1.5} depthTest={false} depthWrite={false} />
