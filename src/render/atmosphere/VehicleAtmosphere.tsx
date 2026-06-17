@@ -1,8 +1,9 @@
-import { useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useMemo, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
+import { EffectComposer } from '@react-three/postprocessing'
 import { Vector3 } from 'three'
 import type { PrecomputedTextures } from '@takram/three-atmosphere'
-import { Atmosphere, AtmosphereContext } from '@takram/three-atmosphere/r3f'
+import { AerialPerspective, Atmosphere, AtmosphereContext } from '@takram/three-atmosphere/r3f'
 import { Ellipsoid } from '@takram/three-geospatial'
 import { useTrajectoriesStore } from '../../state/trajectories'
 import { evaluateCurve } from '../../sim/curves'
@@ -92,20 +93,20 @@ function AtmosphereTransientDriver({
 }
 
 /**
- * Mounts takram's `<Atmosphere>` provider around `children` for the body the
- * vehicle is at, wiring per-body LUTs + floating-origin placement. When the body
- * has no atmosphere it renders `children` unchanged. takram's visual components
- * (Sky / AerialPerspective / SunLight / SkyLight) are descendants added in later
- * phases; they read this provider's context.
+ * Owns the vehicle scene's EffectComposer and, for a body with an atmosphere,
+ * mounts takram's `<Atmosphere>` provider with per-body LUTs + floating-origin
+ * placement and the `AerialPerspective` effect (sky + aerial perspective). Airless
+ * bodies get a bare composer (scene only). Our own lights + celestial bodies are
+ * unchanged (decision A / D2): takram's sun/moon disks stay off — we render the
+ * sim's sun/moon/planets ourselves, eclipse-aware — and our directional sun + sky
+ * ambient light the scene, so takram's sunLight/skyLight stay off too.
  */
 export function VehicleAtmosphere({
   bodyId,
   vehicleId,
-  children,
 }: {
   bodyId: string
   vehicleId: string
-  children: ReactNode
 }) {
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
   const config = body?.atmosphereRender
@@ -120,12 +121,25 @@ export function VehicleAtmosphere({
   )
   const textures = useAtmosphereTextures(bodyId, params)
 
-  if (!params || !ellipsoid) return <>{children}</>
+  // Airless body: composer renders the scene with no atmosphere effect.
+  if (!params || !ellipsoid) {
+    return (
+      <EffectComposer>
+        <></>
+      </EffectComposer>
+    )
+  }
 
   return (
     <Atmosphere textures={textures ?? undefined} ellipsoid={ellipsoid} correctAltitude>
       <AtmosphereTransientDriver bodyId={bodyId} vehicleId={vehicleId} />
-      {children}
+      <EffectComposer>
+        {textures ? (
+          <AerialPerspective sky sun={false} moon={false} />
+        ) : (
+          <></>
+        )}
+      </EffectComposer>
     </Atmosphere>
   )
 }

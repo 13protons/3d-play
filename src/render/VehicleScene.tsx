@@ -38,7 +38,6 @@ import {
   bodySurfaceOrientationEuler,
   vehicleBodyTransform,
 } from './rotation'
-import { EffectComposer } from '@react-three/postprocessing'
 import { RENDER_LAYERS } from './renderLayers'
 import { VehicleAtmosphere } from './atmosphere/VehicleAtmosphere'
 import { PlanetTerrainTiles } from './terrain/PlanetTerrainTiles'
@@ -409,16 +408,12 @@ function VehicleSceneContent() {
       {firstVehicle && (
         <PlanetTerrainTiles bodyId={firstVehicle.parentId} vehicleId={firstVehicle.id} />
       )}
-      {/* The composer owns the render loop — one coherent scene render, no per-layer
-          multi-pass, no depth clear. Wrapped in the atmosphere provider so the
-          (later) Sky/AerialPerspective effects and takram lights can read its
-          context; the body's LUTs bake on first mount. No effects yet (empty child). */}
-      {firstVehicle ? (
-        <VehicleAtmosphere bodyId={firstVehicle.parentId} vehicleId={firstVehicle.id}>
-          <EffectComposer><></></EffectComposer>
-        </VehicleAtmosphere>
-      ) : (
-        <EffectComposer><></></EffectComposer>
+      {/* VehicleAtmosphere owns the EffectComposer (one coherent scene render, no
+          per-layer multi-pass / depth clear). For a body with an atmosphere it adds
+          takram's Sky + AerialPerspective inside the provider; airless bodies get a
+          bare composer. */}
+      {firstVehicle && (
+        <VehicleAtmosphere bodyId={firstVehicle.parentId} vehicleId={firstVehicle.id} />
       )}
     </>
   )
