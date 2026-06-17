@@ -40,6 +40,7 @@ import {
 } from './rotation'
 import { EffectComposer } from '@react-three/postprocessing'
 import { RENDER_LAYERS } from './renderLayers'
+import { VehicleAtmosphere } from './atmosphere/VehicleAtmosphere'
 import { PlanetTerrainTiles } from './terrain/PlanetTerrainTiles'
 import { vehiclePlanetSurfaceRenderDecision } from './terrain/terrainLodPolicy'
 import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
@@ -409,9 +410,16 @@ function VehicleSceneContent() {
         <PlanetTerrainTiles bodyId={firstVehicle.parentId} vehicleId={firstVehicle.id} />
       )}
       {/* The composer owns the render loop — one coherent scene render, no per-layer
-          multi-pass, no depth clear. Skeleton phase: no effects yet (empty child);
-          takram's Sky/AerialPerspective + bloom land in later phases. */}
-      <EffectComposer><></></EffectComposer>
+          multi-pass, no depth clear. Wrapped in the atmosphere provider so the
+          (later) Sky/AerialPerspective effects and takram lights can read its
+          context; the body's LUTs bake on first mount. No effects yet (empty child). */}
+      {firstVehicle ? (
+        <VehicleAtmosphere bodyId={firstVehicle.parentId} vehicleId={firstVehicle.id}>
+          <EffectComposer><></></EffectComposer>
+        </VehicleAtmosphere>
+      ) : (
+        <EffectComposer><></></EffectComposer>
+      )}
     </>
   )
 }
