@@ -320,11 +320,11 @@ export function NavballInstrument(props: NavballInstrumentProps) {
       <div style={{ position: 'absolute', left: 10, top: 5 }}>
         <Navball {...props} />
       </div>
-      {/* Top shelf: periapsis/apoapsis. */}
+      {/* Top shelf: apoapsis then periapsis. */}
       {orbit && (
         <Shelf top={-2}>
-          <ShelfValue label="PE" value={formatFlightNumber(orbit.periapsisAltitude, 'm')} />
           <ShelfValue label="AP" value={orbit.apoapsisAltitude === null ? '--' : formatFlightNumber(orbit.apoapsisAltitude, 'm')} />
+          <ShelfValue label="PE" value={orbit.periapsisAltitude < 0 ? '--' : formatFlightNumber(orbit.periapsisAltitude, 'm')} />
         </Shelf>
       )}
       {/* Bottom shelf: reference frame + orbital profile + vehicle state. */}
