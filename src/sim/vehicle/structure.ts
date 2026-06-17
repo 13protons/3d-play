@@ -20,6 +20,8 @@ import {
   aggregate,
   buildSkeleton,
   netThrust,
+  netThrustGimbaled,
+  solveGimbalForTorque,
 } from './aggregation'
 import type { PartDefinition } from './parts'
 import type { PartInstance, StageSummary } from '../types'
@@ -134,6 +136,16 @@ export class VehicleStructure {
   /** Net thrust force + torque (about the CoM) in the body frame. */
   netThrustBody(throttle: number, centerOfMass: Vec3): ThrustResult {
     return netThrust(this.engines, centerOfMass, throttle)
+  }
+
+  /** Gimbal command realizing a desired pitch/yaw torque about the CoM. */
+  solveGimbal(centerOfMass: Vec3, throttle: number, desiredX: number, desiredY: number): { gx: number, gy: number } {
+    return solveGimbalForTorque(this.engines, centerOfMass, throttle, desiredX, desiredY)
+  }
+
+  /** Net thrust with a gimbal command applied to the firing engines. */
+  netThrustBodyGimbaled(throttle: number, centerOfMass: Vec3, gx: number, gy: number): ThrustResult {
+    return netThrustGimbaled(this.engines, centerOfMass, throttle, gx, gy)
   }
 
   /**

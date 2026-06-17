@@ -60,11 +60,13 @@ export interface EngineTerm {
   instanceId: string
   /** Mount point in the body frame. */
   position: Vec3
-  /** Unit thrust direction in the body frame. */
+  /** Unit thrust direction in the body frame (nominal, un-gimbaled). */
   direction: Vec3
   maxThrust: number
   isp: number
   stage: number
+  /** Max gimbal deflection from nominal (radians). 0 = fixed. */
+  gimbalRange: number
 }
 
 /**
@@ -187,6 +189,7 @@ export function buildSkeleton(
           maxThrust: mod.maxThrust,
           isp: mod.isp,
           stage: part.stage,
+          gimbalRange: mod.gimbalRange !== undefined ? (mod.gimbalRange * Math.PI) / 180 : 0,
         })
       } else if (mod.kind === 'reactionWheel') {
         reactionWheelTorque = vec3Add(reactionWheelTorque, mod.torque)
@@ -234,13 +237,93 @@ export function aggregate(
  * (gimbal steering is a later slice). Callers filter `engines` to the firing set.
  */
 export function netThrust(engines: EngineTerm[], centerOfMass: Vec3, throttle: number): ThrustResult {
+  return netThrustGimbaled(engines, centerOfMass, throttle, 0, 0)
+}
+
+/**
+ * Deflect a unit thrust direction by a gimbal command: rotate about the body X
+ * axis by `gx`, then the body Y axis by `gy`. Small angles in practice, but the
+ * exact rotation keeps it well-behaved up to the full deflection range.
+ */
+export function deflectDirection(dir: Vec3, gx: number, gy: number): Vec3 {
+  const cx = Math.cos(gx), sx = Math.sin(gx)
+  const x1 = dir[0]
+  const y1 = dir[1] * cx - dir[2] * sx
+  const z1 = dir[1] * sx + dir[2] * cx
+  const cy = Math.cos(gy), sy = Math.sin(gy)
+  return [x1 * cy + z1 * sy, y1, -x1 * sy + z1 * cy]
+}
+
+/** Clamp a gimbal command's magnitude to `range` (radians), preserving direction. */
+function clampGimbal(gx: number, gy: number, range: number): [number, number] {
+  const mag = Math.hypot(gx, gy)
+  if (mag <= range || mag === 0) return [gx, gy]
+  const k = range / mag
+  return [gx * k, gy * k]
+}
+
+/**
+ * Net thrust with a gimbal command `(gx, gy)` applied to every gimbal-capable
+ * engine (each clamped to its own range); fixed engines keep their nominal
+ * direction. Reduces to {@link netThrust} at zero deflection.
+ */
+export function netThrustGimbaled(
+  engines: EngineTerm[],
+  centerOfMass: Vec3,
+  throttle: number,
+  gx: number,
+  gy: number,
+): ThrustResult {
   if (throttle <= 0) return { force: [0, 0, 0], torque: [0, 0, 0] }
   let force: Vec3 = [0, 0, 0]
   let torque: Vec3 = [0, 0, 0]
   for (const engine of engines) {
-    const f = vec3Scale(engine.direction, engine.maxThrust * throttle)
+    let dir = engine.direction
+    if (engine.gimbalRange > 0 && (gx !== 0 || gy !== 0)) {
+      const [cgx, cgy] = clampGimbal(gx, gy, engine.gimbalRange)
+      dir = deflectDirection(engine.direction, cgx, cgy)
+    }
+    const f = vec3Scale(dir, engine.maxThrust * throttle)
     force = vec3Add(force, f)
     torque = vec3Add(torque, vec3Cross(vec3Sub(engine.position, centerOfMass), f))
   }
   return { force, torque }
+}
+
+const MAX_GIMBAL = (engines: EngineTerm[]): number =>
+  engines.reduce((m, e) => Math.max(m, e.gimbalRange), 0)
+
+/**
+ * Gimbal command `(gx, gy)` that points the engines to impart the desired
+ * pitch/yaw control torque about the CoM *from their mount points*. Linearizes
+ * the torque response by finite difference (a 2×2 Jacobian) and solves, then
+ * clamps to the deflection range — the range is the only limit, and it's
+ * physical. Robust to any engine layout (no hand-derived sign conventions); the
+ * control loop closes around it each step, so the linearization need not be
+ * exact. Roll falls out for free: axial engines produce no roll torque, so the
+ * solve yields ~0 there and the reaction wheels cover it.
+ */
+export function solveGimbalForTorque(
+  engines: EngineTerm[],
+  centerOfMass: Vec3,
+  throttle: number,
+  desiredX: number,
+  desiredY: number,
+): { gx: number, gy: number } {
+  const range = MAX_GIMBAL(engines)
+  if (range <= 0 || throttle <= 0) return { gx: 0, gy: 0 }
+  const eps = Math.min(range, 0.01)
+  const t0 = netThrustGimbaled(engines, centerOfMass, throttle, 0, 0).torque
+  const tx = netThrustGimbaled(engines, centerOfMass, throttle, eps, 0).torque
+  const ty = netThrustGimbaled(engines, centerOfMass, throttle, 0, eps).torque
+  // J = ∂(τx, τy)/∂(gx, gy)
+  const m00 = (tx[0] - t0[0]) / eps, m10 = (tx[1] - t0[1]) / eps
+  const m01 = (ty[0] - t0[0]) / eps, m11 = (ty[1] - t0[1]) / eps
+  const det = m00 * m11 - m01 * m10
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-9) return { gx: 0, gy: 0 }
+  const bx = desiredX - t0[0], by = desiredY - t0[1]
+  const gx = (m11 * bx - m01 * by) / det
+  const gy = (-m10 * bx + m00 * by) / det
+  const [cgx, cgy] = clampGimbal(gx, gy, range)
+  return { gx: cgx, gy: cgy }
 }

@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   aggregate,
   buildSkeleton,
+  deflectDirection,
   netThrust,
+  netThrustGimbaled,
   resolvePartTransforms,
+  solveGimbalForTorque,
+  type EngineTerm,
 } from '../aggregation'
 import type { PartDefinition } from '../parts'
 import { MAT3_ZERO, type Mat3, type Quaternion, type Vec3 } from '../mat3'
@@ -158,6 +162,7 @@ describe('netThrust', () => {
     maxThrust: 1000,
     isp: 300,
     stage: 0,
+    gimbalRange: 0,
   })
 
   it('is zero at zero throttle', () => {
@@ -182,5 +187,66 @@ describe('netThrust', () => {
   it('scales force with throttle', () => {
     const result = netThrust([engine([0, 0, 0], [0, 0, 1])], [0, 0, 0], 0.5)
     expectVec3Close(result.force, [0, 0, 500])
+  })
+})
+
+describe('gimbal', () => {
+  const RANGE = (10 * Math.PI) / 180
+  // One engine mounted below the CoM, thrust +Z — a normal rocket layout.
+  const gimbalEngine = (): EngineTerm => ({
+    instanceId: 'e',
+    position: [0, 0, -5],
+    direction: [0, 0, 1],
+    maxThrust: 1000,
+    isp: 300,
+    stage: 0,
+    gimbalRange: RANGE,
+  })
+
+  it('deflectDirection tilts the thrust axis and preserves unit length', () => {
+    const d = deflectDirection([0, 0, 1], 0.1, 0)
+    expect(Math.hypot(d[0], d[1], d[2])).toBeCloseTo(1, 12)
+    expect(d[2]).toBeLessThan(1) // tilted off the +Z axis
+    expect(d[1]).not.toBe(0)
+  })
+
+  it('zero deflection matches the un-gimbaled net thrust', () => {
+    const e = [gimbalEngine()]
+    const a = netThrustGimbaled(e, [0, 0, 0], 1, 0, 0)
+    const b = netThrust(e, [0, 0, 0], 1)
+    expectVec3Close(a.force, b.force)
+    expectVec3Close(a.torque, b.torque)
+  })
+
+  it('a deflected engine imparts a torque from its mount point', () => {
+    // Engine 5 m below the CoM, thrust deflected: torque grows from the arm × force.
+    const result = netThrustGimbaled([gimbalEngine()], [0, 0, 0], 1, RANGE, 0)
+    const torqueMag = Math.hypot(result.torque[0], result.torque[1], result.torque[2])
+    expect(torqueMag).toBeGreaterThan(0)
+    // Thrust magnitude is conserved (just redirected).
+    expect(Math.hypot(result.force[0], result.force[1], result.force[2])).toBeCloseTo(1000, 6)
+  })
+
+  it('solveGimbalForTorque finds a deflection that produces the requested torque', () => {
+    const e = [gimbalEngine()]
+    // Pick a torque well within range capacity (arm 5 m, thrust 1000, sin10° ≈ 0.17 → ~868 N·m max).
+    const desired = { x: 300, y: -200 }
+    const { gx, gy } = solveGimbalForTorque(e, [0, 0, 0], 1, desired.x, desired.y)
+    const torque = netThrustGimbaled(e, [0, 0, 0], 1, gx, gy).torque
+    expect(torque[0]).toBeCloseTo(desired.x, 0)
+    expect(torque[1]).toBeCloseTo(desired.y, 0)
+  })
+
+  it('clamps the deflection to the gimbal range for an over-large request', () => {
+    const e = [gimbalEngine()]
+    const { gx, gy } = solveGimbalForTorque(e, [0, 0, 0], 1, 1e9, 0)
+    expect(Math.hypot(gx, gy)).toBeLessThanOrEqual(RANGE + 1e-9)
+  })
+
+  it('produces no deflection for a fixed (non-gimbal) engine', () => {
+    const fixed: EngineTerm = { ...gimbalEngine(), gimbalRange: 0 }
+    const { gx, gy } = solveGimbalForTorque([fixed], [0, 0, 0], 1, 500, 0)
+    expect(gx).toBe(0)
+    expect(gy).toBe(0)
   })
 })

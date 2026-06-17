@@ -28,6 +28,8 @@ export interface EngineModule {
   isp: number
   /** Thrust axis in the part's local frame; normalized at skeleton build. */
   thrustDirection?: Vec3
+  /** Max gimbal deflection from nominal (degrees). 0/undefined = fixed engine. */
+  gimbalRange?: number
 }
 
 /** A decoupler is the cut point a stage fires to jettison everything below it. */

@@ -342,9 +342,6 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         fuelMass: structure.stageFuel(),
         elapsedSeconds,
       })
-      const thrust = structure.netThrustBody(effectiveThrottle, agg.centerOfMass)
-      thrustForceBody = thrust.force
-      thrustTorqueBody = thrust.torque
       // Use the geometric tensor only when it inverts (a real multi-part craft).
       // The synthesized single-body case stays on the authored diagonal MoI.
       if (agg.inertiaInverse) {
@@ -352,6 +349,19 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         inertiaInverseStep = agg.inertiaInverse
         if (attitude) attitude.momentOfInertia = [agg.inertia[0], agg.inertia[4], agg.inertia[8]]
       }
+
+      // Gimbaled thrust: point the engines toward the controller's desired
+      // steering torque; the deflected thrust imparts a torque from each engine's
+      // mount point, and the integrator + reaction wheels take it from there. The
+      // deflection range is the only limit; a centered engine has no moment arm,
+      // so the solve yields no deflection and the craft just steers with wheels.
+      const desired = attitude
+        ? desiredControlTorque(orientation, angularVelocity, [Infinity, Infinity, Infinity])
+        : ([0, 0, 0] as Vec3)
+      const { gx, gy } = structure.solveGimbal(agg.centerOfMass, effectiveThrottle, desired[0], desired[1])
+      const thrust = structure.netThrustBodyGimbaled(effectiveThrottle, agg.centerOfMass, gx, gy)
+      thrustForceBody = thrust.force
+      thrustTorqueBody = thrust.torque
     }
 
     const parentCurve = msg.bodyCurves.find((curve) => curve.id === parentId)
@@ -516,12 +526,13 @@ function advanceAttitude(
   }
   if (!attitude) {
     // Degenerate path (no attitude model): treat manual torque as a direct rate.
-    const torque = computeAttitudeTorque(orientation, angularVelocity)
+    const torque = desiredControlTorque(orientation, angularVelocity, [0, 0, 0])
     commandedTorque = torque
     angularVelocity = torque
     orientation = integrateOrientation(orientation, angularVelocity, elapsedSeconds)
     return
   }
+  const reactionWheelTorque = attitude.reactionWheelTorque
   const result = integrateAttitudeOverStep({
     orientation,
     angularVelocity,
@@ -529,7 +540,11 @@ function advanceAttitude(
     inertiaTensor,
     inertiaInverse,
     elapsedSeconds,
-    torqueFor: computeAttitudeTorque,
+    // Reaction wheels run normally on every axis; the gimbal's torque arrives
+    // via externalTorque. Both are just torques the integrator sums — no
+    // actuator allocation is asserted (the gimbal naturally can't roll, so the
+    // wheels cover it without being told to).
+    torqueFor: (o, w) => desiredControlTorque(o, w, reactionWheelTorque),
     externalTorque,
   })
   orientation = result.orientation
@@ -537,8 +552,13 @@ function advanceAttitude(
   commandedTorque = result.lastTorque
 }
 
-/** Reaction-wheel torque for a candidate (orientation, angularVelocity). Pure w.r.t. the args. */
-function computeAttitudeTorque(currentOrientation: Quaternion, currentAngularVelocity: Vec3): Vec3 {
+/**
+ * Desired control torque for a candidate (orientation, angularVelocity), shaped
+ * to the given per-axis `maxTorque` budget. Used by the reaction wheels (budget
+ * = wheel torque) and by the gimbal solver (budget = gimbal authority on
+ * pitch/yaw). Pure w.r.t. the args.
+ */
+function desiredControlTorque(currentOrientation: Quaternion, currentAngularVelocity: Vec3, maxTorque: Vec3): Vec3 {
   if (!attitude) return manualTorque
   if (attitudeTarget.kind === 'manual') {
     const base = manualReactionWheelTorque({
@@ -552,19 +572,19 @@ function computeAttitudeTorque(currentOrientation: Quaternion, currentAngularVel
   if (attitudeTarget.kind === 'damp') {
     const dampingTorque = angularVelocityDampingTorque({
       angularVelocity: currentAngularVelocity,
-      maxTorque: attitude.reactionWheelTorque,
+      maxTorque,
       momentOfInertia: attitude.momentOfInertia,
     })
-    return sumAndClampTorque(dampingTorque, manualTorque, attitude.reactionWheelTorque)
+    return sumAndClampTorque(dampingTorque, manualTorque, maxTorque)
   }
   const holdTorque = forwardDirectionHoldTorque({
     currentOrientation,
     targetForward: attitudeTarget.vector,
     angularVelocity: currentAngularVelocity,
-    maxTorque: attitude.reactionWheelTorque,
+    maxTorque,
     momentOfInertia: attitude.momentOfInertia,
   })
-  return sumAndClampTorque(holdTorque, manualTorque, attitude.reactionWheelTorque)
+  return sumAndClampTorque(holdTorque, manualTorque, maxTorque)
 }
 
 function dot(a: Vec3, b: Vec3): number {
