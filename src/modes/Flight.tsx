@@ -130,6 +130,11 @@ export function Flight() {
         const firstVehicle = Object.values(useTrajectoriesStore.getState().vehicles)[0]
         if (firstVehicle) useAutopilotStore.getState().toggleMode(firstVehicle.id, 'damp')
       }
+      if (e.key === ' ') {
+        // Fire the next stage (no-op in the worker if nothing is left to drop).
+        e.preventDefault()
+        useInputStore.getState().push({ type: 'stage', simTime })
+      }
       const throttlePreset = throttlePresetForKeyDown(e)
       if (throttlePreset === 'full') {
         e.preventDefault()

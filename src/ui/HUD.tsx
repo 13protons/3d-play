@@ -4,6 +4,7 @@ import { useCameraStore } from '../state/camera'
 import { useManeuverStore } from '../state/maneuver'
 import { useModeStore } from '../state/mode'
 import { useAutopilotStore } from '../state/autopilot'
+import { useInputStore } from '../state/input'
 import { maneuverBurnDirection, type ManeuverDeltaV, type ManeuverNode } from '../sim/maneuverNode'
 import { attitudeDiagnostics, type AttitudeAxisDiagnostic } from './attitudeDiagnostics'
 import { countRender } from '../render/perfCounters'
@@ -386,15 +387,18 @@ function AttitudeAxisRow({ row }: { row: AttitudeAxisDiagnostic }) {
  * while burning). Mirrors the old MASS card but as a standalone floating panel.
  */
 function ResourcesPanel({ control }: { control: VehicleControlMeta }) {
-  const { mass, fuelMass, isp, currentThrust } = control
+  const { mass, fuelMass, isp, currentThrust, stages, currentStage, canStage } = control
   if (mass === undefined || fuelMass === undefined) return null
   const flow = isp && currentThrust ? currentThrust / exhaustVelocity(isp) : 0
-  const dvRemaining = isp ? deltaVBudget(mass, mass - fuelMass, isp) : 0
+  // Per-stage ΔV when the craft is multi-part; otherwise the single-body budget.
+  const totalDv = stages?.length
+    ? stages.reduce((sum, s) => sum + s.deltaV, 0)
+    : isp ? deltaVBudget(mass, mass - fuelMass, isp) : 0
   const burnLeft = flow > 0 ? fuelMass / flow : null
   const rows: { label: string; value: string; warn?: boolean }[] = [
     { label: 'MASS', value: `${mass.toFixed(0)} kg` },
     { label: 'FUEL', value: `${fuelMass.toFixed(0)} kg`, warn: fuelMass <= 0 },
-    { label: 'ΔV', value: `${dvRemaining.toFixed(0)} m/s` },
+    { label: 'ΔV', value: `${totalDv.toFixed(0)} m/s` },
     { label: 'FLOW', value: `${flow.toFixed(1)} kg/s` },
   ]
   if (burnLeft !== null) rows.push({ label: 'BURN', value: formatBurnDuration(burnLeft) })
@@ -423,7 +427,51 @@ function ResourcesPanel({ control }: { control: VehicleControlMeta }) {
           <span style={{ color: row.warn ? '#ff7777' : '#ffcd70' }}>{row.value}</span>
         </div>
       ))}
+      {stages && stages.length > 0 && (
+        <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid rgba(210,225,255,0.2)' }}>
+          {stages.map((s) => (
+            <div
+              key={s.stage}
+              style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2, opacity: s.stage === currentStage ? 1 : 0.55 }}
+            >
+              <span style={{ color: s.stage === currentStage ? '#9cd8ff' : 'inherit' }}>
+                {s.stage === currentStage ? '▶ ' : '  '}S{s.stage}
+              </span>
+              <span style={{ color: '#ffcd70' }}>{s.deltaV.toFixed(0)} m/s</span>
+            </div>
+          ))}
+          <StageButton enabled={!!canStage} />
+        </div>
+      )}
     </div>
+  )
+}
+
+function StageButton({ enabled }: { enabled: boolean }) {
+  return (
+    <button
+      onClick={() => {
+        if (!enabled) return
+        useInputStore.getState().push({ type: 'stage', simTime: useTrajectoriesStore.getState().getSimTime() })
+      }}
+      disabled={!enabled}
+      style={{
+        marginTop: 8,
+        width: '100%',
+        padding: '6px 0',
+        background: enabled ? 'rgba(156,216,255,0.18)' : 'rgba(255,255,255,0.05)',
+        border: `1px solid ${enabled ? 'rgba(156,216,255,0.5)' : 'rgba(255,255,255,0.15)'}`,
+        borderRadius: 4,
+        color: enabled ? 'white' : 'rgba(255,255,255,0.35)',
+        fontFamily: 'monospace',
+        fontSize: 11,
+        letterSpacing: 1,
+        cursor: enabled ? 'pointer' : 'default',
+        pointerEvents: 'auto',
+      }}
+    >
+      STAGE ⎵
+    </button>
   )
 }
 
