@@ -4,6 +4,37 @@ Design for turning a vehicle from a single hand-authored rigid body into a tree
 of parts whose rigid-body properties are *derived* from the tree. This is the
 keystone for staging, thrust vectoring, aero stability, and reentry/thermal.
 
+## Status: v1 spine implemented (2026-06-17)
+
+All six build-order steps below shipped. Map of the code:
+
+- `src/sim/vehicle/mat3.ts` — Vec3 / 3×3 matrix algebra (inverse, quaternion→
+  matrix, point-mass inertia, parallel-axis).
+- `src/sim/vehicle/parts.ts` — `PartDefinition` + module catalog (+ a render hint).
+- `src/sim/vehicle/aggregation.ts` — tree-transform resolution, two-phase
+  aggregation (dry skeleton + per-step fuel-linear update), net thrust force/torque.
+- `src/sim/vehicle/controls.ts` — Euler integrator (`angularAccelerationEuler`)
+  wired into `integrateAttitudeOverStep` (tensor path + external thrust torque);
+  `thrustAccelerationFromBodyForce`.
+- `src/sim/vehicle/structure.ts` — mutable `VehicleStructure`: fuel, firing-stage
+  selection, drain, staging, per-stage ΔV. `singleBody()` reproduces the legacy
+  model exactly (degenerate 1-part case).
+- `src/sim/vehicle/worker.ts` — builds the structure at init; per step aggregates
+  → mass/thrust/inertia; drains fuel; `stage` command emits a `vehicle-structure`
+  sync event.
+- `src/state/{vehicle,bridge,trajectories}.ts` — part tree threaded scenario →
+  store (render mirror) → worker init; structural-sync applied to the mirror.
+- `src/render/Vessel.tsx` — assembles part meshes from the mirror.
+- UI: RESOURCES per-stage ΔV + STAGE button; spacebar stages.
+- Scenario: `public/data/scenarios/two-stage-ascent.json`.
+
+**Known v1 limitations to revisit:** the single-body case keeps the authored
+diagonal MoI (its geometric tensor is zero, so the Euler path only engages for
+real multi-part trees); the controller schedules gains off the diagonal of the
+tensor (good enough, not exact for products of inertia); `Vessel.tsx` shares one
+flame ref across engine parts (only one plume shows); render dims are uniform-
+scaled metres; staging resolves on message receipt (a step boundary in practice).
+
 ## Principle
 
 A vehicle is a **tree of parts**. The physics needs a rigid body — mass, center
