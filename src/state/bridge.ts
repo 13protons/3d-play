@@ -301,6 +301,7 @@ export async function startSim(scenarioId: string): Promise<void> {
           currentStage: msg.currentStage,
           canStage: msg.canStage,
           stages: msg.stages,
+          centerOfMass: msg.centerOfMass,
         })
       }
       if (msg.type === 'vehicle-structure') {

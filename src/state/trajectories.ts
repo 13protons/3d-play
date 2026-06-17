@@ -25,6 +25,7 @@ export interface VehicleControlMeta {
   currentStage?: number
   canStage?: boolean
   stages?: StageSummary[]
+  centerOfMass?: [number, number, number]
 }
 
 export interface BodyMeta {

@@ -27,6 +27,7 @@ const DEFAULT_RENDER: PartRender = { shape: 'cylinder', radius: 1.5, length: 4, 
 export function Vessel({ vehicleId }: { vehicleId: string }) {
   countRender('Vessel')
   const groupRef = useRef<Group>(null)
+  const comRef = useRef<Group>(null)
   const flameRef = useRef<Group>(null)
   const model = useVehicleStore((s) => s.models[vehicleId])
   const parts = model?.parts
@@ -61,6 +62,14 @@ export function Vessel({ vehicleId }: { vehicleId: string }) {
     if (!controls) return
     const [x, y, z, w] = controls.orientation
     group.quaternion.set(x, y, z, w)
+    // Pivot about the live CoM: the tracked position is the CoM, so offset the
+    // parts by −CoM (scaled into scene units) inside the rotated group. As fuel
+    // burns and on staging the CoM moves, and the craft pivots about the new one.
+    if (comRef.current) {
+      const com = controls.centerOfMass
+      if (com) comRef.current.position.set(-com[0] * VEHICLE_RENDER_SCALE, -com[1] * VEHICLE_RENDER_SCALE, -com[2] * VEHICLE_RENDER_SCALE)
+      else comRef.current.position.set(0, 0, 0)
+    }
     if (flameRef.current) flameRef.current.visible = controls.throttle > 0
   })
 
@@ -68,7 +77,7 @@ export function Vessel({ vehicleId }: { vehicleId: string }) {
 
   return (
     <group ref={groupRef}>
-      <group scale={VEHICLE_RENDER_SCALE}>
+      <group ref={comRef} scale={VEHICLE_RENDER_SCALE}>
         {placed.map((p) => (
           <group
             key={p.instanceId}

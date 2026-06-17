@@ -188,6 +188,7 @@ export type VehicleWorkerOutbound =
       currentStage?: number
       canStage?: boolean
       stages?: StageSummary[]
+      centerOfMass?: [number, number, number]
     }
 
 // ---------------------------------------------------------------------------
