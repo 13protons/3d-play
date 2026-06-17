@@ -7,6 +7,7 @@ interface ModeState {
   showRotationAxes: boolean
   showAttitudeDiagnostics: boolean
   perfLogging: boolean
+  showKeyboardShortcuts: boolean
   enterFlight: (scenarioId: string) => void
   enterMenu: () => void
   setActiveView: (view: 'orbital' | 'vehicle') => void
@@ -14,6 +15,7 @@ interface ModeState {
   toggleRotationAxes: () => void
   toggleAttitudeDiagnostics: () => void
   togglePerfLogging: () => void
+  toggleKeyboardShortcuts: () => void
 }
 
 export const useModeStore = create<ModeState>((set) => ({
@@ -23,6 +25,7 @@ export const useModeStore = create<ModeState>((set) => ({
   showRotationAxes: false,
   showAttitudeDiagnostics: false,
   perfLogging: false,
+  showKeyboardShortcuts: false,
   enterFlight: (scenarioId) => set({ view: 'flight', scenarioId, activeView: 'orbital' }),
   enterMenu: () => set({ view: 'menu', scenarioId: null, activeView: 'orbital', showRotationAxes: false }),
   setActiveView: (activeView) => set({ activeView }),
@@ -30,4 +33,6 @@ export const useModeStore = create<ModeState>((set) => ({
   toggleRotationAxes: () => set((state) => ({ showRotationAxes: !state.showRotationAxes })),
   toggleAttitudeDiagnostics: () => set((state) => ({ showAttitudeDiagnostics: !state.showAttitudeDiagnostics })),
   togglePerfLogging: () => set((state) => ({ perfLogging: !state.perfLogging })),
+  toggleKeyboardShortcuts: () =>
+    set((state) => ({ showKeyboardShortcuts: !state.showKeyboardShortcuts })),
 }))

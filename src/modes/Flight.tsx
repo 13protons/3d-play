@@ -94,6 +94,13 @@ export function Flight() {
     }
 
     function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === '?') {
+        if (!e.repeat) {
+          e.preventDefault()
+          useModeStore.getState().toggleKeyboardShortcuts()
+        }
+        return
+      }
       if (!shouldProcessFlightControlKey({ paused: pausedRef.current, key: e.key })) return
       const { warpRate, simTime } = useTrajectoriesStore.getState()
       if (e.repeat) return

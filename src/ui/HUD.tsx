@@ -1,7 +1,6 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useCameraStore } from '../state/camera'
-import { useInputStore } from '../state/input'
 import { useManeuverStore } from '../state/maneuver'
 import { useModeStore } from '../state/mode'
 import { useAutopilotStore } from '../state/autopilot'
@@ -11,7 +10,6 @@ import { countRender } from '../render/perfCounters'
 import { useThrottledRender } from './useThrottledRender'
 import { TooltipOverlay } from './Tooltip'
 import type { VehicleControlMeta } from '../state/trajectories'
-import { WARP_RATES } from '../sim/warp'
 import { evaluateCurve, evaluateCurveVelocity } from '../sim/curves'
 import { computeFlightReadout, flightTelemetryRows } from './flightReadout'
 import { NavballCluster } from './Navball'
@@ -48,23 +46,9 @@ export function HUD() {
   const bodies = useTrajectoriesStore((s) => s.bodies)
   const vehicles = useTrajectoriesStore((s) => s.vehicles)
   const followTargetId = useCameraStore((s) => s.followTargetId)
-  const setFollowTarget = useCameraStore((s) => s.setFollowTarget)
   const activeView = useModeStore((s) => s.activeView)
-  const showRotationAxes = useModeStore((s) => s.showRotationAxes)
-  const showAttitudeDiagnostics = useModeStore((s) => s.showAttitudeDiagnostics)
-  const toggleView = useModeStore((s) => s.toggleView)
-  const toggleRotationAxes = useModeStore((s) => s.toggleRotationAxes)
-  const toggleAttitudeDiagnostics = useModeStore((s) => s.toggleAttitudeDiagnostics)
-  const perfLogging = useModeStore((s) => s.perfLogging)
-  const togglePerfLogging = useModeStore((s) => s.togglePerfLogging)
+  const showKeyboardShortcuts = useModeStore((s) => s.showKeyboardShortcuts)
   const targetName = bodies[followTargetId]?.name ?? vehicles[followTargetId]?.name ?? followTargetId
-
-  function setWarp(rate: number) {
-    useInputStore
-      .getState()
-      .push({ type: 'set-warp', rate, simTime: useTrajectoriesStore.getState().getSimTime() })
-  }
-
 
   return (
     <div
@@ -100,134 +84,17 @@ export function HUD() {
         </div>
       </div>
 
-      <div
-        style={{
-          marginTop: 12,
-          display: 'flex',
-          gap: 8,
-          pointerEvents: 'auto',
-        }}
-      >
-        <select
-          value={followTargetId}
-          onChange={(e) => setFollowTarget(e.target.value)}
-          style={{
-            background: '#1a1a2e',
-            color: '#ccc',
-            border: '1px solid #333',
-            padding: '4px 8px',
-            cursor: 'pointer',
-            fontFamily: 'monospace',
-            fontSize: 12,
-          }}
-        >
-          {Object.values(vehicles).length > 0 && (
-            <optgroup label="Vehicles">
-              {Object.values(vehicles).map((v) => (
-                <option key={v.id} value={v.id}>{v.name}</option>
-              ))}
-            </optgroup>
-          )}
-          <optgroup label="Bodies">
-            {Object.values(bodies).map((body) => (
-              <option key={body.id} value={body.id}>{body.name}</option>
-            ))}
-          </optgroup>
-        </select>
-        <button
-          onClick={toggleView}
-          style={{
-            background: '#1a1a2e',
-            color: '#ccc',
-            border: '1px solid #333',
-            padding: '4px 8px',
-            cursor: 'pointer',
-            fontFamily: 'monospace',
-            fontSize: 12,
-          }}
-        >
-          Toggle View (V)
-        </button>
-        <button
-          onClick={toggleRotationAxes}
-          style={{
-            background: showRotationAxes ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
-            color: '#ccc',
-            border: '1px solid #333',
-            padding: '4px 8px',
-            cursor: 'pointer',
-            fontFamily: 'monospace',
-            fontSize: 12,
-          }}
-        >
-          Rotation Axis: {showRotationAxes ? 'On' : 'Off'}
-        </button>
-        <button
-          onClick={toggleAttitudeDiagnostics}
-          style={{
-            background: showAttitudeDiagnostics ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
-            color: '#ccc',
-            border: '1px solid #333',
-            padding: '4px 8px',
-            cursor: 'pointer',
-            fontFamily: 'monospace',
-            fontSize: 12,
-          }}
-        >
-          Attitude Diag: {showAttitudeDiagnostics ? 'On' : 'Off'}
-        </button>
-        <button
-          onClick={togglePerfLogging}
-          style={{
-            background: perfLogging ? 'rgba(255,255,255,0.25)' : '#1a1a2e',
-            color: '#ccc',
-            border: '1px solid #333',
-            padding: '4px 8px',
-            cursor: 'pointer',
-            fontFamily: 'monospace',
-            fontSize: 12,
-          }}
-        >
-          Perf Log: {perfLogging ? 'On' : 'Off'}
-        </button>
+      <div style={{ marginTop: 12 }}>
+        <DebugMenu />
       </div>
 
-      <div
-        style={{
-          marginTop: 12,
-          display: 'flex',
-          gap: 4,
-          pointerEvents: 'auto',
-        }}
-      >
-        {WARP_RATES.map((rate) => (
-          <button
-            key={rate}
-            onClick={() => setWarp(rate)}
-            style={{
-              padding: '2px 8px',
-              background:
-                rate === warpRate
-                  ? 'rgba(100,180,255,0.35)'
-                  : 'rgba(255,255,255,0.08)',
-              color: 'white',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 3,
-              cursor: 'pointer',
-              fontFamily: 'monospace',
-              fontSize: 11,
-            }}
-          >
-            {rate}x
-          </button>
-        ))}
-      </div>
-
-      <div style={{ marginTop: 8, opacity: 0.4, fontSize: 11 }}>
-        [ / ] warp &nbsp; Z/X throttle &nbsp; Ctrl+Z full &nbsp; Ctrl+X cut &nbsp; T SAS &nbsp; M map
-        &nbsp; WASD/QE reaction wheel
-        &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu
-      </div>
+      {showKeyboardShortcuts && (
+        <div style={{ marginTop: 8, opacity: 0.5, fontSize: 11 }}>
+          [ / ] warp &nbsp; Z/X throttle &nbsp; Ctrl+Z full &nbsp; Ctrl+X cut &nbsp; T SAS &nbsp; M map
+          &nbsp; WASD/QE reaction wheel
+          &nbsp; scroll to zoom &nbsp; drag to orbit &nbsp; esc menu &nbsp; ? hide
+        </div>
+      )}
       <FlightReadouts />
       <TooltipOverlay />
     </div>
@@ -238,6 +105,102 @@ export function HUD() {
 function SimClock() {
   useThrottledRender(8)
   return <div>T+ {formatTime(useTrajectoriesStore.getState().getSimTime())}</div>
+}
+
+const controlBaseStyle: CSSProperties = {
+  color: '#ccc',
+  border: '1px solid #333',
+  padding: '4px 8px',
+  cursor: 'pointer',
+  fontFamily: 'monospace',
+  fontSize: 12,
+  textAlign: 'left',
+}
+
+/** Shared style for the debug-menu items; `active` highlights toggles that are on. */
+function controlStyle(active: boolean): CSSProperties {
+  return { ...controlBaseStyle, background: active ? 'rgba(255,255,255,0.25)' : '#1a1a2e' }
+}
+
+/**
+ * Collapses the dev controls (follow target, view, rotation axis, attitude
+ * diag, perf log) behind a single menu. The toggles are store-backed, so they
+ * keep their state across opens.
+ */
+function DebugMenu() {
+  const [open, setOpen] = useState(false)
+  const bodies = useTrajectoriesStore((s) => s.bodies)
+  const vehicles = useTrajectoriesStore((s) => s.vehicles)
+  const followTargetId = useCameraStore((s) => s.followTargetId)
+  const setFollowTarget = useCameraStore((s) => s.setFollowTarget)
+  const activeView = useModeStore((s) => s.activeView)
+  const showRotationAxes = useModeStore((s) => s.showRotationAxes)
+  const showAttitudeDiagnostics = useModeStore((s) => s.showAttitudeDiagnostics)
+  const perfLogging = useModeStore((s) => s.perfLogging)
+  const toggleView = useModeStore((s) => s.toggleView)
+  const toggleRotationAxes = useModeStore((s) => s.toggleRotationAxes)
+  const toggleAttitudeDiagnostics = useModeStore((s) => s.toggleAttitudeDiagnostics)
+  const togglePerfLogging = useModeStore((s) => s.togglePerfLogging)
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-block', pointerEvents: 'auto' }}>
+      <button onClick={() => setOpen((v) => !v)} style={controlStyle(open)}>
+        ☰ Debug
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            padding: 8,
+            minWidth: 200,
+            background: 'rgba(10,12,22,0.95)',
+            border: '1px solid #333',
+            borderRadius: 4,
+            zIndex: 50,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+            <span style={{ opacity: 0.6 }}>Follow</span>
+            <select
+              value={followTargetId}
+              onChange={(e) => setFollowTarget(e.target.value)}
+              style={{ ...controlBaseStyle, flex: 1 }}
+            >
+              {Object.values(vehicles).length > 0 && (
+                <optgroup label="Vehicles">
+                  {Object.values(vehicles).map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label="Bodies">
+                {Object.values(bodies).map((body) => (
+                  <option key={body.id} value={body.id}>{body.name}</option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+          <button onClick={toggleView} style={controlStyle(false)}>
+            View: {activeView.toUpperCase()}
+          </button>
+          <button onClick={toggleRotationAxes} style={controlStyle(showRotationAxes)}>
+            Rotation Axis: {showRotationAxes ? 'On' : 'Off'}
+          </button>
+          <button onClick={toggleAttitudeDiagnostics} style={controlStyle(showAttitudeDiagnostics)}>
+            Attitude Diag: {showAttitudeDiagnostics ? 'On' : 'Off'}
+          </button>
+          <button onClick={togglePerfLogging} style={controlStyle(perfLogging)}>
+            Perf Log: {perfLogging ? 'On' : 'Off'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 /**
