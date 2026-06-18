@@ -94,13 +94,15 @@ function AtmosphereTransientDriver({
 }
 
 /**
- * Reports whether the camera has climbed above the atmosphere shell (topRadius).
- * Aerial perspective is "look through the air" — only valid from inside the
- * atmosphere — so above the shell we switch it off and render the from-space limb
- * shell instead. Hysteresis is a small fraction of the SHELL THICKNESS (not of
- * topRadius — a % of the ~6,400 km radius would be wider than the whole 60 km
- * atmosphere and latch above forever). Camera ECEF position: the scene origin is the
- * vehicle, so cameraECEF = cameraScenePos + (vehiclePos - bodyPos).
+ * Reports whether we're in a "from-space" situation — i.e. whether the CAMERA or the
+ * VEHICLE is above the atmosphere shell (topRadius). Keying on the camera alone is
+ * wrong: when the vehicle is in orbit but the camera orbits down below the shell,
+ * takram would switch back on and fog the space background maroon. So we use the max
+ * of the two radii. Above → the from-space limb shell; below → takram's aerial
+ * perspective. Hysteresis is a small fraction of the SHELL THICKNESS (not of topRadius
+ * — a % of the ~6,400 km radius would exceed the whole 60 km atmosphere and latch).
+ * Camera ECEF position: the scene origin is the vehicle, so cameraECEF =
+ * cameraScenePos + (vehiclePos - bodyPos); the vehicle's own radius is |vehicle-body|.
  */
 function CameraAtmosphereGate({
   bodyId,
@@ -127,16 +129,22 @@ function CameraAtmosphereGate({
     if (!bodyCurve || !vehicleCurve) return
     const bodyPos = evaluateCurve(bodyCurve, t) as Vec3
     const vehiclePos = evaluateCurve(vehicleCurve, t) as Vec3
-    const ex = camera.position.x + (vehiclePos[0] - bodyPos[0])
-    const ey = camera.position.y + (vehiclePos[1] - bodyPos[1])
-    const ez = camera.position.z + (vehiclePos[2] - bodyPos[2])
-    const cameraRadius = Math.hypot(ex, ey, ez)
+    const vx = vehiclePos[0] - bodyPos[0]
+    const vy = vehiclePos[1] - bodyPos[1]
+    const vz = vehiclePos[2] - bodyPos[2]
+    const vehicleRadius = Math.hypot(vx, vy, vz)
+    const cameraRadius = Math.hypot(
+      camera.position.x + vx,
+      camera.position.y + vy,
+      camera.position.z + vz,
+    )
+    const radius = Math.max(cameraRadius, vehicleRadius)
     const above =
       aboveRef.current == null
-        ? cameraRadius > topRadius
+        ? radius > topRadius
         : aboveRef.current
-          ? cameraRadius > topRadius - margin
-          : cameraRadius > topRadius + margin
+          ? radius > topRadius - margin
+          : radius > topRadius + margin
     if (above !== aboveRef.current) {
       aboveRef.current = above
       onAboveChange(above)

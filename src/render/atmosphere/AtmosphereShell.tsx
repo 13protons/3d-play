@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import {
   AddEquation,
   CustomBlending,
-  FrontSide,
+  DoubleSide,
   OneFactor,
   OneMinusSrcAlphaFactor,
   Vector3,
@@ -25,14 +25,15 @@ const SHELL_SUN_INTENSITY = 8
 /**
  * From-space atmosphere for the parent body: a planet-centred shell whose shader
  * ray-marches single scattering (see atmosphereShellShader). The mesh sits at exactly
- * atmosphereRadius (= topRadius) and is FrontSide: the swap only mounts this when the
- * camera is ABOVE topRadius, so the camera is always outside the mesh and the near
- * hemisphere rasterizes (disc + limb = small, cheap coverage). NOT oversized — an
- * oversized mesh would swallow the camera (inside → FrontSide culls → nothing draws).
- * The shader clips to the true atmosphere via ray-sphere; high tessellation keeps the
- * silhouette (and thus the limb edge) smooth. Additive over the mostly-dark night
- * planet + black space gives the blue limb + red terminator ring. Positioned at the
- * body's floating-origin scene position; sun direction from the emissive body.
+ * atmosphereRadius (= topRadius) and is DoubleSide: the swap mounts this when EITHER
+ * the camera or the vehicle is above the shell, so the camera may be outside the mesh
+ * (common, from-space) OR inside it (vehicle in orbit but camera orbited low) — the
+ * shader's marchStart = max(0, hit) handles both. NOT oversized — that would swallow
+ * the camera and force a full-screen march from inside even in the common case. The
+ * shader clips to the true atmosphere via ray-sphere; high tessellation keeps the
+ * silhouette (and thus the limb edge) smooth. Composites scene*transmittance +
+ * inscatter (premultiplied blend) for the blue limb + red terminator ring. Positioned
+ * at the body's floating-origin scene position; sun direction from the emissive body.
  */
 export function AtmosphereShell({
   bodyId,
@@ -111,7 +112,7 @@ export function AtmosphereShell({
         blendSrc={OneFactor}
         blendDst={OneMinusSrcAlphaFactor}
         depthWrite={false}
-        side={FrontSide}
+        side={DoubleSide}
       />
     </mesh>
   )

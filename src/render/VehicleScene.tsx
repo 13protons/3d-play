@@ -555,6 +555,7 @@ export function VehicleScene() {
       <Canvas
         camera={{ position: [0, 10, 30], near: 0.1, far: 1e9, fov: 60 }}
         frameloop={active ? 'always' : 'never'}
+        gl={{ logarithmicDepthBuffer: true }}
         style={{ width: '100%', height: '100%' }}
       >
         <PerfLogger view="vehicle" />

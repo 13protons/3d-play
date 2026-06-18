@@ -18,11 +18,16 @@
 
 export const ATMOSPHERE_SHELL_VERTEX_SHADER = /* glsl */ `
 varying vec3 vWorldPosition;
+#include <logdepthbuf_pars_vertex>
 
 void main() {
   vec4 worldPosition = modelMatrix * vec4(position, 1.0);
   vWorldPosition = worldPosition.xyz;
   gl_Position = projectionMatrix * viewMatrix * worldPosition;
+  // Participate in the logarithmic depth buffer (enabled on the canvas) so the shell
+  // doesn't z-fight the terrain at orbital range — at far:1e9 a standard buffer can't
+  // resolve the ~60 km shell/surface gap. Stock materials get this automatically.
+  #include <logdepthbuf_vertex>
 }
 `
 
@@ -30,6 +35,7 @@ export const ATMOSPHERE_SHELL_FRAGMENT_SHADER = /* glsl */ `
 precision highp float;
 
 varying vec3 vWorldPosition;
+#include <logdepthbuf_pars_fragment>
 
 uniform vec3 uPlanetCenter;      // scene-space, relative to floating origin
 uniform vec3 uSunDirection;      // unit vector from planet toward the sun
@@ -56,6 +62,8 @@ vec2 raySphere(vec3 origin, vec3 dir, vec3 center, float radius) {
 }
 
 void main() {
+  #include <logdepthbuf_fragment>
+
   vec3 rayOrigin = cameraPosition;
   vec3 rayDir = normalize(vWorldPosition - cameraPosition);
 
