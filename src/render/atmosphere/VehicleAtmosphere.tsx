@@ -135,8 +135,12 @@ export function VehicleAtmosphere({
     <Atmosphere textures={textures ?? undefined} ellipsoid={ellipsoid} correctAltitude>
       <AtmosphereTransientDriver bodyId={bodyId} vehicleId={vehicleId} />
       {textures && <Sky sun={false} moon={false} />}
-      <EffectComposer>
-        {textures ? <AerialPerspective sun={false} moon={false} /> : <></>}
+      {/* multisampling 0: the default 8x MSAA on a full-screen atmosphere pass is the
+          main frame-time cost (AA can return later via an SMAA effect). ground=false:
+          we render real terrain, so takram must NOT also draw its analytic flat ground
+          (that was the thick maroon band from orbit). */}
+      <EffectComposer multisampling={0}>
+        {textures ? <AerialPerspective sun={false} moon={false} ground={false} /> : <></>}
         <ToneMapping mode={ToneMappingMode.AGX} />
       </EffectComposer>
     </Atmosphere>
