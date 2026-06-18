@@ -96,24 +96,28 @@ function AtmosphereTransientDriver({
 /**
  * Reports whether the camera has climbed above the atmosphere shell (topRadius).
  * Aerial perspective is "look through the air" — only valid from inside the
- * atmosphere — so above the shell we switch it off and let the Sky mesh carry the
- * from-space look (limb + black space). Hysteresis (2%/-2%) keeps orbiting near the
- * edge from thrashing the effect pass. Camera ECEF position: the scene origin is the
+ * atmosphere — so above the shell we switch it off and render the from-space limb
+ * shell instead. Hysteresis is a small fraction of the SHELL THICKNESS (not of
+ * topRadius — a % of the ~6,400 km radius would be wider than the whole 60 km
+ * atmosphere and latch above forever). Camera ECEF position: the scene origin is the
  * vehicle, so cameraECEF = cameraScenePos + (vehiclePos - bodyPos).
  */
 function CameraAtmosphereGate({
   bodyId,
   vehicleId,
+  bottomRadius,
   topRadius,
   onAboveChange,
 }: {
   bodyId: string
   vehicleId: string
+  bottomRadius: number
   topRadius: number
   onAboveChange: (above: boolean) => void
 }) {
   const camera = useThree((s) => s.camera)
   const aboveRef = useRef<boolean | null>(null)
+  const margin = (topRadius - bottomRadius) * 0.05 // ~5% of shell thickness
   useFrame(() => {
     const store = useTrajectoriesStore.getState()
     const { curves } = store
@@ -131,8 +135,8 @@ function CameraAtmosphereGate({
       aboveRef.current == null
         ? cameraRadius > topRadius
         : aboveRef.current
-          ? cameraRadius > topRadius * 0.98
-          : cameraRadius > topRadius * 1.02
+          ? cameraRadius > topRadius - margin
+          : cameraRadius > topRadius + margin
     if (above !== aboveRef.current) {
       aboveRef.current = above
       onAboveChange(above)
@@ -190,6 +194,7 @@ export function VehicleAtmosphere({
       <CameraAtmosphereGate
         bodyId={bodyId}
         vehicleId={vehicleId}
+        bottomRadius={params.bottomRadius}
         topRadius={params.topRadius}
         onAboveChange={setCameraAbove}
       />

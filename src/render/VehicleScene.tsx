@@ -49,10 +49,10 @@ import { countRender } from './perfCounters'
 const SUN_RENDER_DISTANCE = 5e8
 
 // Vehicle view is for near-vehicle flight, not surveying the whole planet. Cap how
-// far the camera can orbit out — beyond a few hundred km the atmosphere effect's
-// ground->space transition degrades (floating-origin precision), and that wide a
-// view is the orbital map's job. Tunable.
-const VEHICLE_VIEW_MAX_DISTANCE = 3e5
+// far the camera can orbit out — far enough to rise above the ~60 km atmosphere and
+// see the limb/sunrise, but not so far the terrain drops to its lowest LOD and the
+// view turns to mush. Surveying the whole planet is the orbital map's job. Tunable.
+const VEHICLE_VIEW_MAX_DISTANCE = 1.5e5
 
 /**
  * Walk up from vehicleParentId to root, collecting ancestors and their direct children.
