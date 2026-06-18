@@ -6,7 +6,7 @@ import {
   createBodySurfaceGeometry,
   generateBodySurfaceGeometryData,
 } from '../bodySurfaceGeometry'
-import { selectCubeSphereShellTiles, selectTerrainTiles } from '../terrain/tileSelection'
+import { selectAdaptiveCubeSphereTiles, selectCubeSphereShellTiles, selectTerrainTiles } from '../terrain/tileSelection'
 import { TerrainTileCache } from '../terrain/tileCache'
 import { terrainTileChildren, terrainTileKey } from '../terrain/tileId'
 import { cachedTerrainTilesForIds, mergeTerrainTileData, terrainTileSelectionKey } from '../terrain/tileGeometry'
@@ -576,5 +576,64 @@ describe('TerrainTileCache', () => {
     expect(cache.getCachedTile(first)).toBeDefined()
     expect(cache.getCachedTile(second)).toBeUndefined()
     expect(cache.getCachedTile(third)).toBeDefined()
+  })
+})
+
+describe('selectAdaptiveCubeSphereTiles', () => {
+  const bodyRadius = 6_371_000 // Earth
+  const fovRadians = Math.PI / 3
+  const viewportHeight = 1080
+
+  it('covers all six faces and stays coarse when the camera is far away', () => {
+    const tiles = selectAdaptiveCubeSphereTiles({
+      bodyId: 'earth',
+      bodyRadius,
+      cameraLocalPosition: [0, 0, bodyRadius * 100],
+      fovRadians,
+      viewportHeight,
+    })
+
+    expect(new Set(tiles.map((tile) => tile.face))).toEqual(
+      new Set(['px', 'nx', 'py', 'ny', 'pz', 'nz']),
+    )
+    // Nothing on screen is large enough to subdivide: one root tile per face.
+    expect(tiles).toHaveLength(6)
+    expect(Math.max(...tiles.map((tile) => tile.lod))).toBe(0)
+  })
+
+  it('refines to the body max LOD near the camera and keeps the far side coarse', () => {
+    const tiles = selectAdaptiveCubeSphereTiles({
+      bodyId: 'earth',
+      bodyRadius,
+      // 1 km above the surface on the +z axis → sub-camera point is on the 'pz' face.
+      cameraLocalPosition: [0, 0, bodyRadius + 1000],
+      fovRadians,
+      viewportHeight,
+    })
+
+    const maxLod = maxTileLodForBodyRadius(bodyRadius)
+    const finest = tiles.reduce((a, b) => (b.lod > a.lod ? b : a))
+    expect(finest.lod).toBe(maxLod)
+    expect(finest.face).toBe('pz')
+
+    // The back face is over the horizon at ground level, so it's culled entirely.
+    expect(tiles.some((tile) => tile.face === 'nz')).toBe(false)
+
+    // Horizon culling + the tile budget keep the working set bounded.
+    expect(tiles.length).toBeLessThan(2048)
+    expect(tiles.length).toBeGreaterThan(1)
+  })
+
+  it('is deterministic for a fixed camera', () => {
+    const args = {
+      bodyId: 'earth' as const,
+      bodyRadius,
+      cameraLocalPosition: [bodyRadius + 5000, 0, 0] as [number, number, number],
+      fovRadians,
+      viewportHeight,
+    }
+    expect(selectAdaptiveCubeSphereTiles(args).map(terrainTileKey)).toEqual(
+      selectAdaptiveCubeSphereTiles(args).map(terrainTileKey),
+    )
   })
 })
