@@ -39,6 +39,7 @@ import type { VehicleAttitude } from '../types'
 import {
   classifySurfaceContact,
   classifySurfaceContactAlongSegment,
+  isLandingDescent,
   rotatingSurfaceState,
   type SurfaceContact,
 } from './surfaceContact'
@@ -519,7 +520,13 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         parentRadius: contactRadius,
         landingSpeedThreshold: LANDING_SPEED_THRESHOLD,
       })
-      if (contact.type !== 'flying') {
+      // Only land when actually moving *toward* the surface (see isLandingDescent):
+      // a craft thrusting off the pad has zero/positive radial velocity, so it isn't
+      // re-grabbed even though the contact radius (R + clearance) grows as fuel drains
+      // and the CoM rises.
+      const surfaceNormalNow = normalize([relativePosition[0], relativePosition[1], relativePosition[2]])
+      const radialVelocity = dot(relativeVelocity, surfaceNormalNow)
+      if (isLandingDescent(contact, radialVelocity)) {
         surfaceContact = contact
         landedAt = prevTime + (contact.segmentT ?? 1) * (simTime - prevTime)
         const landed = rotatingSurfaceState({

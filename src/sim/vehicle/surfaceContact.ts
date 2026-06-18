@@ -10,6 +10,21 @@ export interface SurfaceState {
   velocity: Vec3
 }
 
+/**
+ * A surface contact only counts as a landing when the craft is moving *toward* the
+ * surface (negative radial velocity). A craft thrusting off the pad has zero/positive
+ * radial velocity, so it's lifting off, not landing — it must not be re-grabbed, even
+ * though its position still sits within the contact radius (which grows as fuel drains
+ * and the CoM rises). `radialVelocity` is the velocity component along the outward
+ * surface normal.
+ */
+export function isLandingDescent(
+  contact: SurfaceContact,
+  radialVelocity: number,
+): contact is Exclude<SurfaceContact, { type: 'flying' }> {
+  return contact.type !== 'flying' && radialVelocity < 0
+}
+
 export function classifySurfaceContact({
   relativePosition,
   relativeVelocity,

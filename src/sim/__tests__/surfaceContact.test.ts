@@ -2,9 +2,29 @@ import { describe, expect, it } from 'vitest'
 import {
   classifySurfaceContact,
   classifySurfaceContactAlongSegment,
+  isLandingDescent,
   landedSurfaceState,
   rotatingSurfaceState,
 } from '../vehicle/surfaceContact'
+
+describe('isLandingDescent', () => {
+  const landed = { type: 'landed' as const, surfaceNormal: [1, 0, 0] as [number, number, number] }
+  const crashed = { type: 'crashed' as const, surfaceNormal: [1, 0, 0] as [number, number, number] }
+
+  it('lands when descending toward the surface', () => {
+    expect(isLandingDescent(landed, -5)).toBe(true)
+    expect(isLandingDescent(crashed, -50)).toBe(true)
+  })
+
+  it('does not re-grab a craft thrusting off the pad (ascending or stationary)', () => {
+    expect(isLandingDescent(landed, 5)).toBe(false) // climbing
+    expect(isLandingDescent(landed, 0)).toBe(false) // just released, no radial velocity yet
+  })
+
+  it('is never a landing while flying', () => {
+    expect(isLandingDescent({ type: 'flying' }, -5)).toBe(false)
+  })
+})
 
 describe('classifySurfaceContact', () => {
   it('does nothing above the surface', () => {
