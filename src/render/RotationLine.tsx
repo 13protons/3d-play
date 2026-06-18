@@ -1,4 +1,4 @@
-import { Line } from '@react-three/drei'
+import { WebGPULine } from './WebGPULine'
 import { rotationAxisPoints } from './rotation'
 
 interface RotationLineProps {
@@ -7,7 +7,7 @@ interface RotationLineProps {
 
 export function RotationLine({ radius }: RotationLineProps) {
   return (
-    <Line
+    <WebGPULine
       points={rotationAxisPoints(radius)}
       color="#f2f2f2"
       lineWidth={2}

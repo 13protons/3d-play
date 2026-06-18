@@ -1,4 +1,4 @@
-import { Line } from '@react-three/drei'
+import { WebGPULine } from './WebGPULine'
 import { craftDebugAeroForceSegment, craftDebugAxisSegments } from './rotation'
 
 interface CraftDebugAxesProps {
@@ -13,10 +13,10 @@ export function CraftDebugAxes({ length, aeroForceWorld, orientation }: CraftDeb
 
   return (
     <group>
-      <Line points={axes.x} color="#ff6b6b" lineWidth={2} depthWrite={false} depthTest={false} />
-      <Line points={axes.y} color="#7dff7a" lineWidth={2} depthWrite={false} depthTest={false} />
-      <Line points={axes.z} color="#5ecbff" lineWidth={2} depthWrite={false} depthTest={false} />
-      <Line points={axes.thrust} color="#ffffff" lineWidth={3} depthWrite={false} depthTest={false} />
+      <WebGPULine points={axes.x} color="#ff6b6b" lineWidth={2} depthWrite={false} depthTest={false} />
+      <WebGPULine points={axes.y} color="#7dff7a" lineWidth={2} depthWrite={false} depthTest={false} />
+      <WebGPULine points={axes.z} color="#5ecbff" lineWidth={2} depthWrite={false} depthTest={false} />
+      <WebGPULine points={axes.thrust} color="#ffffff" lineWidth={3} depthWrite={false} depthTest={false} />
       <mesh position={axes.cot}>
         <sphereGeometry args={[0.16, 12, 8]} />
         <meshBasicMaterial color="#ff8a18" depthTest={false} />
@@ -25,7 +25,7 @@ export function CraftDebugAxes({ length, aeroForceWorld, orientation }: CraftDeb
         <sphereGeometry args={[0.12, 12, 8]} />
         <meshBasicMaterial color="#ffffff" depthTest={false} />
       </mesh>
-      {aeroForce && <Line points={aeroForce} color="#ff4df8" lineWidth={4} depthWrite={false} depthTest={false} />}
+      {aeroForce && <WebGPULine points={aeroForce} color="#ff4df8" lineWidth={4} depthWrite={false} depthTest={false} />}
     </group>
   )
 }

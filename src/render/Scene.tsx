@@ -1,6 +1,8 @@
 import { Canvas } from '@react-three/fiber'
-import { Stars } from '@react-three/drei'
 import { useTrajectoriesStore } from '../state/trajectories'
+import { WebGPUStars } from './WebGPUStars'
+import { RenderPipeline } from './RenderPipeline'
+import { makeWebGPURenderer } from './webgpuRenderer'
 import { Body } from './Body'
 import { ManeuverNodeOverlay } from './ManeuverNodeOverlay'
 import { OrbitMarkers } from './OrbitMarkers'
@@ -27,6 +29,7 @@ export function Scene() {
         far: 1e15,
         fov: 60,
       }}
+      gl={makeWebGPURenderer()}
       style={{
         position: 'absolute',
         top: 0,
@@ -36,8 +39,9 @@ export function Scene() {
       }}
     >
       <PerfLogger view="orbital" />
+      <RenderPipeline />
       <ambientLight intensity={0.04} />
-      <Stars radius={1e14} depth={1e14} count={3000} factor={1e12} fade />
+      <WebGPUStars radius={1e14} count={3000} />
       <CameraRig />
       {bodyIds.map((id) => (
         <Body key={id} bodyId={id} />

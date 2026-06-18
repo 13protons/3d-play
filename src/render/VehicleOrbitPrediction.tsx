@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
-import { Line } from '@react-three/drei'
+import { WebGPULine } from './WebGPULine'
 import type { Group } from 'three'
 import { useCameraStore } from '../state/camera'
 import { placeManeuverNode } from '../state/maneuverActions'
@@ -195,14 +195,14 @@ export function VehicleOrbitPrediction({ vehicleId }: VehicleOrbitPredictionProp
     <group ref={groupRef} visible={false}>
       {prediction && prediction.points.length > 2 && (
         <>
-          <Line
+          <WebGPULine
             points={prediction.points}
             color={style.color}
             lineWidth={style.lineWidth}
             opacity={style.opacity}
           />
           {/* Wider invisible hit-line so the orbit is easy to click. */}
-          <Line
+          <WebGPULine
             points={prediction.points}
             color={style.color}
             lineWidth={16}

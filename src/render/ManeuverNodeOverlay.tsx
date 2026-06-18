@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { Line } from '@react-three/drei'
+import { WebGPULine } from './WebGPULine'
 import { CanvasTexture, SpriteMaterial, type Group, type Sprite } from 'three'
 import { useCameraStore } from '../state/camera'
 import { useManeuverStore } from '../state/maneuver'
@@ -153,7 +153,7 @@ export function ManeuverNodeOverlay({ vehicleId }: ManeuverNodeOverlayProps) {
         <>
           <sprite ref={markerRef} material={markerMaterial} position={overlay.nodePosition} />
           {overlay.previewPoints && (
-            <Line
+            <WebGPULine
               points={overlay.previewPoints}
               color="#ffcc00"
               lineWidth={1.5}
