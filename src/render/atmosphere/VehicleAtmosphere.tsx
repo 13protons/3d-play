@@ -4,7 +4,7 @@ import { EffectComposer, ToneMapping } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import { Vector3 } from 'three'
 import type { PrecomputedTextures } from '@takram/three-atmosphere'
-import { AerialPerspective, Atmosphere, AtmosphereContext, Sky } from '@takram/three-atmosphere/r3f'
+import { AerialPerspective, Atmosphere, AtmosphereContext } from '@takram/three-atmosphere/r3f'
 import { Ellipsoid } from '@takram/three-geospatial'
 import { useTrajectoriesStore } from '../../state/trajectories'
 import { evaluateCurve } from '../../sim/curves'
@@ -134,13 +134,19 @@ export function VehicleAtmosphere({
   return (
     <Atmosphere textures={textures ?? undefined} ellipsoid={ellipsoid} correctAltitude>
       <AtmosphereTransientDriver bodyId={bodyId} vehicleId={vehicleId} />
-      {textures && <Sky sun={false} moon={false} />}
-      {/* multisampling 0: the default 8x MSAA on a full-screen atmosphere pass is the
-          main frame-time cost (AA can return later via an SMAA effect). ground=false:
-          we render real terrain, so takram must NOT also draw its analytic flat ground
-          (that was the thick maroon band from orbit). */}
+      {/* sky=true: the effect renders the background sky itself, so deep-space pixels
+          come back black (no atmosphere along the ray) instead of the bare far-plane
+          being fogged maroon. This replaces the separate <Sky> mesh, which (being a
+          sphere at the atmosphere radius) didn't cover the space above the limb from
+          orbit. ground=false: we draw real terrain, so takram must not draw its own
+          analytic flat ground. multisampling 0: the default 8x MSAA on a full-screen
+          atmosphere pass was the main frame-time cost (AA can return via SMAA later). */}
       <EffectComposer multisampling={0}>
-        {textures ? <AerialPerspective sun={false} moon={false} ground={false} /> : <></>}
+        {textures ? (
+          <AerialPerspective sky sun={false} moon={false} ground={false} />
+        ) : (
+          <></>
+        )}
         <ToneMapping mode={ToneMappingMode.AGX} />
       </EffectComposer>
     </Atmosphere>
