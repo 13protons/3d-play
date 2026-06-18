@@ -1,6 +1,13 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { AdditiveBlending, FrontSide, Vector3 } from 'three'
+import {
+  AddEquation,
+  CustomBlending,
+  FrontSide,
+  OneFactor,
+  OneMinusSrcAlphaFactor,
+  Vector3,
+} from 'three'
 import type { Mesh } from 'three'
 import { useTrajectoriesStore } from '../../state/trajectories'
 import type { AtmosphereRenderConfig } from '../../state/trajectories'
@@ -11,9 +18,9 @@ import {
   ATMOSPHERE_SHELL_VERTEX_SHADER,
 } from './atmosphereShellShader'
 
-// Sun radiance scale for the shell's inscatter. Tunable by eye against the orbital
-// sunrise target; the in-shader exposure tone-map keeps it bounded.
-const SHELL_SUN_INTENSITY = 20
+// Sun radiance scale for the shell's inscatter. Tunable by eye against takram's
+// in-atmosphere look + the orbital sunrise; the in-shader exposure tone-map bounds it.
+const SHELL_SUN_INTENSITY = 8
 
 /**
  * From-space atmosphere for the parent body: a planet-centred shell whose shader
@@ -99,7 +106,10 @@ export function AtmosphereShell({
         uniforms={uniforms}
         defines={{ VIEW_SAMPLES: '16', LIGHT_SAMPLES: '8' }}
         transparent
-        blending={AdditiveBlending}
+        blending={CustomBlending}
+        blendEquation={AddEquation}
+        blendSrc={OneFactor}
+        blendDst={OneMinusSrcAlphaFactor}
         depthWrite={false}
         side={FrontSide}
       />

@@ -123,14 +123,23 @@ void main() {
     * ((1.0 - g * g) * (1.0 + mu * mu))
     / ((2.0 + g * g) * pow(1.0 + g * g - 2.0 * g * mu, 1.5));
 
-  vec3 color = uSunIntensity
+  vec3 inscatter = uSunIntensity
     * (totalRayleigh * uBetaRayleigh * phaseRayleigh
       + totalMie * uBetaMie * phaseMie);
 
-  // Exposure tone-map to keep the HDR inscatter bounded; output stays linear
-  // (the render pipeline applies output color encoding).
-  color = vec3(1.0) - exp(-color);
+  // Exposure tone-map keeps the HDR inscatter bounded; output stays linear.
+  inscatter = vec3(1.0) - exp(-inscatter);
 
-  gl_FragColor = vec4(color, 1.0);
+  // View-ray transmittance (camera -> end of march): how much of the scene behind
+  // survives. The material's premultiplied blend then composites
+  // scene * transmittance + inscatter — aerial perspective, not an additive wash:
+  // straight down (short path) the terrain mostly survives; at the grazing limb
+  // (long path) it goes to ~0 and only the inscatter glow remains.
+  vec3 viewTransmittance = exp(
+    -(uBetaRayleigh * opticalDepthR + uBetaMie * 1.1 * opticalDepthM));
+  float luminanceT = dot(viewTransmittance, vec3(0.2126, 0.7152, 0.0722));
+
+  // a = 1 - transmittance, so blend(ONE, ONE_MINUS_SRC_ALPHA) = inscatter + dst*T.
+  gl_FragColor = vec4(inscatter, 1.0 - luminanceT);
 }
 `
