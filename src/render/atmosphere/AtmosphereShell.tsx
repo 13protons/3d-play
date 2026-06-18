@@ -1,0 +1,103 @@
+import { useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
+import { AdditiveBlending, FrontSide, Vector3 } from 'three'
+import type { Mesh } from 'three'
+import { useTrajectoriesStore } from '../../state/trajectories'
+import type { AtmosphereRenderConfig } from '../../state/trajectories'
+import { evaluateCurve } from '../../sim/curves'
+import type { Vec3 } from '../lighting'
+import {
+  ATMOSPHERE_SHELL_FRAGMENT_SHADER,
+  ATMOSPHERE_SHELL_VERTEX_SHADER,
+} from './atmosphereShellShader'
+
+// Sun radiance scale for the shell's inscatter. Tunable by eye against the orbital
+// sunrise target; the in-shader exposure tone-map keeps it bounded.
+const SHELL_SUN_INTENSITY = 20
+
+/**
+ * From-space atmosphere for the parent body: a planet-centred shell whose shader
+ * ray-marches single scattering (see atmosphereShellShader). The mesh is oversized
+ * (×1.1) and FrontSide so the near hemisphere rasterizes from outside; the shader
+ * clips to the true atmosphere via ray-sphere, so the mesh tessellation doesn't pinch
+ * the limb. Additive over the (mostly dark) night planet + black space gives the limb
+ * glow + red terminator ring. Positioned at the body's floating-origin scene position,
+ * sun direction from the emissive body — same data the body mesh + sun light use.
+ */
+export function AtmosphereShell({
+  bodyId,
+  vehicleId,
+  config,
+  radius,
+}: {
+  bodyId: string
+  vehicleId: string
+  config: AtmosphereRenderConfig
+  radius: number
+}) {
+  const meshRef = useRef<Mesh>(null)
+
+  const uniforms = useMemo(
+    () => ({
+      uPlanetCenter: { value: new Vector3() },
+      uSunDirection: { value: new Vector3(0, 1, 0) },
+      uPlanetRadius: { value: radius },
+      uAtmosphereRadius: { value: radius + config.shellHeight },
+      // takram-native coefficients are per-km; the march is in metres -> ×1e-3.
+      uBetaRayleigh: { value: new Vector3(...config.rayleighScattering).multiplyScalar(1e-3) },
+      uBetaMie: { value: config.mieScattering * 1e-3 },
+      uRayleighScaleHeight: { value: config.rayleighScaleHeight },
+      uMieScaleHeight: { value: config.mieScaleHeight },
+      uMieG: { value: config.miePhaseFunctionG },
+      uSunIntensity: { value: SHELL_SUN_INTENSITY },
+    }),
+    [config, radius],
+  )
+
+  const shellMeshRadius = (radius + config.shellHeight) * 1.1
+
+  useFrame(() => {
+    const mesh = meshRef.current
+    if (!mesh) return
+    const store = useTrajectoriesStore.getState()
+    const { curves, bodies } = store
+    const t = store.getSimTime()
+    const bodyCurve = curves[bodyId]
+    const vehicleCurve = curves[vehicleId]
+    if (!bodyCurve || !vehicleCurve) return
+
+    const bodyPos = evaluateCurve(bodyCurve, t) as Vec3
+    const vehiclePos = evaluateCurve(vehicleCurve, t) as Vec3
+    // Planet centre in scene space (floating origin on the vehicle).
+    const cx = bodyPos[0] - vehiclePos[0]
+    const cy = bodyPos[1] - vehiclePos[1]
+    const cz = bodyPos[2] - vehiclePos[2]
+    uniforms.uPlanetCenter.value.set(cx, cy, cz)
+    mesh.position.set(cx, cy, cz)
+
+    const sun = Object.values(bodies).find((body) => body.emissive)
+    const sunCurve = sun ? curves[sun.id] : undefined
+    if (sun && sunCurve) {
+      const sunPos = evaluateCurve(sunCurve, t) as Vec3
+      uniforms.uSunDirection.value
+        .set(sunPos[0] - bodyPos[0], sunPos[1] - bodyPos[1], sunPos[2] - bodyPos[2])
+        .normalize()
+    }
+  })
+
+  return (
+    <mesh ref={meshRef} frustumCulled={false}>
+      <sphereGeometry args={[shellMeshRadius, 96, 64]} />
+      <shaderMaterial
+        vertexShader={ATMOSPHERE_SHELL_VERTEX_SHADER}
+        fragmentShader={ATMOSPHERE_SHELL_FRAGMENT_SHADER}
+        uniforms={uniforms}
+        defines={{ VIEW_SAMPLES: '16', LIGHT_SAMPLES: '8' }}
+        transparent
+        blending={AdditiveBlending}
+        depthWrite={false}
+        side={FrontSide}
+      />
+    </mesh>
+  )
+}

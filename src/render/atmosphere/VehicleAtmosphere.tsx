@@ -10,6 +10,7 @@ import { evaluateCurve } from '../../sim/curves'
 import type { Vec3 } from '../lighting'
 import { atmosphereParametersFromRenderConfig } from './atmosphereParameters'
 import { getAtmosphereTextures } from './atmosphereTextures'
+import { AtmosphereShell } from './AtmosphereShell'
 
 /** Bake (or fetch from cache) the body's precomputed LUTs once params are known. */
 function useAtmosphereTextures(
@@ -192,7 +193,17 @@ export function VehicleAtmosphere({
         topRadius={params.topRadius}
         onAboveChange={setCameraAbove}
       />
-      {textures && <Sky sun={false} moon={false} />}
+      {/* Hard swap (crossfade TODO): below the shell, takram's in-atmosphere look
+          (Sky + aerial perspective); above the shell, the from-space limb shell. */}
+      {textures && !cameraAbove && <Sky sun={false} moon={false} />}
+      {cameraAbove && config && radius != null && (
+        <AtmosphereShell
+          bodyId={bodyId}
+          vehicleId={vehicleId}
+          config={config}
+          radius={radius}
+        />
+      )}
       <EffectComposer>
         {textures && !cameraAbove ? (
           <AerialPerspective sun={false} moon={false} />
