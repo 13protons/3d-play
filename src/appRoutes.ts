@@ -7,6 +7,7 @@ export const scenarios = [
   { id: 'inner-solar-system', label: 'Launch: Inner Solar System' },
   { id: 'full-solar-system', label: 'Launch: Full Solar System' },
   { id: 'two-stage-ascent', label: 'Launch: Two-Stage Ascent' },
+  { id: 'low-earth-orbit', label: 'Test: Low Earth Orbit' },
 ] as const
 
 export const mainMenuLinks = [

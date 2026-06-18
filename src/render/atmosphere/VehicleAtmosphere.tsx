@@ -1,6 +1,7 @@
-import { useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useMemo, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { EffectComposer } from '@react-three/postprocessing'
+import { EffectComposer, ToneMapping } from '@react-three/postprocessing'
+import { ToneMappingMode } from 'postprocessing'
 import { Vector3 } from 'three'
 import type { PrecomputedTextures } from '@takram/three-atmosphere'
 import { AerialPerspective, Atmosphere, AtmosphereContext, Sky } from '@takram/three-atmosphere/r3f'
@@ -10,7 +11,6 @@ import { evaluateCurve } from '../../sim/curves'
 import type { Vec3 } from '../lighting'
 import { atmosphereParametersFromRenderConfig } from './atmosphereParameters'
 import { getAtmosphereTextures } from './atmosphereTextures'
-import { AtmosphereShell } from './AtmosphereShell'
 
 /** Bake (or fetch from cache) the body's precomputed LUTs once params are known. */
 function useAtmosphereTextures(
@@ -40,13 +40,12 @@ const vehicleRelToBody = new Vector3()
 const sunDirection = new Vector3()
 
 /**
- * Drive the Atmosphere context's transient state from the sim each frame. The
- * scene uses a floating origin centred on the vehicle, so a scene point P maps to
- * the body-centred ECEF frame as `P + (vehiclePos - bodyPos)` — i.e. the scene
- * origin lands at the vehicle's position relative to the planet centre (~the
- * surface). Rotation is identity: the atmosphere is spherically symmetric, so the
- * planet's spin orientation doesn't affect scattering. `correctAltitude` on the
- * provider recovers the precision the large translation would otherwise lose.
+ * Drive the Atmosphere context's transient state from the sim each frame. The scene
+ * uses a floating origin centred on the vehicle and its axes are ECEF-aligned (bodies
+ * are placed at bodyPos - vehiclePos with no rotation), so scene→ECEF is a pure
+ * translation by (vehiclePos - bodyPos): the scene origin lands at the vehicle's
+ * position relative to the planet centre. `correctAltitude` on the provider recovers
+ * the precision the large translation would otherwise lose.
  */
 function AtmosphereTransientDriver({
   bodyId,
@@ -79,7 +78,7 @@ function AtmosphereTransientDriver({
       vehicleRelToBody.z,
     )
 
-    // Sun direction in ECEF (== scene axes under identity rotation): planet -> sun.
+    // Sun direction in ECEF (== scene axes under identity rotation): planet → sun.
     const sun = Object.values(bodies).find((body) => body.emissive)
     const sunCurve = sun ? curves[sun.id] : undefined
     if (sun && sunCurve) {
@@ -94,76 +93,14 @@ function AtmosphereTransientDriver({
 }
 
 /**
- * Reports whether we're in a "from-space" situation — i.e. whether the CAMERA or the
- * VEHICLE is above the atmosphere shell (topRadius). Keying on the camera alone is
- * wrong: when the vehicle is in orbit but the camera orbits down below the shell,
- * takram would switch back on and fog the space background maroon. So we use the max
- * of the two radii. Above → the from-space limb shell; below → takram's aerial
- * perspective. Hysteresis is a small fraction of the SHELL THICKNESS (not of topRadius
- * — a % of the ~6,400 km radius would exceed the whole 60 km atmosphere and latch).
- * Camera ECEF position: the scene origin is the vehicle, so cameraECEF =
- * cameraScenePos + (vehiclePos - bodyPos); the vehicle's own radius is |vehicle-body|.
- */
-function CameraAtmosphereGate({
-  bodyId,
-  vehicleId,
-  bottomRadius,
-  topRadius,
-  onAboveChange,
-}: {
-  bodyId: string
-  vehicleId: string
-  bottomRadius: number
-  topRadius: number
-  onAboveChange: (above: boolean) => void
-}) {
-  const camera = useThree((s) => s.camera)
-  const aboveRef = useRef<boolean | null>(null)
-  const margin = (topRadius - bottomRadius) * 0.05 // ~5% of shell thickness
-  useFrame(() => {
-    const store = useTrajectoriesStore.getState()
-    const { curves } = store
-    const t = store.getSimTime()
-    const bodyCurve = curves[bodyId]
-    const vehicleCurve = curves[vehicleId]
-    if (!bodyCurve || !vehicleCurve) return
-    const bodyPos = evaluateCurve(bodyCurve, t) as Vec3
-    const vehiclePos = evaluateCurve(vehicleCurve, t) as Vec3
-    const vx = vehiclePos[0] - bodyPos[0]
-    const vy = vehiclePos[1] - bodyPos[1]
-    const vz = vehiclePos[2] - bodyPos[2]
-    const vehicleRadius = Math.hypot(vx, vy, vz)
-    const cameraRadius = Math.hypot(
-      camera.position.x + vx,
-      camera.position.y + vy,
-      camera.position.z + vz,
-    )
-    const radius = Math.max(cameraRadius, vehicleRadius)
-    const above =
-      aboveRef.current == null
-        ? radius > topRadius
-        : aboveRef.current
-          ? radius > topRadius - margin
-          : radius > topRadius + margin
-    if (above !== aboveRef.current) {
-      aboveRef.current = above
-      onAboveChange(above)
-    }
-  })
-  return null
-}
-
-/**
- * Owns the vehicle scene's EffectComposer and, for a body with an atmosphere,
- * mounts takram's `<Atmosphere>` provider with per-body LUTs + floating-origin
- * placement. The sky/atmosphere visual is the `<Sky>` MESH (SkyMaterial), which is
- * what correctly transitions from "sky from within" to "atmosphere from space" —
- * `AerialPerspective` is left with its default `sky:false` and only fogs geometry
- * (this is takram's canonical pattern; `sky:true` on the effect fills the
- * background with inscatter and doesn't recede to space). Airless bodies get a bare
- * composer. Our own lights + celestial bodies are unchanged (decision A / D2):
- * takram's sun/moon disks stay off — we render the sim's bodies, eclipse-aware —
- * and our directional sun + ambient light the scene, so takram's lights stay off.
+ * Single-model atmosphere: takram's `<Sky>` mesh + `<AerialPerspective>` for the
+ * parent body, at all altitudes (ground to orbit — takram is built for this). The
+ * pipeline ends with a `<ToneMapping>` pass, as takram's own examples do: their
+ * atmosphere outputs HDR luminance that must be tone-mapped, and omitting it was a
+ * likely cause of the washed/maroon from-space background. takram's sun/moon disks
+ * stay off (we render the sim's bodies, eclipse-aware) and our directional sun +
+ * ambient light the scene, so takram's lights stay off too (decision A / D2).
+ * Airless bodies get a bare composer.
  */
 export function VehicleAtmosphere({
   bodyId,
@@ -184,8 +121,6 @@ export function VehicleAtmosphere({
     [radius],
   )
   const textures = useAtmosphereTextures(bodyId, params)
-  // Camera above the atmosphere shell → switch off aerial perspective (see gate).
-  const [cameraAbove, setCameraAbove] = useState(false)
 
   // Airless body: composer renders the scene with no atmosphere effect.
   if (!params || !ellipsoid) {
@@ -199,30 +134,10 @@ export function VehicleAtmosphere({
   return (
     <Atmosphere textures={textures ?? undefined} ellipsoid={ellipsoid} correctAltitude>
       <AtmosphereTransientDriver bodyId={bodyId} vehicleId={vehicleId} />
-      <CameraAtmosphereGate
-        bodyId={bodyId}
-        vehicleId={vehicleId}
-        bottomRadius={params.bottomRadius}
-        topRadius={params.topRadius}
-        onAboveChange={setCameraAbove}
-      />
-      {/* Hard swap (crossfade TODO): below the shell, takram's in-atmosphere look
-          (Sky + aerial perspective); above the shell, the from-space limb shell. */}
-      {textures && !cameraAbove && <Sky sun={false} moon={false} />}
-      {cameraAbove && config && radius != null && (
-        <AtmosphereShell
-          bodyId={bodyId}
-          vehicleId={vehicleId}
-          config={config}
-          radius={radius}
-        />
-      )}
+      {textures && <Sky sun={false} moon={false} />}
       <EffectComposer>
-        {textures && !cameraAbove ? (
-          <AerialPerspective sun={false} moon={false} />
-        ) : (
-          <></>
-        )}
+        {textures ? <AerialPerspective sun={false} moon={false} /> : <></>}
+        <ToneMapping mode={ToneMappingMode.AGX} />
       </EffectComposer>
     </Atmosphere>
   )
