@@ -37,7 +37,7 @@ import { vehiclePlanetSurfaceRenderDecision } from './terrain/terrainLodPolicy';
 import { createBodySurfaceGeometry } from './bodySurfaceGeometry';
 import { PerfLogger } from './PerfLogger';
 import { countRender } from './perfCounters';
-import { WebGPUStars } from './WebGPUStars';
+import { VehicleSky } from './sky/VehicleSky';
 import { RenderPipeline } from './RenderPipeline';
 import { makeWebGPURenderer } from './webgpuRenderer';
 
@@ -383,10 +383,7 @@ function VehicleSceneContent() {
   return (
     <>
       <VehicleAmbientLight />
-      <WebGPUStars
-        radius={STAR_SHELL_RADIUS}
-        count={3000}
-      />
+      {firstVehicle && <VehicleSky vehicleId={firstVehicle.id} radius={STAR_SHELL_RADIUS} />}
       <VehicleViewControls />
       <RenderPipeline />
       <EnableSceneLayers />

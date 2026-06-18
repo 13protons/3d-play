@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { useModeStore } from './state/mode'
@@ -6,7 +6,10 @@ import { startSim, stopSim } from './state/bridge'
 import { MainMenu } from './ui/MainMenu'
 import { HudTestPage } from './ui/HudTestPage'
 import { Flight } from './modes/Flight'
-import { isKnownScenarioId, mainPath, missionPath, testHudPath } from './appRoutes'
+import { isKnownScenarioId, mainPath, missionPath, spikeSkyPath, testHudPath } from './appRoutes'
+
+// Lazy so the SkyMesh / TSL spike deps stay out of the main flight bundle.
+const SkySpikePage = lazy(() => import('./spike/SkySpike').then((m) => ({ default: m.SkySpikePage })))
 
 export default function App() {
   return (
@@ -14,6 +17,14 @@ export default function App() {
       <Route path="/" element={<Navigate to={mainPath} replace />} />
       <Route path={mainPath} element={<MainRoute />} />
       <Route path={testHudPath} element={<HudTestPage />} />
+      <Route
+        path={spikeSkyPath}
+        element={
+          <Suspense fallback={<div style={{ position: 'absolute', inset: 0, background: '#000', color: '#888', padding: 16 }}>LOADING SKY SPIKE</div>}>
+            <SkySpikePage />
+          </Suspense>
+        }
+      />
       <Route path="/mission/:scenarioId" element={<MissionRoute />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
