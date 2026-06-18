@@ -92,6 +92,16 @@ function AtmosphereTransientDriver({
   return null
 }
 
+// The atmosphere is GPU-heavy (full-screen scattering passes + a multi-second LUT
+// bake) and was saturating the main thread, which starves the sim workers and makes
+// the simulation stutter. Gate it OFF by default to keep the sim smooth; opt in with
+// ?atmosphere=1 on the mission URL for testing. Re-enable by default once the pass is
+// perf-budgeted (resolution scale + precomputed LUTs — see
+// docs/atmosphere-lut-precompute-pipeline-2026-06-18.md).
+const ATMOSPHERE_ENABLED =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('atmosphere') === '1'
+
 /**
  * Single-model atmosphere, takram's WebGL recipe (validated in the orbit spike):
  * the `<Sky>` MESH for the background (black space from orbit, sky from the ground),
@@ -114,7 +124,10 @@ export function VehicleAtmosphere({
   const config = body?.atmosphereRender
   const radius = body?.radius
   const params = useMemo(
-    () => (config && radius != null ? atmosphereParametersFromRenderConfig(config, radius) : null),
+    () =>
+      ATMOSPHERE_ENABLED && config && radius != null
+        ? atmosphereParametersFromRenderConfig(config, radius)
+        : null,
     [config, radius],
   )
   const ellipsoid = useMemo(
@@ -123,7 +136,9 @@ export function VehicleAtmosphere({
   )
   const textures = useAtmosphereTextures(bodyId, params)
 
-  // Airless body: composer renders the scene with no atmosphere effect.
+  // Atmosphere disabled (default), airless body, or LUTs not yet baked → the composer
+  // just renders the scene (no atmosphere cost). params is null when ATMOSPHERE_ENABLED
+  // is false, so the LUT bake is skipped entirely.
   if (!params || !ellipsoid) {
     return (
       <EffectComposer>
