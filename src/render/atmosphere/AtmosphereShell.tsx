@@ -17,12 +17,15 @@ const SHELL_SUN_INTENSITY = 20
 
 /**
  * From-space atmosphere for the parent body: a planet-centred shell whose shader
- * ray-marches single scattering (see atmosphereShellShader). The mesh is oversized
- * (×1.1) and FrontSide so the near hemisphere rasterizes from outside; the shader
- * clips to the true atmosphere via ray-sphere, so the mesh tessellation doesn't pinch
- * the limb. Additive over the (mostly dark) night planet + black space gives the limb
- * glow + red terminator ring. Positioned at the body's floating-origin scene position,
- * sun direction from the emissive body — same data the body mesh + sun light use.
+ * ray-marches single scattering (see atmosphereShellShader). The mesh sits at exactly
+ * atmosphereRadius (= topRadius) and is FrontSide: the swap only mounts this when the
+ * camera is ABOVE topRadius, so the camera is always outside the mesh and the near
+ * hemisphere rasterizes (disc + limb = small, cheap coverage). NOT oversized — an
+ * oversized mesh would swallow the camera (inside → FrontSide culls → nothing draws).
+ * The shader clips to the true atmosphere via ray-sphere; high tessellation keeps the
+ * silhouette (and thus the limb edge) smooth. Additive over the mostly-dark night
+ * planet + black space gives the blue limb + red terminator ring. Positioned at the
+ * body's floating-origin scene position; sun direction from the emissive body.
  */
 export function AtmosphereShell({
   bodyId,
@@ -54,7 +57,9 @@ export function AtmosphereShell({
     [config, radius],
   )
 
-  const shellMeshRadius = (radius + config.shellHeight) * 1.1
+  // At exactly atmosphereRadius (= topRadius). The swap guarantees the camera is
+  // above topRadius when this mounts, so it's outside the mesh — FrontSide renders.
+  const shellMeshRadius = radius + config.shellHeight
 
   useFrame(() => {
     const mesh = meshRef.current
@@ -87,7 +92,7 @@ export function AtmosphereShell({
 
   return (
     <mesh ref={meshRef} frustumCulled={false}>
-      <sphereGeometry args={[shellMeshRadius, 96, 64]} />
+      <sphereGeometry args={[shellMeshRadius, 256, 128]} />
       <shaderMaterial
         vertexShader={ATMOSPHERE_SHELL_VERTEX_SHADER}
         fragmentShader={ATMOSPHERE_SHELL_FRAGMENT_SHADER}
