@@ -1,18 +1,16 @@
 /**
- * SPIKE — takram atmosphere FROM ORBIT, floating-origin test.
+ * SPIKE — takram atmosphere FROM ORBIT.
  *
- * The previous isolation (camera physically at ~6.4e6, identity matrix) was CLEAN.
- * But that doesn't exercise our actual setup: the vehicle scene puts the camera near
- * the scene ORIGIN and relies entirely on worldToECEFMatrix (a translation) to place
- * it at altitude. If that matrix doesn't reach the effect, the camera collapses to
- * the planet centre → every ray is buried in atmosphere → wide maroon "sunset
- * everywhere", exactly the vehicle symptom.
+ * The analytic-ground version was clean, but it never exercised the vehicle's real
+ * path: with takram's analytic ground, EVERY pixel hits the background SKY branch.
+ * The vehicle has REAL geometry (terrain/body sphere) writing depth, ground:false,
+ * and far:1e9. So this mirrors the vehicle: a real lit ground sphere at the planet
+ * centre, ground:false, far:1e9, floating-origin translation matrix driven via
+ * context.transientStates. If THIS maroons, it's the real-geometry + far-precision
+ * path (the SKY/geometry depth detection), not the matrix or sky config.
  *
- * So this replicates the vehicle: camera near origin, planet centre far below in
- * scene space, worldToECEFMatrix = translation driven per-frame via
- * context.transientStates (the same path VehicleAtmosphere uses). If THIS maroons,
- * the bug is the matrix/propagation; ?identity=1 falls back to the known-clean
- * camera-at-distance + identity-matrix layout for comparison.
+ * Toggles: ?analytic=1 (takram analytic ground + far:5e7, the known-clean case) ·
+ * ?sky=effect (sky:true instead of Sky mesh) · ?identity=1 (camera-at-distance).
  */
 import { useContext, useEffect, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
@@ -27,20 +25,20 @@ import { Ellipsoid } from '@takram/three-geospatial'
 
 const R = AtmosphereParameters.DEFAULT.bottomRadius // 6_360_000 m
 const SPHERE_ELLIPSOID = new Ellipsoid(R, R, R)
-const ORBITAL_RADIUS = R + 4e5 // ~400 km orbit
+const ORBITAL_RADIUS = R + 4e5
 const SUN_DIRECTION = new Vector3(1, 0.15, 0.35).normalize()
 
 const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
 const USE_IDENTITY = params?.get('identity') === '1'
 const USE_EFFECT_SKY = params?.get('sky') === 'effect'
+const USE_ANALYTIC = params?.get('analytic') === '1' // takram analytic ground, no real geometry
 
-// Floating origin: scene origin is the orbital point; the planet centre is far below.
-const PLANET_CENTER_SCENE = USE_IDENTITY
-  ? new Vector3(0, 0, 0)
-  : new Vector3(0, -ORBITAL_RADIUS, 0)
-const CAMERA_POSITION: [number, number, number] = USE_IDENTITY
-  ? [3.2e6, 1.4e6, 6.4e6]
-  : [3e5, 2e5, 3e5]
+const PLANET_CENTER_SCENE = USE_IDENTITY ? new Vector3(0, 0, 0) : new Vector3(0, -ORBITAL_RADIUS, 0)
+const CAMERA_POSITION: [number, number, number] = USE_IDENTITY ? [3.2e6, 1.4e6, 6.4e6] : [3e5, 2e5, 3e5]
+// Mirror the vehicle's near/far when using real geometry; the analytic case can use a
+// tighter far (it has no geometry-depth path to stress).
+const NEAR = USE_ANALYTIC ? 1e4 : 0.1
+const FAR = USE_ANALYTIC ? 5e7 : 1e9
 
 function usePrecomputedTextures(): PrecomputedTextures | null {
   const gl = useThree((s) => s.gl)
@@ -67,21 +65,27 @@ function usePrecomputedTextures(): PrecomputedTextures | null {
   return textures
 }
 
-/** Drives worldToECEFMatrix (translation, floating origin) + sun, exactly like the
- * vehicle's AtmosphereTransientDriver — via context.transientStates each frame. */
 function TransientDriver() {
   const context = useContext(AtmosphereContext)
   useFrame(() => {
     const states = context.transientStates
     if (!states) return
-    if (USE_IDENTITY) {
-      states.worldToECEFMatrix.identity()
-    } else {
-      states.worldToECEFMatrix.makeTranslation(0, ORBITAL_RADIUS, 0)
-    }
+    if (USE_IDENTITY) states.worldToECEFMatrix.identity()
+    else states.worldToECEFMatrix.makeTranslation(0, ORBITAL_RADIUS, 0)
     states.sunDirection.copy(SUN_DIRECTION)
   })
   return null
+}
+
+export function AtmosphereSpikePage() {
+  return (
+    <div style={{ position: 'absolute', inset: 0, background: '#000' }}>
+      <Canvas camera={{ position: CAMERA_POSITION, near: NEAR, far: FAR, fov: 50 }}>
+        <SpikeScene />
+      </Canvas>
+      <Overlay />
+    </div>
+  )
 }
 
 function SpikeScene() {
@@ -92,28 +96,23 @@ function SpikeScene() {
     <Atmosphere textures={textures} ellipsoid={SPHERE_ELLIPSOID} correctAltitude>
       <TransientDriver />
       {!USE_EFFECT_SKY && <Sky sun={false} moon={false} />}
-      <OrbitControls
-        makeDefault
-        target={PLANET_CENTER_SCENE.toArray()}
-        minDistance={R * 1.02}
-        maxDistance={R * 4}
-      />
+      {!USE_ANALYTIC && (
+        <>
+          {/* Real lit planet sphere — exercises the geometry-depth path like the vehicle. */}
+          <mesh position={PLANET_CENTER_SCENE.toArray()}>
+            <sphereGeometry args={[R, 256, 128]} />
+            <meshStandardMaterial color="#3a6f4a" roughness={1} metalness={0} />
+          </mesh>
+          <directionalLight position={SUN_DIRECTION.clone().multiplyScalar(1e8).toArray()} intensity={3} />
+          <ambientLight intensity={0.05} />
+        </>
+      )}
+      <OrbitControls makeDefault target={PLANET_CENTER_SCENE.toArray()} minDistance={R * 1.02} maxDistance={R * 4} />
       <EffectComposer multisampling={0}>
-        <AerialPerspective sky={USE_EFFECT_SKY} sun={false} moon={false} />
+        <AerialPerspective sky={USE_EFFECT_SKY} sun={false} moon={false} ground={USE_ANALYTIC} />
         <ToneMapping mode={ToneMappingMode.AGX} />
       </EffectComposer>
     </Atmosphere>
-  )
-}
-
-export function AtmosphereSpikePage() {
-  return (
-    <div style={{ position: 'absolute', inset: 0, background: '#000' }}>
-      <Canvas camera={{ position: CAMERA_POSITION, near: 1e4, far: 5e7, fov: 50 }}>
-        <SpikeScene />
-      </Canvas>
-      <Overlay />
-    </div>
   )
 }
 
@@ -133,15 +132,18 @@ function Overlay() {
         pointerEvents: 'none',
       }}
     >
-      <div style={{ fontWeight: 700, marginBottom: 4 }}>ATMOSPHERE FROM ORBIT — FLOATING-ORIGIN TEST</div>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>ATMOSPHERE FROM ORBIT</div>
       <div>
-        mode: <b>{USE_IDENTITY ? 'identity matrix + camera at distance (known clean)' : 'floating origin + translation matrix (vehicle setup)'}</b>
+        ground: <b>{USE_ANALYTIC ? 'takram analytic (far 5e7)' : 'REAL sphere + ground:false (far 1e9)'}</b>
       </div>
-      <div>sky: <b>{USE_EFFECT_SKY ? 'effect (sky:true)' : 'Sky mesh'}</b></div>
-      <div style={{ opacity: 0.7 }}>?identity=1 · ?sky=effect</div>
+      <div>
+        sky: <b>{USE_EFFECT_SKY ? 'effect (sky:true)' : 'Sky mesh'}</b> · matrix:{' '}
+        <b>{USE_IDENTITY ? 'identity' : 'floating-origin translation'}</b>
+      </div>
+      <div style={{ opacity: 0.7 }}>?analytic=1 · ?sky=effect · ?identity=1</div>
       <div style={{ marginTop: 6, opacity: 0.75 }}>
-        If floating-origin mode is maroon but ?identity=1 is black, the bug is the
-        worldToECEFMatrix not reaching the effect (camera collapses to planet centre).
+        Default mirrors the vehicle (real geometry + far:1e9). If space above the limb
+        is maroon here, it's the geometry-depth/far-precision path.
       </div>
     </div>
   )
