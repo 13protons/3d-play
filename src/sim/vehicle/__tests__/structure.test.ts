@@ -101,6 +101,27 @@ describe('VehicleStructure with a real tree', () => {
     expectVec3Close(dry, [0, 0, 0])
   })
 
+  it('ground clearance is the CoM height above the lowest part base (+Z up)', () => {
+    const cylDefs = new Map<string, PartDefinition>([
+      ['cyl', { id: 'cyl', dryMass: 1000, inertia: MAT3_ZERO, modules: [], render: { shape: 'cylinder', radius: 1, length: 4, color: '#fff' } }],
+    ])
+    // Two equal cylinders (length 4) stacked along +Z at z=0 and z=4 → CoM at z=2,
+    // lowest base at z=0-2=-2, so clearance = 2 - (-2) = 4.
+    const s = new VehicleStructure(
+      [
+        part({ instanceId: 'lower', defId: 'cyl' }),
+        part({ instanceId: 'upper', defId: 'cyl', localPosition: [0, 0, 4] }),
+      ],
+      cylDefs,
+    )
+    expect(s.aggregate().centerOfMass[2]).toBeCloseTo(2, 9)
+    expect(s.groundClearance()).toBeCloseTo(4, 9)
+  })
+
+  it('single-body point-mass craft has zero ground clearance', () => {
+    expect(VehicleStructure.singleBody({ dryMass: 1000, fuelMass: 0, maxThrust: 1, isp: 1 }).groundClearance()).toBe(0)
+  })
+
   it('an off-axis engine produces a thrust torque about the CoM', () => {
     const s = new VehicleStructure(
       [part({ instanceId: 'e', defId: 'core', localPosition: [1, 0, 0] })],

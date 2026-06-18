@@ -23,6 +23,7 @@ import {
   effectiveThrust,
   netThrust,
   netThrustGimbaled,
+  resolvePartTransforms,
   solveGimbalForTorque,
 } from './aggregation'
 import type { PartDefinition } from './parts'
@@ -92,6 +93,29 @@ export class VehicleStructure {
   /** Mass properties for the current fuel state (all active parts). */
   aggregate(): VehicleAggregate {
     return aggregate(this.skeleton, this.fuel)
+  }
+
+  /**
+   * Distance from the center of mass to the lowest active part along +Z (the up axis
+   * when landed) — the craft's ground clearance. Resting the tracked CoM this far
+   * above the surface sits the base on the ground instead of burying the lower half.
+   * Bounding-box approximation: each part is half its render length below its centre
+   * (parts stack along the spine); part tilt and nozzle overhang are ignored. Zero for
+   * the point-mass single-body craft, which has no render geometry.
+   */
+  groundClearance(): number {
+    const transforms = resolvePartTransforms(this.parts)
+    let bottom = Number.POSITIVE_INFINITY
+    for (const part of this.parts) {
+      if (!part.active) continue
+      const def = this.definitions.get(part.defId)
+      const transform = transforms.get(part.instanceId)
+      if (!def || !transform) continue
+      const halfLength = (def.render?.length ?? 0) / 2
+      bottom = Math.min(bottom, transform.position[2] - halfLength)
+    }
+    if (!Number.isFinite(bottom)) return 0
+    return Math.max(0, this.aggregate().centerOfMass[2] - bottom)
   }
 
   /** Engines firing this step — those on parts in the current stage. */

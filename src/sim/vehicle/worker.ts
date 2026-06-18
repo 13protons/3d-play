@@ -241,10 +241,13 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       if (launchFrame) {
         orientation = quaternionFromBasis(launchFrame.east, launchFrame.north, launchFrame.up)
       }
+      // Rest the craft on its base, not its tracked CoM: the contact sphere is the
+      // body radius plus the vehicle's ground clearance (CoM-to-base height).
+      const contactRadius = parentSurface.radius + (structure?.groundClearance() ?? 0)
       surfaceContact = classifySurfaceContact({
         relativePosition,
         relativeVelocity,
-        parentRadius: parentSurface.radius,
+        parentRadius: contactRadius,
         landingSpeedThreshold: LANDING_SPEED_THRESHOLD,
       })
       if (surfaceContact.type !== 'flying') {
@@ -254,7 +257,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
           initialSurfaceNormal: surfaceContact.surfaceNormal,
           parentPosition,
           parentVelocity,
-          parentRadius: parentSurface.radius,
+          parentRadius: contactRadius,
           parentAngularVelocity: parentSurface.angularVelocity,
           parentRotationAxis: parentSurface.rotationAxis,
         })
@@ -402,7 +405,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         initialSurfaceNormal: surfaceContact.surfaceNormal,
         parentPosition,
         parentVelocity,
-        parentRadius: parentSurface.radius,
+        parentRadius: parentSurface.radius + (structure?.groundClearance() ?? 0),
         parentAngularVelocity: parentSurface.angularVelocity,
         parentRotationAxis: parentSurface.rotationAxis,
       })
@@ -506,12 +509,14 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         prevState[1] - previousParentPosition[1],
         prevState[2] - previousParentPosition[2],
       ]
+      // The base touches when the tracked CoM descends to body radius + clearance.
+      const contactRadius = parentSurface.radius + (structure?.groundClearance() ?? 0)
       const contact = classifySurfaceContactAlongSegment({
         previousRelativePosition,
         currentRelativePosition: relativePosition,
         relativeVelocity,
         elapsedSeconds: simTime - prevTime,
-        parentRadius: parentSurface.radius,
+        parentRadius: contactRadius,
         landingSpeedThreshold: LANDING_SPEED_THRESHOLD,
       })
       if (contact.type !== 'flying') {
@@ -523,7 +528,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
           initialSurfaceNormal: contact.surfaceNormal,
           parentPosition,
           parentVelocity,
-          parentRadius: parentSurface.radius,
+          parentRadius: contactRadius,
           parentAngularVelocity: parentSurface.angularVelocity,
           parentRotationAxis: parentSurface.rotationAxis,
         })
