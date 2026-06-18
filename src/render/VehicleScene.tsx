@@ -423,7 +423,6 @@ function VehicleViewControls() {
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const targetUpRef = useRef(new Vector3(0, 1, 0));
   const surfaceCameraInitializedRef = useRef(false);
-  const surfaceRotationSimTimeRef = useRef<number | null>(null);
   const camera = useThree((s) => s.camera);
 
   // Cap zoom-out at ~1 parent radius (reactive: re-evaluates if the parent changes).
@@ -471,32 +470,13 @@ function VehicleViewControls() {
       surfaceState,
     });
 
-    // While landed/crashed the vehicle co-rotates with the surface (see
-    // worker.ts). Rotate the camera around the same axis by the same per-frame
-    // angle so the planet stays visually fixed and time-warp shows a sunrise
-    // rather than the world tumbling under a stationary camera.
-    if (surfaceState !== 'flying' && Number.isFinite(t)) {
-      const prev = surfaceRotationSimTimeRef.current;
-      if (prev !== null) {
-        const simDelta = t - prev;
-        const angle = parent.angularVelocity * simDelta;
-        if (Number.isFinite(angle) && angle !== 0 && Math.abs(simDelta) < 86400) {
-          const target = controlsRef.current?.target;
-          const tx = target?.x ?? 0;
-          const ty = target?.y ?? 0;
-          const tz = target?.z ?? 0;
-          const offset = new Vector3(camera.position.x - tx, camera.position.y - ty, camera.position.z - tz);
-          offset.applyAxisAngle(
-            new Vector3(parentRotationAxis[0], parentRotationAxis[1], parentRotationAxis[2]),
-            angle,
-          );
-          camera.position.set(tx + offset.x, ty + offset.y, tz + offset.z);
-        }
-      }
-      surfaceRotationSimTimeRef.current = t;
-    } else {
-      surfaceRotationSimTimeRef.current = null;
-    }
+    // No camera co-rotation while landed: the sim co-rotates the vehicle with the
+    // surface (worker.ts rotatingSurfaceState), and the planet/terrain render at
+    // (bodyPos − vehiclePos) spun by the body's absolute orientation — the same
+    // rotation the orbital view uses — so the crust point under the craft already
+    // renders fixed at the scene origin. Rotating the camera too would double the
+    // spin and make the ground appear to slide backwards (west). Sunrise still
+    // happens: the sun direction sweeps across the fixed surface as the planet turns.
 
     const targetUp =
       frame.mode === 'surface' ?
