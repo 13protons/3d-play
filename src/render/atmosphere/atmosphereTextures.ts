@@ -42,7 +42,9 @@ async function bakeTextures(
       '[atmosphere] EXT_color_buffer_float unavailable — float LUT bake may fail',
     )
   }
-  const generator = new PrecomputedTexturesGenerator(gl)
+  // higherOrderScattering off trims the one-time bake cost (the multi-second startup
+  // stall) for a small multi-scatter-accuracy loss that's invisible at our scale.
+  const generator = new PrecomputedTexturesGenerator(gl, { higherOrderScattering: false })
   try {
     const textures = await generator.update(params)
     return textures

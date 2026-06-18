@@ -4,7 +4,7 @@ import { EffectComposer, ToneMapping } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import { Vector3 } from 'three'
 import type { PrecomputedTextures } from '@takram/three-atmosphere'
-import { AerialPerspective, Atmosphere, AtmosphereContext } from '@takram/three-atmosphere/r3f'
+import { AerialPerspective, Atmosphere, AtmosphereContext, Sky } from '@takram/three-atmosphere/r3f'
 import { Ellipsoid } from '@takram/three-geospatial'
 import { useTrajectoriesStore } from '../../state/trajectories'
 import { evaluateCurve } from '../../sim/curves'
@@ -93,14 +93,15 @@ function AtmosphereTransientDriver({
 }
 
 /**
- * Single-model atmosphere: takram's `<Sky>` mesh + `<AerialPerspective>` for the
- * parent body, at all altitudes (ground to orbit — takram is built for this). The
- * pipeline ends with a `<ToneMapping>` pass, as takram's own examples do: their
- * atmosphere outputs HDR luminance that must be tone-mapped, and omitting it was a
- * likely cause of the washed/maroon from-space background. takram's sun/moon disks
- * stay off (we render the sim's bodies, eclipse-aware) and our directional sun +
- * ambient light the scene, so takram's lights stay off too (decision A / D2).
- * Airless bodies get a bare composer.
+ * Single-model atmosphere, takram's WebGL recipe (validated in the orbit spike):
+ * the `<Sky>` MESH for the background (black space from orbit, sky from the ground),
+ * `<AerialPerspective>` (ground:false — we draw real terrain) to fog geometry, and a
+ * `<ToneMapping>` pass (takram outputs HDR luminance). Crucially the canvas uses
+ * `logarithmicDepthBuffer` (set in VehicleScene) for depth precision so the real
+ * planet doesn't z-fight from orbit. Do NOT use AerialPerspective `sky:true` — it
+ * fogs the background maroon. takram's sun/moon disks stay off (we render the sim's
+ * eclipse-aware bodies) and our own lights light the scene. Airless bodies get a bare
+ * composer.
  */
 export function VehicleAtmosphere({
   bodyId,
@@ -134,16 +135,13 @@ export function VehicleAtmosphere({
   return (
     <Atmosphere textures={textures ?? undefined} ellipsoid={ellipsoid} correctAltitude>
       <AtmosphereTransientDriver bodyId={bodyId} vehicleId={vehicleId} />
-      {/* sky=true: the effect renders the background sky itself, so deep-space pixels
-          come back black (no atmosphere along the ray) instead of the bare far-plane
-          being fogged maroon. This replaces the separate <Sky> mesh, which (being a
-          sphere at the atmosphere radius) didn't cover the space above the limb from
-          orbit. ground=false: we draw real terrain, so takram must not draw its own
-          analytic flat ground. multisampling 0: the default 8x MSAA on a full-screen
-          atmosphere pass was the main frame-time cost (AA can return via SMAA later). */}
+      {textures && <Sky sun={false} moon={false} />}
+      {/* ground=false: we draw real terrain, so takram must not draw its analytic
+          ground. multisampling 0: 8x MSAA on a full-screen atmosphere pass is costly
+          (AA can return via SMAA later). */}
       <EffectComposer multisampling={0}>
         {textures ? (
-          <AerialPerspective sky sun={false} moon={false} ground={false} />
+          <AerialPerspective sun={false} moon={false} ground={false} />
         ) : (
           <></>
         )}
