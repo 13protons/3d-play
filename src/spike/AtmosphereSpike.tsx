@@ -34,10 +34,11 @@ const USE_EFFECT_SKY = params?.get('sky') === 'effect'
 const USE_ANALYTIC = params?.get('analytic') === '1' // takram analytic ground, no real geometry
 const USE_LINEAR = params?.get('linear') === '1' // far:1e9 linear depth (the trash baseline)
 
-// Default: reversed-Z depth (takram's LEO approach) with far:1e9 — excellent
-// precision across the whole range so the real planet doesn't z-fight, while the
-// distant sun can still render. ?linear=1 is the broken linear-depth baseline.
-const USE_REVERSED_Z = !USE_LINEAR && !USE_ANALYTIC
+// Default: logarithmicDepthBuffer + far:1e9 — what takram's own WebGL examples use.
+// It gives the depth precision the real planet needs (no z-fighting) and the distant
+// sun still renders, while the LUT bake works (reversed-Z crashes it). ?linear=1 is
+// the broken linear-depth baseline for comparison.
+const USE_LOG = !USE_LINEAR && !USE_ANALYTIC
 const PLANET_CENTER_SCENE = USE_IDENTITY ? new Vector3(0, 0, 0) : new Vector3(0, -ORBITAL_RADIUS, 0)
 const CAMERA_POSITION: [number, number, number] = USE_IDENTITY ? [3.2e6, 1.4e6, 6.4e6] : [3e5, 2e5, 3e5]
 const NEAR = USE_ANALYTIC ? 1e4 : 0.1
@@ -85,7 +86,7 @@ export function AtmosphereSpikePage() {
     <div style={{ position: 'absolute', inset: 0, background: '#000' }}>
       <Canvas
         camera={{ position: CAMERA_POSITION, near: NEAR, far: FAR, fov: 50 }}
-        gl={USE_REVERSED_Z ? { reversedDepthBuffer: true } : undefined}
+        gl={USE_LOG ? { logarithmicDepthBuffer: true } : undefined}
       >
         <SpikeScene />
       </Canvas>
@@ -140,16 +141,17 @@ function Overlay() {
     >
       <div style={{ fontWeight: 700, marginBottom: 4 }}>ATMOSPHERE FROM ORBIT</div>
       <div>
-        depth: <b>{USE_ANALYTIC ? 'far 5e7 (analytic, no geometry)' : USE_REVERSED_Z ? 'REVERSED-Z, far 1e9' : 'linear, far 1e9 (baseline)'}</b>
+        depth: <b>{USE_ANALYTIC ? 'far 5e7 (analytic, no geometry)' : USE_LOG ? 'LOG depth, far 1e9' : 'linear, far 1e9 (baseline)'}</b>
       </div>
       <div>
         ground: <b>{USE_ANALYTIC ? 'takram analytic' : 'REAL sphere + ground:false'}</b> · sky:{' '}
-        <b>{USE_EFFECT_SKY ? 'effect' : 'mesh'}</b>
+        <b>{USE_EFFECT_SKY ? 'effect (sky:true)' : 'Sky mesh'}</b>
       </div>
       <div style={{ opacity: 0.7 }}>?linear=1 · ?analytic=1 · ?sky=effect · ?identity=1</div>
       <div style={{ marginTop: 6, opacity: 0.75 }}>
-        Default = reversed-Z (takram's LEO fix): real planet should be smooth (no
-        z-fighting) with far:1e9. ?linear=1 is the broken baseline for comparison.
+        Default = log depth + Sky mesh (takram's WebGL setup): real planet should be
+        smooth + black space. ?linear=1 = z-fighting baseline; ?sky=effect = the
+        maroon haze (don't use sky:true).
       </div>
     </div>
   )
