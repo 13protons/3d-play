@@ -1,6 +1,6 @@
 export const mainPath = '/main'
 export const testHudPath = '/_test/hud'
-export const spikeSkyPath = '/_spike/sky'
+export const spikeEarthPath = '/_spike/earth'
 
 export const scenarios = [
   { id: 'sun-earth-moon', label: 'Launch: Sun-Earth-Moon' },
@@ -11,7 +11,7 @@ export const scenarios = [
 
 export const mainMenuLinks = [
   { label: 'HUD Playground', path: testHudPath },
-  { label: 'Sky Spike', path: spikeSkyPath },
+  { label: 'Earth Spike', path: spikeEarthPath },
 ] as const
 
 export type ScenarioId = typeof scenarios[number]['id']
