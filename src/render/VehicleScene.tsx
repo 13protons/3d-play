@@ -25,11 +25,10 @@ import { BodyMaterial } from './BodyMaterial';
 import { CraftDebugAxes } from './CraftDebugAxes';
 import { cameraUpLerpAlpha, surfaceCameraPosition } from './cameraSmoothing';
 import {
-  clampCameraAboveLocalSurface,
   SURFACE_CAMERA_MIN_HEIGHT,
-  shouldClampCameraAboveLocalSurface,
   shouldHideBodySphereForLocalSurface,
 } from './surfacePatch';
+import { clampOutsideSphere } from './cameraClamp';
 import { bodySurfaceOrientationEuler, vehicleBodyTransform } from './rotation';
 import { RENDER_LAYERS } from './renderLayers';
 import { PlanetTerrainTiles } from './terrain/PlanetTerrainTiles';
@@ -383,7 +382,10 @@ function VehicleSceneContent() {
   return (
     <>
       <VehicleAmbientLight />
-      <WebGPUStars radius={STAR_SHELL_RADIUS} count={3000} />
+      <WebGPUStars
+        radius={STAR_SHELL_RADIUS}
+        count={3000}
+      />
       <VehicleViewControls />
       <RenderPipeline />
       <EnableSceneLayers />
@@ -495,20 +497,18 @@ function VehicleViewControls() {
       camera.position.set(...surfaceCameraPosition(frame.radialOut, south, 18, 22));
       surfaceCameraInitializedRef.current = true;
     }
-    if (
-      shouldClampCameraAboveLocalSurface({
-        surfaceState,
-        referenceMode: frame.mode,
-      })
-    ) {
-      camera.position.set(
-        ...clampCameraAboveLocalSurface(
-          [camera.position.x, camera.position.y, camera.position.z],
-          frame.radialOut,
-          SURFACE_CAMERA_MIN_HEIGHT,
-        ),
-      );
-    }
+    // Keep the camera outside the planet (its centre is at -relativePosition in this
+    // vehicle-origin frame) so you can look around freely — even up at the sky — without
+    // it dropping below the ground. Replaces the old flat tangent-plane clamp that
+    // pinned the camera above the vehicle and made looking up impossible. Harmless when
+    // flying (the camera is far from the planet centre, so it never engages).
+    clampOutsideSphere(
+      camera.position,
+      -relativePosition[0],
+      -relativePosition[1],
+      -relativePosition[2],
+      parent.radius + SURFACE_CAMERA_MIN_HEIGHT,
+    );
     if (frame.mode !== 'surface') {
       surfaceCameraInitializedRef.current = false;
     }
@@ -539,7 +539,7 @@ export function VehicleScene() {
       }}
     >
       <Canvas
-        camera={{ position: [0, 10, 30], near: 0.1, far: 1e9, fov: 60 }}
+        camera={{ position: [0, 10, 30], near: 0.1, far: 1e9, fov: 50 }}
         gl={makeWebGPURenderer({ reversedDepthBuffer: true })}
         style={{ width: '100%', height: '100%' }}
       >

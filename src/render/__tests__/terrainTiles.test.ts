@@ -148,10 +148,12 @@ describe('generatedTerrainTileSource', () => {
   })
 
   it('reuses cached fallback surface data without sharing BufferGeometry instances', () => {
-    const firstData = cachedBodySurfaceGeometryData(100)
-    const secondData = cachedBodySurfaceGeometryData(100)
-    const firstGeometry = createBodySurfaceGeometry(100)
-    const secondGeometry = createBodySurfaceGeometry(100)
+    // Explicit low LOD: this exercises the cache (keyed by radius:lod), not the sphere
+    // resolution, so keep it cheap and independent of the production fallback LOD.
+    const firstData = cachedBodySurfaceGeometryData(100, 1)
+    const secondData = cachedBodySurfaceGeometryData(100, 1)
+    const firstGeometry = createBodySurfaceGeometry(100, 1)
+    const secondGeometry = createBodySurfaceGeometry(100, 1)
 
     expect(secondData).toBe(firstData)
     expect(secondGeometry).not.toBe(firstGeometry)

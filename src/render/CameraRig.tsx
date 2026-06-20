@@ -5,6 +5,7 @@ import { useCameraStore } from '../state/camera'
 import { useModeStore } from '../state/mode'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
+import { clampOutsideSphere } from './cameraClamp'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 
 // Keep the camera this far above a surface when it's pushed out of a body.
@@ -40,18 +41,13 @@ export function CameraRig() {
       if (!bodyCurve) continue
       const bodyPos = evaluateCurve(bodyCurve, t)
       // Body centre in the camera's (follow-target-relative) scene frame.
-      const cx = bodyPos[0] - targetPos[0]
-      const cy = bodyPos[1] - targetPos[1]
-      const cz = bodyPos[2] - targetPos[2]
-      const dx = camera.position.x - cx
-      const dy = camera.position.y - cy
-      const dz = camera.position.z - cz
-      const distance = Math.hypot(dx, dy, dz)
-      const minRadius = body.radius * SURFACE_CLEARANCE
-      if (distance > 0 && distance < minRadius) {
-        const scale = minRadius / distance
-        camera.position.set(cx + dx * scale, cy + dy * scale, cz + dz * scale)
-      }
+      clampOutsideSphere(
+        camera.position,
+        bodyPos[0] - targetPos[0],
+        bodyPos[1] - targetPos[1],
+        bodyPos[2] - targetPos[2],
+        body.radius * SURFACE_CLEARANCE,
+      )
     }
   }, 1)
 
