@@ -6,7 +6,9 @@ import { minTileLodForBodyRadius } from './terrain/terrainLodPolicy'
 import type { TerrainCubeFace, TerrainTileData } from './terrain/types'
 
 const CUBE_FACES: TerrainCubeFace[] = ['px', 'nx', 'py', 'ny', 'pz', 'nz']
-const FALLBACK_SURFACE_LOD = 1
+// LOD 3 (8×8 tiles per cube face) gives a smooth planet silhouette from orbit before
+// the adaptive terrain tiles take over up close; LOD 1 was visibly faceted.
+const FALLBACK_SURFACE_LOD = 3
 const fallbackGeometryDataCache = new Map<string, TerrainTileData>()
 
 export function bodySurfaceFallbackLod(): number {
