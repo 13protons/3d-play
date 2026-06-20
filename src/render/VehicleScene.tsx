@@ -49,6 +49,12 @@ const SUN_RENDER_DISTANCE = 5e8;
 const VEHICLE_VIEW_MAX_RADII = 0.4;
 const VEHICLE_VIEW_MAX_DISTANCE_FALLBACK = 2e7;
 
+// Closest the vehicle camera may zoom to the craft. Small so it can tuck in low and
+// beside the rocket to angle up toward the sky — the surface sphere clamp still stops
+// it at the ground, so it can't break the ground plane. (Orbit-around-the-craft can't
+// fully reach the zenith; this just gets as close as the geometry allows.)
+const VEHICLE_VIEW_MIN_DISTANCE = 2.5;
+
 // Radius of the vehicle-view star shell, centred on the craft. Pushed far enough
 // beyond the camera's max orbit distance that the camera can never reach it; with
 // non-attenuated point size the large radius doesn't change how stars look.
@@ -518,7 +524,7 @@ function VehicleViewControls() {
   return (
     <OrbitControls
       ref={controlsRef}
-      minDistance={SURFACE_CAMERA_MIN_HEIGHT * 2}
+      minDistance={VEHICLE_VIEW_MIN_DISTANCE}
       maxDistance={maxDistance}
     />
   );
