@@ -1,94 +1,145 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
-import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
-import { useModeStore } from './state/mode'
-import { startSim, stopSim } from './state/bridge'
-import { MainMenu } from './ui/MainMenu'
-import { HudTestPage } from './ui/HudTestPage'
-import { Flight } from './modes/Flight'
-import { isKnownScenarioId, mainPath, missionPath, spikeEarthPath, testHudPath } from './appRoutes'
+import { lazy, Suspense, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { useModeStore } from './state/mode';
+import { startSim, stopSim } from './state/bridge';
+import { MainMenu } from './ui/MainMenu';
+import { HudTestPage } from './ui/HudTestPage';
+import { Flight } from './modes/Flight';
+import { isKnownScenarioId, mainPath, missionPath, spikeEarthPath, spikeDawnPath, testHudPath } from './appRoutes';
 
 // Lazy so the TSL spike deps stay out of the main flight bundle.
-const EarthSpikePage = lazy(() => import('./spike/EarthSpike').then((m) => ({ default: m.EarthSpikePage })))
+const EarthSpikePage = lazy(() => import('./spike/EarthSpike').then((m) => ({ default: m.EarthSpikePage })));
+const DawnSpikePage = lazy(() => import('./spike/DawnSpike').then((m) => ({ default: m.DawnSpikePage })));
 
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to={mainPath} replace />} />
-      <Route path={mainPath} element={<MainRoute />} />
-      <Route path={testHudPath} element={<HudTestPage />} />
+      <Route
+        path='/'
+        element={
+          <Navigate
+            to={mainPath}
+            replace
+          />
+        }
+      />
+      <Route
+        path={mainPath}
+        element={<MainRoute />}
+      />
+      <Route
+        path={testHudPath}
+        element={<HudTestPage />}
+      />
       <Route
         path={spikeEarthPath}
         element={
-          <Suspense fallback={<div style={{ position: 'absolute', inset: 0, background: '#000', color: '#888', padding: 16 }}>LOADING EARTH SPIKE</div>}>
+          <Suspense
+            fallback={
+              <div style={{ position: 'absolute', inset: 0, background: '#000', color: '#888', padding: 16 }}>
+                LOADING EARTH SPIKE
+              </div>
+            }
+          >
             <EarthSpikePage />
           </Suspense>
         }
       />
-      <Route path="/mission/:scenarioId" element={<MissionRoute />} />
-      <Route path="*" element={<NotFound />} />
+      <Route
+        path={spikeDawnPath}
+        element={
+          <Suspense
+            fallback={
+              <div style={{ position: 'absolute', inset: 0, background: '#000', color: '#888', padding: 16 }}>
+                LOADING DAWN SPIKE
+              </div>
+            }
+          >
+            <DawnSpikePage />
+          </Suspense>
+        }
+      />
+      <Route
+        path='/mission/:scenarioId'
+        element={<MissionRoute />}
+      />
+      <Route
+        path='*'
+        element={<NotFound />}
+      />
     </Routes>
-  )
+  );
 }
 
 function MainRoute() {
-  const navigate = useNavigate()
-  const enterMenu = useModeStore((s) => s.enterMenu)
+  const navigate = useNavigate();
+  const enterMenu = useModeStore((s) => s.enterMenu);
 
   useEffect(() => {
-    stopSim()
-    enterMenu()
-  }, [enterMenu])
+    stopSim();
+    enterMenu();
+  }, [enterMenu]);
 
-  return <MainMenu onLaunch={(scenarioId) => navigate(missionPath(scenarioId))} />
+  return <MainMenu onLaunch={(scenarioId) => navigate(missionPath(scenarioId))} />;
 }
 
 function MissionRoute() {
-  const { scenarioId } = useParams()
-  const enterFlight = useModeStore((s) => s.enterFlight)
-  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
+  const { scenarioId } = useParams();
+  const enterFlight = useModeStore((s) => s.enterFlight);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
 
   useEffect(() => {
-    if (!scenarioId || !isKnownScenarioId(scenarioId)) return
-    const missionScenarioId = scenarioId
+    if (!scenarioId || !isKnownScenarioId(scenarioId)) return;
+    const missionScenarioId = scenarioId;
 
-    let cancelled = false
+    let cancelled = false;
 
     async function launchMission() {
-      setStatus('loading')
-      stopSim()
+      setStatus('loading');
+      stopSim();
       try {
-        await startSim(missionScenarioId)
+        await startSim(missionScenarioId);
         if (!cancelled) {
-          enterFlight(missionScenarioId)
-          setStatus('ready')
+          enterFlight(missionScenarioId);
+          setStatus('ready');
         }
       } catch (error) {
         if (!cancelled) {
-          console.error(error)
-          setStatus('failed')
+          console.error(error);
+          setStatus('failed');
         }
       }
     }
 
-    void launchMission()
+    void launchMission();
 
     return () => {
-      cancelled = true
-    }
-  }, [enterFlight, scenarioId])
+      cancelled = true;
+    };
+  }, [enterFlight, scenarioId]);
 
   if (!scenarioId || !isKnownScenarioId(scenarioId)) {
-    return <NotFound title="Unknown mission" detail={scenarioId ? `No mission exists for ${scenarioId}.` : undefined} />
+    return (
+      <NotFound
+        title='Unknown mission'
+        detail={scenarioId ? `No mission exists for ${scenarioId}.` : undefined}
+      />
+    );
   }
 
   if (status === 'failed') {
-    return <NotFound title="Mission failed to load" detail={`Could not load ${scenarioId}.`} />
+    return (
+      <NotFound
+        title='Mission failed to load'
+        detail={`Could not load ${scenarioId}.`}
+      />
+    );
   }
 
-  if (status === 'loading') return <LoadingMission scenarioId={scenarioId} />
+  if (status === 'loading') return <LoadingMission scenarioId={scenarioId} />;
 
-  return <Flight />
+  return <Flight />;
 }
 
 function LoadingMission({ scenarioId }: { scenarioId: string }) {
@@ -97,11 +148,11 @@ function LoadingMission({ scenarioId }: { scenarioId: string }) {
       <div style={{ opacity: 0.6, fontSize: 11 }}>LOADING MISSION</div>
       <div>{scenarioId}</div>
     </Shell>
-  )
+  );
 }
 
 function NotFound({ title = 'Not found', detail }: { title?: string; detail?: string }) {
-  const navigate = useNavigate()
+  const navigate = useNavigate();
   return (
     <Shell>
       <div style={{ fontSize: 28, marginBottom: 8 }}>{title}</div>
@@ -121,7 +172,7 @@ function NotFound({ title = 'Not found', detail }: { title?: string; detail?: st
         Back to main
       </button>
     </Shell>
-  )
+  );
 }
 
 function Shell({ children }: { children: ReactNode }) {
@@ -140,5 +191,5 @@ function Shell({ children }: { children: ReactNode }) {
     >
       {children}
     </div>
-  )
+  );
 }
