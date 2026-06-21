@@ -30,3 +30,51 @@ export function createStarfieldGeometry(radius: number, count: number): BufferGe
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
   return geometry
 }
+
+/**
+ * Like {@link createStarfieldGeometry}, but also assigns each star an apparent `magnitude`
+ * and seeds an (initially black) per-star `color` attribute. Magnitudes follow the real
+ * power-law star count N(<m) ∝ 10^(0.4·m) — few bright stars, many faint — sampled by
+ * inverting that CDF. The renderer can then fade each star against a limiting magnitude
+ * (see limitingMagnitude) by writing brightness into `color`, ideally with additive
+ * blending so sub-threshold stars contribute no light on any background.
+ */
+export function createStarfieldWithMagnitudes(
+  radius: number,
+  count: number,
+  minMagnitude = -1.5,
+  maxMagnitude = 6.5,
+): BufferGeometry {
+  let seed = 0x9e3779b9 ^ (count * 2654435761)
+  const random = () => {
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+
+  const positions = new Float32Array(count * 3)
+  const magnitudes = new Float32Array(count)
+  const colors = new Float32Array(count * 3) // black until the renderer lights them
+
+  const fluxMin = Math.pow(10, 0.4 * minMagnitude)
+  const fluxMax = Math.pow(10, 0.4 * maxMagnitude)
+
+  for (let i = 0; i < count; i++) {
+    const u = random() * 2 - 1
+    const theta = random() * Math.PI * 2
+    const s = Math.sqrt(1 - u * u)
+    const r = radius * (0.85 + random() * 0.15)
+    positions[i * 3] = r * s * Math.cos(theta)
+    positions[i * 3 + 1] = r * s * Math.sin(theta)
+    positions[i * 3 + 2] = r * u
+    // Invert the cumulative count to draw a magnitude from the power-law distribution.
+    magnitudes[i] = 2.5 * Math.log10(fluxMin + random() * (fluxMax - fluxMin))
+  }
+
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('magnitude', new Float32BufferAttribute(magnitudes, 1))
+  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
+  return geometry
+}
