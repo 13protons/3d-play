@@ -25,6 +25,63 @@ export function isLandingDescent(
   return contact.type !== 'flying' && radialVelocity < 0
 }
 
+export type SurfaceResponse = 'fly' | 'crash' | 'park' | 'rest'
+
+/**
+ * How a flying craft's surface contact resolves this step.
+ *
+ * A non-penetration contact force only ever acts on a craft moving INTO the surface, so an
+ * ascending craft flies regardless of contact or thrust — even when its tracked point is still
+ * within the contact radius (which *grows* as fuel drains and the CoM rises, so a healthy-TWR
+ * ascent sits "inside" it for the first moments). `movingIntoSurface` (radial velocity < 0) is
+ * that gate. It is distinct from the old descent-to-land test: `thrustProducing` decides the
+ * parked↔dynamic state; this decides whether the surface pushes back this step.
+ *
+ * When moving into the surface:
+ *  - crashed (came in too fast) → crash;
+ *  - engine quiet → park (a genuine touchdown);
+ *  - under power but unable to climb out (sub-TWR) → rest on the surface but stay dynamic, so it
+ *    lifts off the instant thrust beats gravity — no landed↔flying flicker.
+ */
+export function surfaceResponse(
+  contact: SurfaceContact,
+  thrustProducing: boolean,
+  movingIntoSurface: boolean,
+): SurfaceResponse {
+  if (contact.type === 'flying' || !movingIntoSurface) return 'fly'
+  if (contact.type === 'crashed') return 'crash'
+  return thrustProducing ? 'rest' : 'park'
+}
+
+/**
+ * Resting (non-penetration) contact for a craft held at the surface under power. Clamps the
+ * tracked point to the contact radius and removes only the velocity component INTO the surface
+ * (the inward normal); the tangential component is preserved, so on real terrain a craft on a
+ * slope slides/falls off rather than sticking. INTERIM until the collision solver owns contact
+ * response — this is the same normal-impulse a solver applies, so it's forward-compatible.
+ */
+export function restingContactState({
+  relativePosition,
+  relativeVelocity,
+  parentPosition,
+  parentVelocity,
+  contactRadius,
+}: {
+  relativePosition: Vec3
+  relativeVelocity: Vec3
+  parentPosition: Vec3
+  parentVelocity: Vec3
+  contactRadius: number
+}): SurfaceState {
+  const outwardNormal = normalize(relativePosition, [1, 0, 0])
+  const into = Math.min(0, dot(relativeVelocity, outwardNormal)) // < 0 only when descending
+  const correctedRelative = subtract(relativeVelocity, scale(outwardNormal, into))
+  return {
+    position: add(parentPosition, scale(outwardNormal, contactRadius)),
+    velocity: add(parentVelocity, correctedRelative),
+  }
+}
+
 export function classifySurfaceContact({
   relativePosition,
   relativeVelocity,

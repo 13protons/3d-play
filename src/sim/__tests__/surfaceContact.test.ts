@@ -4,7 +4,9 @@ import {
   classifySurfaceContactAlongSegment,
   isLandingDescent,
   landedSurfaceState,
+  restingContactState,
   rotatingSurfaceState,
+  surfaceResponse,
 } from '../vehicle/surfaceContact'
 
 describe('isLandingDescent', () => {
@@ -23,6 +25,77 @@ describe('isLandingDescent', () => {
 
   it('is never a landing while flying', () => {
     expect(isLandingDescent({ type: 'flying' }, -5)).toBe(false)
+  })
+})
+
+describe('surfaceResponse', () => {
+  const normal = [1, 0, 0] as [number, number, number]
+  const landed = { type: 'landed' as const, surfaceNormal: normal }
+  const crashed = { type: 'crashed' as const, surfaceNormal: normal }
+
+  it('keeps a craft flying when there is no contact', () => {
+    expect(surfaceResponse({ type: 'flying' }, false, true)).toBe('fly')
+    expect(surfaceResponse({ type: 'flying' }, true, true)).toBe('fly')
+  })
+
+  it('lets an ascending craft fly even within the contact radius (healthy-TWR climb)', () => {
+    // The contact radius grows as fuel drains and the CoM rises, so a climbing craft can sit
+    // "within" it — but a non-penetration force never grabs something already leaving. This is
+    // the regression that pinned a TWR>1 ascent to the ground.
+    expect(surfaceResponse(landed, true, false)).toBe('fly') // under power, ascending
+    expect(surfaceResponse(landed, false, false)).toBe('fly') // coasting up through the radius
+  })
+
+  it('crashes on a hard contact moving into the surface, regardless of thrust', () => {
+    expect(surfaceResponse(crashed, false, true)).toBe('crash')
+    expect(surfaceResponse(crashed, true, true)).toBe('crash')
+  })
+
+  it('parks on a gentle touchdown when the engine is quiet', () => {
+    expect(surfaceResponse(landed, false, true)).toBe('park')
+  })
+
+  it('rests (stays dynamic) when under power but sinking (sub-TWR) — no landed↔flying flicker', () => {
+    // Sub-TWR throttle-up: net-down, so it's moving into the surface; it must not be re-parked or
+    // it would flicker between landed and flying every step. It rests until thrust beats gravity.
+    expect(surfaceResponse(landed, true, true)).toBe('rest')
+  })
+})
+
+describe('restingContactState', () => {
+  it('clamps to the contact radius and cancels only the inward-normal velocity, preserving tangential', () => {
+    const rest = restingContactState({
+      relativePosition: [9, 0, 0], // just below the surface
+      relativeVelocity: [-5, 3, 0], // -5 into the surface, +3 tangential
+      parentPosition: [0, 0, 0],
+      parentVelocity: [0, 0, 0],
+      contactRadius: 10,
+    })
+    expect(rest.position).toEqual([10, 0, 0]) // clamped out to the radius
+    expect(rest.velocity).toEqual([0, 3, 0]) // inward cancelled, tangential kept → slides on a slope
+  })
+
+  it('leaves an outward (ascending) velocity untouched so the craft lifts off once TWR > 1', () => {
+    const rest = restingContactState({
+      relativePosition: [9, 0, 0],
+      relativeVelocity: [5, 0, 0], // moving outward
+      parentPosition: [0, 0, 0],
+      parentVelocity: [0, 0, 0],
+      contactRadius: 10,
+    })
+    expect(rest.velocity).toEqual([5, 0, 0])
+  })
+
+  it('adds the parent position and velocity (resting in the parent frame)', () => {
+    const rest = restingContactState({
+      relativePosition: [9, 0, 0],
+      relativeVelocity: [-5, 0, 0],
+      parentPosition: [100, 0, 0],
+      parentVelocity: [1, 2, 3],
+      contactRadius: 10,
+    })
+    expect(rest.position).toEqual([110, 0, 0])
+    expect(rest.velocity).toEqual([1, 2, 3])
   })
 })
 
