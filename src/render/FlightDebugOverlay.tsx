@@ -11,7 +11,7 @@
  * cadence so refreshing the vectors doesn't re-render the whole Vessel tree.
  */
 
-import { Line } from '@react-three/drei'
+import { WebGPULine } from './WebGPULine'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { useThrottledRender } from '../ui/useThrottledRender'
 import { type Mat3, type Quaternion, type Vec3, mat3FromQuaternion, mat3MulVec, mat3Transpose } from '../sim/vehicle/mat3'
@@ -113,9 +113,9 @@ export function FlightDebugOverlay({ vehicleId, scale, engines }: FlightDebugOve
           <meshBasicMaterial color={COLORS.cop} depthTest={false} />
         </mesh>
       )}
-      <Line points={[[-AXIS_LEN, 0, 0], [AXIS_LEN, 0, 0]]} color={COLORS.axisX} lineWidth={1.5} depthTest={false} depthWrite={false} />
-      <Line points={[[0, -AXIS_LEN, 0], [0, AXIS_LEN, 0]]} color={COLORS.axisY} lineWidth={1.5} depthTest={false} depthWrite={false} />
-      <Line points={[[0, 0, -AXIS_LEN], [0, 0, AXIS_LEN]]} color={COLORS.axisZ} lineWidth={1.5} depthTest={false} depthWrite={false} />
+      <WebGPULine points={[[-AXIS_LEN, 0, 0], [AXIS_LEN, 0, 0]]} color={COLORS.axisX} lineWidth={1.5} depthTest={false} depthWrite={false} />
+      <WebGPULine points={[[0, -AXIS_LEN, 0], [0, AXIS_LEN, 0]]} color={COLORS.axisY} lineWidth={1.5} depthTest={false} depthWrite={false} />
+      <WebGPULine points={[[0, 0, -AXIS_LEN], [0, 0, AXIS_LEN]]} color={COLORS.axisZ} lineWidth={1.5} depthTest={false} depthWrite={false} />
 
       {engines.map((e, i) => {
         const dir = dirRay(e.direction, 3)
@@ -125,14 +125,14 @@ export function FlightDebugOverlay({ vehicleId, scale, engines }: FlightDebugOve
               <sphereGeometry args={[0.5, 12, 8]} />
               <meshBasicMaterial color={COLORS.engine} depthTest={false} transparent opacity={e.stage === stage ? 1 : 0.4} />
             </mesh>
-            {dir && <Line points={dir} color={COLORS.engine} lineWidth={1} depthTest={false} depthWrite={false} />}
+            {dir && <WebGPULine points={dir} color={COLORS.engine} lineWidth={1} depthTest={false} depthWrite={false} />}
           </group>
         )
       })}
 
-      {thrustRay && <Line points={thrustRay} color={COLORS.thrust} lineWidth={3} depthTest={false} depthWrite={false} />}
-      {torqueRay && <Line points={torqueRay} color={COLORS.torque} lineWidth={3} depthTest={false} depthWrite={false} />}
-      {dragRay && <Line points={dragRay} color={COLORS.drag} lineWidth={3} depthTest={false} depthWrite={false} />}
+      {thrustRay && <WebGPULine points={thrustRay} color={COLORS.thrust} lineWidth={3} depthTest={false} depthWrite={false} />}
+      {torqueRay && <WebGPULine points={torqueRay} color={COLORS.torque} lineWidth={3} depthTest={false} depthWrite={false} />}
+      {dragRay && <WebGPULine points={dragRay} color={COLORS.drag} lineWidth={3} depthTest={false} depthWrite={false} />}
     </group>
   )
 }

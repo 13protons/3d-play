@@ -24,8 +24,6 @@ import {
   shouldDisableThrottleForWarp,
   shouldEmitAeroForce,
   shouldStabilizeAngularVelocityForWarp,
-  thrustAccelerationForElapsedRotation,
-  thrustAccelerationFromBodyForce,
   type Quaternion,
   type Vec3,
 } from './controls'
@@ -39,7 +37,9 @@ import type { VehicleAttitude } from '../types'
 import {
   classifySurfaceContact,
   classifySurfaceContactAlongSegment,
+  restingContactState,
   rotatingSurfaceState,
+  surfaceResponse,
   type SurfaceContact,
 } from './surfaceContact'
 
@@ -241,10 +241,13 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       if (launchFrame) {
         orientation = quaternionFromBasis(launchFrame.east, launchFrame.north, launchFrame.up)
       }
+      // Rest the craft on its base, not its tracked CoM: the contact sphere is the
+      // body radius plus the vehicle's ground clearance (CoM-to-base height).
+      const contactRadius = parentSurface.radius + (structure?.groundClearance() ?? 0)
       surfaceContact = classifySurfaceContact({
         relativePosition,
         relativeVelocity,
-        parentRadius: parentSurface.radius,
+        parentRadius: contactRadius,
         landingSpeedThreshold: LANDING_SPEED_THRESHOLD,
       })
       if (surfaceContact.type !== 'flying') {
@@ -254,7 +257,7 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
           initialSurfaceNormal: surfaceContact.surfaceNormal,
           parentPosition,
           parentVelocity,
-          parentRadius: parentSurface.radius,
+          parentRadius: contactRadius,
           parentAngularVelocity: parentSurface.angularVelocity,
           parentRotationAxis: parentSurface.rotationAxis,
         })
@@ -393,36 +396,33 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
       thrustTorqueBody = thrust.torque
     }
 
+    // Under power = actually producing thrust force this step (engine + fuel + throttle). This,
+    // not a TWR or thrust-direction test, is what takes the craft out of the parked "landed"
+    // state: throttle up and you're a dynamic body; gravity (and, later, the collision solver)
+    // decide whether you really leave the ground.
+    const thrustProducing = structure
+      ? Math.hypot(thrustForceBody[0], thrustForceBody[1], thrustForceBody[2]) > 0
+      : effectiveThrottle > 0 && engine != null && (resources?.fuelMass ?? 0) > 0
+
     if (surfaceContact.type !== 'flying' && parentCurve && parentSurface) {
-      const parentPosition = evaluateCurve(parentCurve, targetTime)
-      const parentVelocity = evaluateCurveVelocity(parentCurve, targetTime)
-      const landed = rotatingSurfaceState({
-        landedAt,
-        simTime: targetTime,
-        initialSurfaceNormal: surfaceContact.surfaceNormal,
-        parentPosition,
-        parentVelocity,
-        parentRadius: parentSurface.radius,
-        parentAngularVelocity: parentSurface.angularVelocity,
-        parentRotationAxis: parentSurface.rotationAxis,
-      })
-      const currentNormal = normalize([
-        landed.position[0] - parentPosition[0],
-        landed.position[1] - parentPosition[1],
-        landed.position[2] - parentPosition[2],
-      ])
-      const thrust = structure
-        ? thrustAccelerationFromBodyForce(thrustForceBody, structure.aggregate().mass, orientation, angularVelocity, 0)
-        : thrustAccelerationForElapsedRotation(
-            orientation,
-            angularVelocity,
-            0,
-            effectiveThrottle,
-            resources && engine ? { maxThrust: engine.maxThrust, mass: resources.mass } : undefined,
-          )
-      if (surfaceContact.type === 'landed' && dot(thrust, currentNormal) > 0) {
+      if (surfaceContact.type === 'landed' && thrustProducing) {
+        // Producing thrust → leave the parked state; fall through to full integration below.
+        // Whether it actually rises is decided by the physics, not here.
         surfaceContact = { type: 'flying' }
       } else {
+        // Parked at rest (engine quiet, or crashed): pin to the rotating surface and co-rotate.
+        const parentPosition = evaluateCurve(parentCurve, targetTime)
+        const parentVelocity = evaluateCurveVelocity(parentCurve, targetTime)
+        const landed = rotatingSurfaceState({
+          landedAt,
+          simTime: targetTime,
+          initialSurfaceNormal: surfaceContact.surfaceNormal,
+          parentPosition,
+          parentVelocity,
+          parentRadius: parentSurface.radius + (structure?.groundClearance() ?? 0),
+          parentAngularVelocity: parentSurface.angularVelocity,
+          parentRotationAxis: parentSurface.rotationAxis,
+        })
         stateVec.set([...landed.position, ...landed.velocity])
         advanceAttitude(elapsedSeconds, thrustTorqueBody, inertiaTensorStep, inertiaInverseStep)
         // Co-rotate with the parent so a landed vehicle's orientation tracks
@@ -506,15 +506,29 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
         prevState[1] - previousParentPosition[1],
         prevState[2] - previousParentPosition[2],
       ]
+      // The base touches when the tracked CoM descends to body radius + clearance.
+      const contactRadius = parentSurface.radius + (structure?.groundClearance() ?? 0)
       const contact = classifySurfaceContactAlongSegment({
         previousRelativePosition,
         currentRelativePosition: relativePosition,
         relativeVelocity,
         elapsedSeconds: simTime - prevTime,
-        parentRadius: parentSurface.radius,
+        parentRadius: contactRadius,
         landingSpeedThreshold: LANDING_SPEED_THRESHOLD,
       })
-      if (contact.type !== 'flying') {
+      // The surface only pushes back when the craft is moving into it; an ascending craft flies
+      // regardless of thrust (the contact radius grows as fuel drains, so a climbing craft sits
+      // briefly "within" it). thrustProducing governs the parked↔dynamic state; this gates the
+      // contact force. See surfaceResponse.
+      const outwardNormal = normalize(relativePosition)
+      const movingIntoSurface =
+        relativeVelocity[0] * outwardNormal[0] +
+        relativeVelocity[1] * outwardNormal[1] +
+        relativeVelocity[2] * outwardNormal[2] <
+        0
+      const response = surfaceResponse(contact, thrustProducing, movingIntoSurface)
+      if ((response === 'crash' || response === 'park') && contact.type !== 'flying') {
+        // Touchdown (engine quiet) or crash (too fast): pin to the rotating surface and co-rotate.
         surfaceContact = contact
         landedAt = prevTime + (contact.segmentT ?? 1) * (simTime - prevTime)
         const landed = rotatingSurfaceState({
@@ -523,15 +537,21 @@ onmessage = (e: MessageEvent<VehicleWorkerInbound>) => {
           initialSurfaceNormal: contact.surfaceNormal,
           parentPosition,
           parentVelocity,
-          parentRadius: parentSurface.radius,
+          parentRadius: contactRadius,
           parentAngularVelocity: parentSurface.angularVelocity,
           parentRotationAxis: parentSurface.rotationAxis,
         })
         stateVec.set([...landed.position, ...landed.velocity])
-        if (contact.type === 'crashed') {
+        if (response === 'crash') {
           angularVelocity = [0, 0, 0]
           manualTorque = [0, 0, 0]
         }
+      } else if (response === 'rest') {
+        // Under power but unable to climb out (sub-TWR): rest on the surface instead of sinking,
+        // staying dynamic so it lifts off the moment thrust beats gravity (no flicker). INTERIM,
+        // pre-collision — the collision solver replaces this; nothing downstream depends on it.
+        const rest = restingContactState({ relativePosition, relativeVelocity, parentPosition, parentVelocity, contactRadius })
+        stateVec.set([...rest.position, ...rest.velocity])
       }
     }
 
@@ -662,10 +682,6 @@ function desiredControlTorque(currentOrientation: Quaternion, currentAngularVelo
     manualTorque[1] !== 0 ? manualSeek[1] : base[1],
     manualTorque[2] !== 0 ? manualSeek[2] : base[2],
   ]
-}
-
-function dot(a: Vec3, b: Vec3): number {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
 function normalize(v: Vec3): Vec3 {

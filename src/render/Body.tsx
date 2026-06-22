@@ -8,7 +8,7 @@ import { useModeStore } from '../state/mode'
 import { evaluateCurve } from '../sim/curves'
 import { OrbitalMarker } from './OrbitalMarker'
 import { RotationLine } from './RotationLine'
-import { BodyMaterial } from './BodyMaterial'
+import { AtmosphereGlowMaterial, BodyMaterial } from './BodyMaterial'
 import {
   bodySurfaceOrientationEuler,
   rotatingBodyTransform,
@@ -36,6 +36,7 @@ export function Body({ bodyId }: BodyProps) {
   const meshRef = useRef<Mesh>(null)
   const spriteRef = useRef<Sprite>(null)
   const lightRef = useRef<PointLight>(null)
+  const atmosphereRef = useRef<Mesh>(null)
   const camera = useThree((s) => s.camera)
   const viewport = useThree((s) => s.size)
   const body = useTrajectoriesStore((s) => s.bodies[bodyId])
@@ -131,6 +132,13 @@ export function Body({ bodyId }: BodyProps) {
 
     mesh.visible = !useSprite && surfaceDecision.showFallbackSphere
     sprite.visible = useSprite && !suppressSprite
+    // The atmosphere halo rides with the body (unrotated) and shows whenever the
+    // planet is a 3D body — both base-sphere and terrain-tile ranges, not just when
+    // the fallback sphere is visible.
+    if (atmosphereRef.current) {
+      atmosphereRef.current.position.set(...scenePosition)
+      atmosphereRef.current.visible = !useSprite
+    }
     if (spinGroup) {
       spinGroup.visible = mesh.visible
       spinGroup.rotation.set(
@@ -167,6 +175,12 @@ export function Body({ bodyId }: BodyProps) {
           <RotationLine radius={body.radius} />
         )}
       </group>
+      {body.atmosphereRender && (
+        <mesh ref={atmosphereRef}>
+          <sphereGeometry args={[body.radius + body.atmosphereRender.shellHeight, 64, 32]} />
+          <AtmosphereGlowMaterial body={body} />
+        </mesh>
+      )}
       <OrbitalMarker
         ref={spriteRef}
         color={body.color}

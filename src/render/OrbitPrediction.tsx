@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Line } from '@react-three/drei'
+import { WebGPULine } from './WebGPULine'
 import type { Group } from 'three'
 import { useCameraStore } from '../state/camera'
 import { useModeStore } from '../state/mode'
@@ -127,7 +127,7 @@ export function OrbitPrediction({ bodyId }: OrbitPredictionProps) {
   return (
     <group ref={groupRef} visible={false}>
       {prediction?.segments.map((points, index) => points.length > 1 && (
-        <Line
+        <WebGPULine
           key={index}
           points={points}
           color={style.color}

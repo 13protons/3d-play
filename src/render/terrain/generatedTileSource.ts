@@ -22,10 +22,11 @@ export function generateTerrainTile(id: TerrainTileId, bodyRadius: number): Terr
   const indices = new Uint32Array(TILE_SEGMENTS * TILE_SEGMENTS * 6)
 
   let vertex = 0
+  let minTextureU = Number.POSITIVE_INFINITY
+  let maxTextureU = Number.NEGATIVE_INFINITY
   for (let y = 0; y <= TILE_SEGMENTS; y++) {
     const v = y / TILE_SEGMENTS
     const faceV = v0 + (v1 - v0) * v
-    let previousTextureU: number | undefined
     for (let x = 0; x <= TILE_SEGMENTS; x++) {
       const u = x / TILE_SEGMENTS
       const faceU = u0 + (u1 - u0) * u
@@ -37,15 +38,25 @@ export function generateTerrainTile(id: TerrainTileId, bodyRadius: number): Terr
       normals[vertex * 3 + 1] = normal[1]
       normals[vertex * 3 + 2] = normal[2]
       const [rawTextureU, textureV] = equirectangularUv(normal)
-      const previousRowTextureU = y > 0 ? uvs[((y - 1) * (TILE_SEGMENTS + 1) + x) * 2] : undefined
-      const referenceTextureU = previousTextureU ?? previousRowTextureU
-      const textureU = referenceTextureU === undefined
-        ? rawTextureU
-        : unwrapTextureU(rawTextureU, referenceTextureU)
-      uvs[vertex * 2] = textureU
+      uvs[vertex * 2] = rawTextureU
       uvs[vertex * 2 + 1] = textureV
-      previousTextureU = textureU
+      if (rawTextureU < minTextureU) minTextureU = rawTextureU
+      if (rawTextureU > maxTextureU) maxTextureU = rawTextureU
       vertex += 1
+    }
+  }
+
+  // Equirectangular seam fix. A tile straddling the ±180° meridian gets U values
+  // split near 0 and near 1; left raw, the texture smears backwards across the whole
+  // tile. Lift the low side onto a continuous [0.5, 1.5) branch (the body texture
+  // uses RepeatWrapping on U, so >1 samples correctly). Detected from the tile's full
+  // U range — a single tile-global decision, so it stays stable as the camera moves
+  // and LOD changes, unlike per-vertex unwrapping anchored on the ambiguous seam
+  // vertex. Tiles span far less than half the globe in longitude, so a >0.5 spread
+  // can only mean a seam crossing.
+  if (maxTextureU - minTextureU > 0.5) {
+    for (let i = 0; i < vertexCount; i++) {
+      if (uvs[i * 2] < 0.5) uvs[i * 2] += 1
     }
   }
 
@@ -69,7 +80,7 @@ export function generateTerrainTile(id: TerrainTileId, bodyRadius: number): Terr
   return { id, positions, normals, uvs, indices, minHeight: 0, maxHeight: 0 }
 }
 
-function cubeFaceUvToDirection(face: TerrainCubeFace, u: number, v: number): Vec3 {
+export function cubeFaceUvToDirection(face: TerrainCubeFace, u: number, v: number): Vec3 {
   const direction: Vec3 = face === 'px'
     ? [1, -v, -u]
     : face === 'nx'
@@ -95,10 +106,4 @@ function equirectangularUv(direction: Vec3): [number, number] {
     textureU < 0 ? textureU + 1 : textureU,
     0.5 - Math.asin(Math.min(1, Math.max(-1, direction[1]))) / Math.PI,
   ]
-}
-
-function unwrapTextureU(textureU: number, previousTextureU: number): number {
-  if (textureU - previousTextureU > 0.5) return textureU - 1
-  if (previousTextureU - textureU > 0.5) return textureU + 1
-  return textureU
 }

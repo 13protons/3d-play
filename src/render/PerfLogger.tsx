@@ -41,7 +41,15 @@ export function PerfLogger({ view }: { view: 'orbital' | 'vehicle' }) {
     const windowMs = now - windowStart.current
     if (windowMs < 1000) return
 
-    const info = gl.info
+    // WebGL reports per-frame draw calls as `render.calls`; WebGPU uses
+    // `render.drawCalls` (its `render.calls` is cumulative). Read whichever the
+    // active backend populates.
+    const render = gl.info.render as {
+      calls: number
+      triangles: number
+      drawCalls?: number
+    }
+    const draws = render.drawCalls ?? render.calls
     const drained = drainRenderCounts()
     const renders: Record<string, number> = {}
     for (const key of Object.keys(drained)) {
@@ -54,8 +62,8 @@ export function PerfLogger({ view }: { view: 'orbital' | 'vehicle' }) {
       t: Math.round((now - start.current) / 100) / 10,
       fps: Math.round((frames.current * 1000) / windowMs),
       maxMs: Math.round(frameMsMax.current * 10) / 10,
-      draws: info.render.calls,
-      tris: info.render.triangles,
+      draws,
+      tris: render.triangles,
       renders,
     }))
 

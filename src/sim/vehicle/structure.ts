@@ -23,6 +23,7 @@ import {
   effectiveThrust,
   netThrust,
   netThrustGimbaled,
+  resolvePartTransforms,
   solveGimbalForTorque,
 } from './aggregation'
 import type { PartDefinition } from './parts'
@@ -49,6 +50,10 @@ export class VehicleStructure {
   private skeleton: DrySkeleton
   /** Current propellant per tank instance id. */
   private fuel: Map<string, number>
+  /** Memoized mass properties; invalidated whenever fuel or the skeleton changes. The worker
+   *  calls aggregate() several times per step (thrust, MoI, ground clearance), so caching it
+   *  between mutations avoids recomputing the same result. */
+  private aggregateCache: VehicleAggregate | undefined
   currentStage: number
 
   constructor(parts: PartInstance[], definitions: Map<string, PartDefinition>, currentStage = 0) {
@@ -89,9 +94,33 @@ export class VehicleStructure {
     return new VehicleStructure([part], new Map([[def.id, def]]))
   }
 
-  /** Mass properties for the current fuel state (all active parts). */
+  /** Mass properties for the current fuel state (all active parts). Memoized between mutations. */
   aggregate(): VehicleAggregate {
-    return aggregate(this.skeleton, this.fuel)
+    if (!this.aggregateCache) this.aggregateCache = aggregate(this.skeleton, this.fuel)
+    return this.aggregateCache
+  }
+
+  /**
+   * Distance from the center of mass to the lowest active part along +Z (the up axis
+   * when landed) — the craft's ground clearance. Resting the tracked CoM this far
+   * above the surface sits the base on the ground instead of burying the lower half.
+   * Bounding-box approximation: each part is half its render length below its centre
+   * (parts stack along the spine); part tilt and nozzle overhang are ignored. Zero for
+   * the point-mass single-body craft, which has no render geometry.
+   */
+  groundClearance(): number {
+    const transforms = resolvePartTransforms(this.parts)
+    let bottom = Number.POSITIVE_INFINITY
+    for (const part of this.parts) {
+      if (!part.active) continue
+      const def = this.definitions.get(part.defId)
+      const transform = transforms.get(part.instanceId)
+      if (!def || !transform) continue
+      const halfLength = (def.render?.length ?? 0) / 2
+      bottom = Math.min(bottom, transform.position[2] - halfLength)
+    }
+    if (!Number.isFinite(bottom)) return 0
+    return Math.max(0, this.aggregate().centerOfMass[2] - bottom)
   }
 
   /** Engines firing this step — those on parts in the current stage. */
@@ -175,6 +204,7 @@ export class VehicleStructure {
       const fuel = this.fuel.get(t.instanceId) ?? 0
       if (fuel > 0) this.fuel.set(t.instanceId, Math.max(0, fuel - fuel * fraction))
     }
+    this.aggregateCache = undefined // fuel changed
   }
 
   /**
@@ -235,6 +265,7 @@ export class VehicleStructure {
     }
     this.currentStage += 1
     this.skeleton = buildSkeleton(this.parts, this.definitions)
+    this.aggregateCache = undefined // skeleton changed
     // Keep only fuel for tanks that survived; seed any newly-relevant tanks.
     const survivors = new Map<string, number>()
     for (const tank of this.skeleton.tanks) survivors.set(tank.instanceId, this.fuel.get(tank.instanceId) ?? 0)

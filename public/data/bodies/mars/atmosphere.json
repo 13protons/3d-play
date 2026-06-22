@@ -1,0 +1,23 @@
+{
+  "$comment": "Render-side atmosphere for Mars. Thin CO2 — a faint bluish limb from orbit (Rayleigh still favours blue), but a butterscotch daytime sky from suspended dust (Mie). The famous twist: the sky near the sun turns BLUE at sunset, the inverse of Earth. All lengths in metres.",
+  "shellHeight": 80000,
+  "rayleigh": {
+    "coefficients": [5.8e-6, 13.5e-6, 33.1e-6],
+    "scaleHeight": 11100
+  },
+  "mie": {
+    "coefficient": 8e-6,
+    "scaleHeight": 11000,
+    "anisotropy": 0.65
+  },
+  "sunIntensity": 12,
+  "viewSamples": 16,
+  "lightSamples": 8,
+  "sky": {
+    "zenith": "#c79a6a",
+    "horizon": "#e3c39c",
+    "sunHalo": "#dbe6ff",
+    "lowSunGlow": "#6f9fd8",
+    "lowSunDeep": "#3f6aa8"
+  }
+}
