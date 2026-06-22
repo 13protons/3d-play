@@ -12,8 +12,8 @@
 // (jplEclipticToAppYUpVector) so the stars share the exact frame as the planets — the
 // ecliptic/zodiac runs along the sun's path and the galactic plane tilts correctly.
 //
-// Magnitude drives the existing limiting-magnitude fade (see src/render/sky/sunHorizon.ts);
-// colour tints each star; a per-star twinkle phase de-syncs the vehicle-view scintillation.
+// Magnitude drives the existing limiting-magnitude fade (see src/render/sky/sunHorizon.ts) and
+// colour tints each star.
 //
 // Stars fainter than MAG_LIMIT are dropped: the naked eye can't see them at night, and the
 // renderer's limiting magnitude already fades them to black, so shipping them is pure waste.
@@ -30,19 +30,12 @@ const OUT_DIR = join(HERE, '..', '..', 'public', 'data', 'stars')
 
 const MAG_LIMIT = 6.5 // NAKED_EYE_LIMIT — fainter stars are invisible at night, so we drop them.
 const OBLIQUITY = 23.439281 * (Math.PI / 180) // J2000 mean obliquity of the ecliptic.
-const FORMAT_VERSION = 2
+const FORMAT_VERSION = 3
 
 const radec = JSON.parse(readFileSync(join(SOURCE, 'bsc5p_radec_min.json'), 'utf8'))
 const spectral = JSON.parse(readFileSync(join(SOURCE, 'bsc5p_spectral_extra_min.json'), 'utf8'))
 
 const magById = new Map(spectral.map((s) => [s.i, s.b]))
-
-// Deterministic pseudo-random in [0,1) from an integer (so the asset is reproducible — no
-// Math.random()). Classic fract(sin(n)·k) hash; quality is irrelevant, we just want de-synced phases.
-const hash01 = (n) => {
-  const v = Math.sin(n * 12.9898) * 43758.5453
-  return v - Math.floor(v)
-}
 
 const cosE = Math.cos(OBLIQUITY)
 const sinE = Math.sin(OBLIQUITY)
@@ -78,7 +71,6 @@ for (const r of radec) {
     cr: Math.round(Math.max(0, Math.min(1, r.K.r)) * 255),
     cg: Math.round(Math.max(0, Math.min(1, r.K.g)) * 255),
     cb: Math.round(Math.max(0, Math.min(1, r.K.b)) * 255),
-    phase: hash01(r.i),
   })
 }
 
@@ -90,13 +82,11 @@ const count = stars.length
 //   [8]                   float32 directions[count*3]  (ecliptic-frame unit vectors)
 //   [8 + 12c]             float32 magnitudes[count]
 //   [8 + 16c]             uint8   colors[count*3]       (0–255 RGB)
-//   [8 + 19c]             float32 phases[count]         (twinkle phase, 0–1)
 const headerBytes = 8
 const dirBytes = count * 3 * 4
 const magBytes = count * 4
 const colorBytes = count * 3
-const phaseBytes = count * 4
-const buffer = new ArrayBuffer(headerBytes + dirBytes + magBytes + colorBytes + phaseBytes)
+const buffer = new ArrayBuffer(headerBytes + dirBytes + magBytes + colorBytes)
 
 const header = new DataView(buffer)
 header.setUint32(0, FORMAT_VERSION, true)
@@ -105,7 +95,6 @@ header.setUint32(4, count, true)
 const dirs = new Float32Array(buffer, headerBytes, count * 3)
 const mags = new Float32Array(buffer, headerBytes + dirBytes, count)
 const colors = new Uint8Array(buffer, headerBytes + dirBytes + magBytes, count * 3)
-const phases = new Float32Array(buffer, headerBytes + dirBytes + magBytes + colorBytes, count)
 
 for (let i = 0; i < count; i++) {
   const s = stars[i]
@@ -116,7 +105,6 @@ for (let i = 0; i < count; i++) {
   colors[i * 3] = s.cr
   colors[i * 3 + 1] = s.cg
   colors[i * 3 + 2] = s.cb
-  phases[i] = s.phase
 }
 
 mkdirSync(OUT_DIR, { recursive: true })
@@ -131,8 +119,7 @@ writeFileSync(
       magLimit: MAG_LIMIT,
       frame: 'ecliptic (J2000); apply jplEclipticToAppYUpVector at load for the app frame',
       bytes: buffer.byteLength,
-      layout:
-        'uint32 version, uint32 count, float32 dir[count*3], float32 mag[count], uint8 color[count*3], float32 phase[count]',
+      layout: 'uint32 version, uint32 count, float32 dir[count*3], float32 mag[count], uint8 color[count*3]',
     },
     null,
     2,

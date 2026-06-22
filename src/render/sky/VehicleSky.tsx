@@ -219,7 +219,6 @@ export function VehicleSky() {
       <MagnitudeStars
         radius={STAR_SHELL_RADIUS}
         limitRef={limitRef}
-        twinkle={0.3}
       />
     </>
   )

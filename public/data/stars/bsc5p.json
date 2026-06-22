@@ -1,9 +1,9 @@
 {
   "source": "BSC5P-JSON-XYZ (https://github.com/frostoven/BSC5P-JSON-XYZ, CC BY 4.0)",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "count": 8384,
   "magLimit": 6.5,
   "frame": "ecliptic (J2000); apply jplEclipticToAppYUpVector at load for the app frame",
-  "bytes": 192840,
-  "layout": "uint32 version, uint32 count, float32 dir[count*3], float32 mag[count], uint8 color[count*3], float32 phase[count]"
+  "bytes": 159304,
+  "layout": "uint32 version, uint32 count, float32 dir[count*3], float32 mag[count], uint8 color[count*3]"
 }

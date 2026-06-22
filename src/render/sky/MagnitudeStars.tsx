@@ -3,23 +3,21 @@ import type { MutableRefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { AdditiveBlending, InstancedBufferAttribute, Sprite } from 'three'
 import { PointsNodeMaterial } from 'three/webgpu'
-import { add, float, instancedBufferAttribute, mix, mul, oneMinus, pow, sin, smoothstep, sub, uniform, uv } from 'three/tsl'
+import { add, float, instancedBufferAttribute, mix, mul, oneMinus, pow, smoothstep, sub, uniform, uv } from 'three/tsl'
 import { buildStarInstanceData, loadStarCatalog } from './starCatalog'
 import type { StarInstanceData } from './starCatalog'
 import { NAKED_EYE_LIMIT } from './sunHorizon'
 
 /**
  * The real naked-eye starfield (BSC5P, ~8.4k stars ≤ mag 6.5), entirely on the GPU. Each star
- * carries its true apparent `magnitude`, blackbody `color`, and a twinkle `phase`; from the
- * sky's limiting-magnitude `limit` uniform and the magnitude the TSL graph derives:
+ * carries its true apparent `magnitude` and blackbody `color`; from the sky's limiting-magnitude
+ * `limit` uniform and the magnitude the TSL graph derives:
  *
  *  - luminance (brighter stars glow stronger), tinted by the star's real colour;
  *  - point size (faint stars are a single pixel; bright stars are fatter discs, so the famous
  *    bright stars and constellation shapes are recognisable);
  *  - a selective HDR boost so only the brightest stars cross the post-pipeline bloom threshold —
- *    they get a soft burst, the faint field doesn't (no full-field bloom artifacts);
- *  - an optional gentle twinkle (atmospheric scintillation) driven by a time uniform and the
- *    per-star phase, with amplitude 0 in space (orbital) and a little in the vehicle view.
+ *    they get a soft burst, the faint field doesn't (no full-field bloom artifacts).
  *
  * Rendered as an instanced Sprite, NOT THREE.Points: on a WebGPU backend THREE.Points is locked
  * to 1px regardless of sizeNode (three caps point primitives at 1px), so sized stars must be
@@ -39,27 +37,20 @@ const MAG_RANGE = 8.0 // mag −1.5 (brightest) … 6.5 (faintest) maps to promi
 const STAR_SIZE_SPREAD = 11.0 // extra pixels a max-prominence star gets over the faint field
 const STAR_SIZE_CURVE = 1.6 // <2 fattens mid-bright stars too, so the brighter sky reads, not just the top few
 const STAR_HDR_GAIN = 6.0 // brightest stars reach ~8× → above the bloom threshold (2.0)
-const TWINKLE_SPEED = 2.5
-const TWO_PI = Math.PI * 2
 
 interface StarUniforms {
   limit: { value: number }
-  time: { value: number }
-  twinkleAmp: { value: number }
 }
 
 /** Build the instanced-Sprite material from per-star instance data. */
 function createMagnitudeStarMaterial(data: StarInstanceData): PointsNodeMaterial {
   const limit = uniform(NAKED_EYE_LIMIT)
-  const time = uniform(0)
-  const twinkleAmp = uniform(0)
 
   // Instanced attributes (one value per star, indexed by instanceIndex). Real InstancedBuffer-
   // Attribute objects so BufferAttributeNode flags them instanced.
   const positionNode = instancedBufferAttribute<'vec3'>(new InstancedBufferAttribute(data.positions, 3), 'vec3')
   const mag = instancedBufferAttribute<'float'>(new InstancedBufferAttribute(data.magnitudes, 1), 'float')
   const starColor = instancedBufferAttribute<'vec3'>(new InstancedBufferAttribute(data.colors, 3), 'vec3')
-  const phase = instancedBufferAttribute<'float'>(new InstancedBufferAttribute(data.phases, 1), 'float')
 
   const visible = oneMinus(smoothstep(limit.sub(STAR_FADE), limit.add(STAR_FADE), mag))
   // Prominence: 0 at the faint cutoff (mag 6.5) → 1 at the brightest (~ −1.5).
@@ -67,9 +58,7 @@ function createMagnitudeStarMaterial(data: StarInstanceData): PointsNodeMaterial
   const intrinsic = mix(float(0.45), float(1.15), bright01)
   // Selective HDR — only the brightest few exceed the bloom threshold.
   const hdr = add(1.0, mul(pow(bright01, 3.0), STAR_HDR_GAIN))
-  // Gentle per-star scintillation; amplitude 0 in space.
-  const twinkle = add(1.0, mul(twinkleAmp, sin(add(mul(time, TWINKLE_SPEED), mul(phase, TWO_PI)))))
-  const brightness = visible.mul(intrinsic).mul(hdr).mul(twinkle)
+  const brightness = visible.mul(intrinsic).mul(hdr)
 
   // Shape each sprite quad into a round star WITHOUT dimming it: a flat full-brightness core out
   // to radius 0.42, then a soft rim to 0 by the edge. Only the corners get cut, so the bright
@@ -85,8 +74,6 @@ function createMagnitudeStarMaterial(data: StarInstanceData): PointsNodeMaterial
   material.sizeNode = add(1.0, mul(visible, mul(pow(bright01, STAR_SIZE_CURVE), STAR_SIZE_SPREAD)))
   material.sizeAttenuation = false
   material.userData.limit = limit
-  material.userData.time = time
-  material.userData.twinkleAmp = twinkleAmp
   return material
 }
 
@@ -94,7 +81,6 @@ export function MagnitudeStars({
   radius,
   limit = NAKED_EYE_LIMIT,
   limitRef,
-  twinkle = 0,
 }: {
   /** Star-shell radius in scene units. Large enough that the camera never reaches it. */
   radius: number
@@ -102,8 +88,6 @@ export function MagnitudeStars({
   limit?: number
   /** Per-frame limiting magnitude, read from `.current` each frame. */
   limitRef?: MutableRefObject<number>
-  /** Twinkle amplitude (atmospheric scintillation). 0 in space; ~0.3 standing on the ground. */
-  twinkle?: number
 }) {
   const ref = useRef<Sprite>(null)
   const [state, setState] = useState<{ material: PointsNodeMaterial; count: number } | null>(null)
@@ -133,13 +117,11 @@ export function MagnitudeStars({
     }
   }, [state])
 
-  useFrame((frame) => {
+  useFrame(() => {
     const sprite = ref.current
     if (!sprite) return
     const u = (sprite.material as PointsNodeMaterial).userData as StarUniforms
     u.limit.value = limitRef ? limitRef.current : limit
-    u.twinkleAmp.value = twinkle
-    if (twinkle > 0) u.time.value = frame.clock.elapsedTime
   })
 
   if (!state) return null
