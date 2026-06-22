@@ -1,6 +1,6 @@
 import { Canvas } from '@react-three/fiber';
 import { useTrajectoriesStore } from '../state/trajectories';
-import { WebGPUStars } from './WebGPUStars';
+import { MagnitudeStars } from './sky/MagnitudeStars';
 import { RenderPipeline } from './RenderPipeline';
 import { makeWebGPURenderer } from './webgpuRenderer';
 import { Body } from './Body';
@@ -41,7 +41,7 @@ export function Scene() {
       <PerfLogger view='orbital' />
       <RenderPipeline withBloom />
       <ambientLight intensity={0.04} />
-      <WebGPUStars
+      <MagnitudeStars
         radius={1e14}
         count={3000}
       />

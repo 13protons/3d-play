@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { AdditiveBlending, BackSide, Mesh, Points, Vector3 } from 'three'
-import { MeshBasicNodeMaterial, PointsNodeMaterial } from 'three/webgpu'
-import { attribute, cameraPosition, color, float, mix, positionWorld, uniform, vec3 } from 'three/tsl'
+import { AdditiveBlending, BackSide, Mesh, Vector3 } from 'three'
+import { MeshBasicNodeMaterial } from 'three/webgpu'
+import { cameraPosition, color, float, mix, positionWorld, uniform } from 'three/tsl'
 import { useModeStore } from '../../state/mode'
 import { useTrajectoriesStore } from '../../state/trajectories'
 import type { AtmosphereSkyColors, BodyMeta } from '../../state/trajectories'
 import { evaluateCurve } from '../../sim/curves'
-import { createStarfieldWithMagnitudes } from './starfieldGeometry'
+import { MagnitudeStars } from './MagnitudeStars'
 import {
   NAKED_EYE_LIMIT,
   SUN_ANGULAR_RADIUS,
@@ -35,7 +35,6 @@ import {
  */
 
 const DEG = Math.PI / 180
-const STAR_FADE = 1.2 // magnitudes of soft edge around the limiting magnitude
 const STAR_SHELL_RADIUS = 5e8 // matches the vehicle view's previous star shell
 const STAR_COUNT = 2400
 const SKY_DOME_RADIUS = 1e7 // camera-locked; just needs to sit inside the far plane (1e9)
@@ -102,24 +101,6 @@ function buildDomeMaterial(sky: AtmosphereSkyColors): MeshBasicNodeMaterial {
   return material
 }
 
-/** Magnitude-graded starfield: each star fades in once the sky's limiting magnitude rises
- *  past its own magnitude. One `limit` uniform on userData, written per frame via the ref;
- *  additive so sub-threshold stars add no light. */
-function buildStarMaterial(): PointsNodeMaterial {
-  const limit = uniform(NAKED_EYE_LIMIT)
-  const mag = attribute('magnitude', 'float')
-  const visible = mag.smoothstep(limit.sub(STAR_FADE), limit.add(STAR_FADE)).oneMinus()
-  const intrinsic = float(1.1).sub(mag.add(1.5).mul(0.1)).clamp(0.35, 1.15)
-  const brightness = visible.mul(intrinsic)
-
-  const material = new PointsNodeMaterial({ transparent: true, depthWrite: false, blending: AdditiveBlending })
-  material.colorNode = vec3(brightness.mul(0.92), brightness.mul(0.96), brightness)
-  material.sizeNode = brightness.mul(2.0).add(1.0)
-  material.sizeAttenuation = false
-  material.userData.limit = limit
-  return material
-}
-
 /** Resolve the vehicle's parent body reactively (radius + atmosphere palette live here). */
 function useVehicleParent(): BodyMeta | undefined {
   return useTrajectoriesStore((s) => {
@@ -133,24 +114,14 @@ const SCRATCH_UP = new Vector3()
 
 export function VehicleSky() {
   const domeRef = useRef<Mesh>(null)
-  const starsRef = useRef<Points>(null)
   const parent = useVehicleParent()
   const sky = parent?.atmosphereRender?.sky
 
   const domeMaterial = useMemo(() => (sky ? buildDomeMaterial(sky) : null), [sky])
-  const stars = useMemo(
-    () => ({ geometry: createStarfieldWithMagnitudes(STAR_SHELL_RADIUS, STAR_COUNT), material: buildStarMaterial() }),
-    [],
-  )
-
   useEffect(() => () => domeMaterial?.dispose(), [domeMaterial])
-  useEffect(
-    () => () => {
-      stars.material.dispose()
-      stars.geometry.dispose()
-    },
-    [stars],
-  )
+
+  // Live limiting magnitude for the starfield, written each frame below and read by MagnitudeStars.
+  const limitRef = useRef(NAKED_EYE_LIMIT)
 
   // Stable per-instance sampler: far-field skip + change-driven (time-warp-correct) throttle.
   const samplerRef = useRef(createTwilightColumnSampler())
@@ -179,14 +150,10 @@ export function VehicleSky() {
     SCRATCH_SUN.set(sp[0] - vp[0], sp[1] - vp[1], sp[2] - vp[2]).normalize()
     SCRATCH_UP.set(vp[0] - pp[0], vp[1] - pp[1], vp[2] - pp[2]).normalize()
 
-    const limit = (starsRef.current?.material as PointsNodeMaterial | undefined)?.userData.limit as
-      | { value: number }
-      | undefined
-
     const atmo = parentBody.atmosphereRender
     if (!atmo) {
       // Airless body: no dome, full starfield day and night.
-      if (limit) limit.value = NAKED_EYE_LIMIT
+      limitRef.current = NAKED_EYE_LIMIT
       return
     }
 
@@ -205,7 +172,7 @@ export function VehicleSky() {
       scaleHeight: atmo.rayleigh.scaleHeight,
     })
 
-    if (limit) limit.value = limitingMagnitude(horizon.altitude, column.airAbove)
+    limitRef.current = limitingMagnitude(horizon.altitude, column.airAbove)
 
     const dome = domeRef.current
     if (!dome || !domeMaterial) return
@@ -248,11 +215,10 @@ export function VehicleSky() {
           <sphereGeometry args={[SKY_DOME_RADIUS, 48, 24]} />
         </mesh>
       )}
-      <points
-        ref={starsRef}
-        geometry={stars.geometry}
-        material={stars.material}
-        renderOrder={-9}
+      <MagnitudeStars
+        radius={STAR_SHELL_RADIUS}
+        count={STAR_COUNT}
+        limitRef={limitRef}
       />
     </>
   )
