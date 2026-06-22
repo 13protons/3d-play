@@ -124,7 +124,9 @@ function buildPlanetMaterial(body: BodyMeta, map: Texture | null, rim: RimMode):
     if (rim === 'haze') {
       // Thin, gentle horizon haze: high fresnel power keeps it near the limb, low strength keeps
       // it subtle, tinted to the sky's own horizon colour so far ground fades into the dome.
-      const haze = atmosphere.sky ? color(atmosphere.sky.horizon) : vec3(...dayRimColor(atmosphere.rayleigh.coefficients))
+      // @types/three TSL gap: `color()` is typed Node<"color">, which mix() rejects (it wants
+      // vec4-or-less). Coerce to vec3 — same runtime value (a colour is a vec3).
+      const haze = atmosphere.sky ? vec3(color(atmosphere.sky.horizon)) : vec3(...dayRimColor(atmosphere.rayleigh.coefficients))
       const hazeMix = dayGate.mul(fresnel.pow(3)).mul(0.35).clamp(0, 1)
       lit = mix(lit, haze, hazeMix)
     } else {

@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { RenderPipeline as WebGPURenderPipeline } from 'three/webgpu'
-import type { WebGPURenderer } from 'three/webgpu'
-import { pass, vec3 } from 'three/tsl'
+import type { Node, WebGPURenderer } from 'three/webgpu'
+import { float, pass, vec3 } from 'three/tsl'
 import { bloom } from 'three/examples/jsm/tsl/display/BloomNode.js'
 import { lensflare } from 'three/examples/jsm/tsl/display/LensflareNode.js'
 
@@ -53,12 +53,16 @@ export function RenderPipeline({
     if (withLensFlare) {
       const flare = lensflare(bloomPass, {
         ghostTint: vec3(1.0, 0.85, 0.55),
-        threshold: 0.7,
-        ghostSamples: 4,
-        ghostSpacing: 0.25,
-        ghostAttenuationFactor: 25,
+        // @types/three TSL gap: LensflareNodeParams types these as Node, but they accept bare
+        // numbers at runtime (wrapped by the node internally). Wrap with float() to satisfy tsc.
+        threshold: float(0.7),
+        ghostSamples: float(4),
+        ghostSpacing: float(0.25),
+        ghostAttenuationFactor: float(25),
       })
-      output = output.add(flare)
+      // @types/three TSL gap: LensflareNode (a TempNode) lacks the Node<"color"> extension
+      // members the .add() overload wants. Cast to Node — it is a valid colour-producing node.
+      output = output.add(flare as unknown as Node<'color'>)
     }
     pipeline.outputNode = output
     return pipeline

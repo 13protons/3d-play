@@ -36,7 +36,6 @@ import {
 
 const DEG = Math.PI / 180
 const STAR_SHELL_RADIUS = 5e8 // matches the vehicle view's previous star shell
-const STAR_COUNT = 2400
 const SKY_DOME_RADIUS = 1e7 // camera-locked; just needs to sit inside the far plane (1e9)
 
 function smoothstep01(edge0: number, edge1: number, x: number): number {
@@ -191,7 +190,9 @@ export function VehicleSky() {
     const eyeRadius = Math.hypot(ex, ey, ez) || R
     const horizonLevel = -Math.sqrt(Math.max(0, 1 - (R / eyeRadius) ** 2))
 
-    const u = dome.material.userData as DomeUniforms
+    // Mutate via the ref's material (refs are mutable per react-hooks rules); cast through the
+    // Mesh's Material|Material[] union to reach the uniforms.
+    const u = (dome.material as MeshBasicNodeMaterial).userData as DomeUniforms
     u.sunU.value.copy(SCRATCH_SUN)
     u.upU.value.copy(SCRATCH_UP)
     // Soften the altitude fade: raw airAbove dims the dome too steeply (real high-altitude skies
@@ -217,8 +218,8 @@ export function VehicleSky() {
       )}
       <MagnitudeStars
         radius={STAR_SHELL_RADIUS}
-        count={STAR_COUNT}
         limitRef={limitRef}
+        twinkle={0.3}
       />
     </>
   )

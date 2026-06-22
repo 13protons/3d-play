@@ -41,10 +41,7 @@ export function Scene() {
       <PerfLogger view='orbital' />
       <RenderPipeline withBloom />
       <ambientLight intensity={0.04} />
-      <MagnitudeStars
-        radius={1e14}
-        count={3000}
-      />
+      <MagnitudeStars radius={1e14} />
       <CameraRig />
       {bodyIds.map((id) => (
         <Body

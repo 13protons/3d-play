@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
-import { AdditiveBlending, BackSide, Color, Mesh, Points, Quaternion, Vector3 } from 'three';
-import { MeshBasicNodeMaterial, PointsNodeMaterial, RenderPipeline as WebGPURenderPipeline } from 'three/webgpu';
-import type { WebGPURenderer } from 'three/webgpu';
-import { attribute, cameraPosition, color, float, mix, pass, positionWorld, uniform, vec3 } from 'three/tsl';
+import { AdditiveBlending, BackSide, Color, Mesh, Quaternion, Vector3 } from 'three';
+import { MeshBasicNodeMaterial, RenderPipeline as WebGPURenderPipeline } from 'three/webgpu';
+import type { Node, WebGPURenderer } from 'three/webgpu';
+import { cameraPosition, color, float, mix, pass, positionWorld, uniform, vec3 } from 'three/tsl';
 import { bloom } from 'three/examples/jsm/tsl/display/BloomNode.js';
 import { lensflare } from 'three/examples/jsm/tsl/display/LensflareNode.js';
 import { makeWebGPURenderer } from '../render/webgpuRenderer';
-import { createStarfieldWithMagnitudes } from '../render/sky/starfieldGeometry';
+import { MagnitudeStars } from '../render/sky/MagnitudeStars';
 import {
   computeSunHorizon,
   createTwilightColumnSampler,
@@ -52,60 +52,6 @@ const LIT_SUNSET = new Color('#ff4d12');
 function smoothstep01(edge0: number, edge1: number, x: number): number {
   const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
-}
-
-/**
- * Starfield faded by apparent magnitude, entirely on the GPU. Each star carries its
- * `magnitude` as a vertex attribute; a single `limit` uniform (the sky's limiting
- * magnitude) decides per-star brightness in a TSL node graph — no per-frame CPU work
- * beyond writing that one uniform. Brighter stars (lower magnitude) glow stronger and
- * larger; additive blending means a sub-threshold star adds no light and vanishes on any
- * background. Brightest emerge first at dusk, faintest only at full dark.
- */
-const STAR_FADE = 1.2; // magnitudes of soft edge around the limit
-
-function MagnitudeStars({ limitingMag }: { limitingMag: number }) {
-  const ref = useRef<Points>(null);
-
-  const { geometry, material } = useMemo(() => {
-    const geometry = createStarfieldWithMagnitudes(40, 1800);
-    const limit = uniform(0); // updated each frame from the prop
-    const mag = attribute('magnitude', 'float');
-    // Visible once the limit rises past this star's magnitude (soft over STAR_FADE mags).
-    const visible = mag.smoothstep(limit.sub(STAR_FADE), limit.add(STAR_FADE)).oneMinus();
-    const intrinsic = float(1.1).sub(mag.add(1.5).mul(0.1)).clamp(0.35, 1.15);
-    const brightness = visible.mul(intrinsic);
-
-    const material = new PointsNodeMaterial({ transparent: true, depthWrite: false, blending: AdditiveBlending });
-    material.colorNode = vec3(brightness.mul(0.92), brightness.mul(0.96), brightness);
-    material.sizeNode = brightness.mul(2.0).add(1.0);
-    material.sizeAttenuation = false;
-    material.userData.limit = limit;
-    return { geometry, material };
-  }, []);
-
-  useFrame(() => {
-    const limit = (ref.current?.material as PointsNodeMaterial | undefined)?.userData.limit as
-      | { value: number }
-      | undefined;
-    if (limit) limit.value = limitingMag;
-  });
-
-  useEffect(
-    () => () => {
-      material.dispose();
-      geometry.dispose();
-    },
-    [material, geometry],
-  );
-
-  return (
-    <points
-      ref={ref}
-      geometry={geometry}
-      material={material}
-    />
-  );
 }
 
 /**
@@ -199,7 +145,9 @@ function SkyDome({
     const dome = ref.current;
     if (!dome) return;
     dome.position.copy(state.camera.position); // skybox: always centered on the camera
-    const u = dome.material.userData as {
+    // @types/three gap: mesh.material is typed Material | Material[]; this mesh has a single
+    // MeshBasicNodeMaterial. Cast through it to reach userData.
+    const u = (dome.material as MeshBasicNodeMaterial).userData as {
       sunU: { value: Vector3 };
       upU: { value: Vector3 };
       illumU: { value: number };
@@ -248,12 +196,16 @@ function SkyPipeline() {
     const bloomPass = bloom(sceneColor, 0.85, 0.7, 0.8);
     const flare = lensflare(bloomPass, {
       ghostTint: vec3(1.0, 0.85, 0.55),
-      threshold: 0.6,
-      ghostSamples: 4,
-      ghostSpacing: 0.25,
-      ghostAttenuationFactor: 25,
+      // @types/three TSL gap: LensflareNodeParams types these as Node, but they accept bare
+      // numbers at runtime (wrapped by the node internally). Wrap with float() to satisfy tsc.
+      threshold: float(0.6),
+      ghostSamples: float(4),
+      ghostSpacing: float(0.25),
+      ghostAttenuationFactor: float(25),
     });
-    p.outputNode = sceneColor.add(bloomPass).add(flare);
+    // @types/three TSL gap: LensflareNode (a TempNode) lacks the Node<"color"> extension
+    // members the .add() overload wants. Cast to Node — it is a valid colour-producing node.
+    p.outputNode = sceneColor.add(bloomPass).add(flare as unknown as Node<'color'>);
     return p;
   }, [gl, scene, camera]);
 
@@ -405,6 +357,13 @@ function HorizonScene({
   const ringQuat = useMemo(() => new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), up), [up]);
   const sunMarker = useMemo(() => observer.clone().addScaledVector(sunDir, 2.2), [observer, sunDir]);
 
+  // The shared starfield reads its limit from a ref each frame; mirror the render prop into it
+  // (in an effect, not during render).
+  const limitRef = useRef(limitingMag);
+  useEffect(() => {
+    limitRef.current = limitingMag;
+  });
+
   // HDR-bright sun disc so the bloom/lens-flare pipeline has a bright spot to work from.
   const sunMaterial = useMemo(() => {
     const m = new MeshBasicNodeMaterial();
@@ -434,7 +393,7 @@ function HorizonScene({
           horizonLevel={horizonLevel}
         />
       )}
-      <MagnitudeStars limitingMag={limitingMag} />
+      <MagnitudeStars radius={40} limitRef={limitRef} />
       <directionalLight
         position={sunDir.toArray()}
         intensity={2.5}
