@@ -6,11 +6,12 @@ import { startSim, stopSim } from './state/bridge';
 import { MainMenu } from './ui/MainMenu';
 import { HudTestPage } from './ui/HudTestPage';
 import { Flight } from './modes/Flight';
-import { isKnownScenarioId, mainPath, missionPath, spikeEarthPath, spikeDawnPath, testHudPath } from './appRoutes';
+import { isKnownScenarioId, mainPath, missionPath, spikeEarthPath, spikeDawnPath, spikeAtmospherePath, testHudPath } from './appRoutes';
 
 // Lazy so the TSL spike deps stay out of the main flight bundle.
 const EarthSpikePage = lazy(() => import('./spike/EarthSpike').then((m) => ({ default: m.EarthSpikePage })));
 const DawnSpikePage = lazy(() => import('./spike/DawnSpike').then((m) => ({ default: m.DawnSpikePage })));
+const AtmosphereSpikePage = lazy(() => import('./spike/AtmosphereSpike').then((m) => ({ default: m.AtmosphereSpikePage })));
 
 export default function App() {
   return (
@@ -57,6 +58,20 @@ export default function App() {
             }
           >
             <DawnSpikePage />
+          </Suspense>
+        }
+      />
+      <Route
+        path={spikeAtmospherePath}
+        element={
+          <Suspense
+            fallback={
+              <div style={{ position: 'absolute', inset: 0, background: '#000', color: '#888', padding: 16 }}>
+                LOADING ATMOSPHERE SPIKE
+              </div>
+            }
+          >
+            <AtmosphereSpikePage />
           </Suspense>
         }
       />

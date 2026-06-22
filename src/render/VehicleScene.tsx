@@ -22,6 +22,7 @@ import {
   vehicleSceneSunLightPosition,
 } from './lighting';
 import { BodyMaterial } from './BodyMaterial';
+import { AtmosphereLimb } from './sky/AtmosphereLimb';
 import { CraftDebugAxes } from './CraftDebugAxes';
 import { cameraUpLerpAlpha, surfaceCameraPosition } from './cameraSmoothing';
 import {
@@ -411,9 +412,15 @@ function VehicleSceneContent() {
             visibleBodyIds={visibleBodyIds}
           />
         ))}
-      {/* AtmosphereShell (v1 GLSL ShaderMaterial) is unmounted: it doesn't compile
-          under the WebGPU backend and the atmosphere effort is being re-approached
-          as a node/TSL pass on the new RenderPipeline. The file is kept for reference. */}
+      {/* Stylized atmosphere limb halo (analytic occlusion, reversed-Z-safe — validated in
+          src/spike/AtmosphereSpike). depthTest on: terrain occludes the over-ground bleed (reads
+          as a limb halo) and the vehicle occludes it; fades in with altitude. */}
+      {firstVehicle && (
+        <AtmosphereLimb
+          bodyId={firstVehicle.parentId}
+          vehicleId={firstVehicle.id}
+        />
+      )}
       {firstVehicle && (
         <PlanetTerrainTiles
           bodyId={firstVehicle.parentId}
@@ -436,9 +443,14 @@ function VehicleViewControls() {
     const parent = vehicle ? s.bodies[vehicle.parentId] : undefined;
     return parent?.radius;
   });
-  const maxDistance = Math.min(
-    parentRadius != null ? parentRadius * VEHICLE_VIEW_MAX_RADII : VEHICLE_VIEW_MAX_DISTANCE_FALLBACK,
-    VEHICLE_VIEW_MAX_DISTANCE,
+  // Floor at the min so a tiny parent body (radius < ~6 m) can't push maxDistance below
+  // minDistance, which leaves OrbitControls zoom in an undefined state.
+  const maxDistance = Math.max(
+    VEHICLE_VIEW_MIN_DISTANCE,
+    Math.min(
+      parentRadius != null ? parentRadius * VEHICLE_VIEW_MAX_RADII : VEHICLE_VIEW_MAX_DISTANCE_FALLBACK,
+      VEHICLE_VIEW_MAX_DISTANCE,
+    ),
   );
 
   useFrame((_, delta) => {

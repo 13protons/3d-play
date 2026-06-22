@@ -2,6 +2,7 @@ export const mainPath = '/main';
 export const testHudPath = '/_test/hud';
 export const spikeEarthPath = '/_spike/earth';
 export const spikeDawnPath = '/_spike/dawn';
+export const spikeAtmospherePath = '/_spike/atmosphere';
 
 export const scenarios = [
   { id: 'sun-earth-moon', label: 'Launch: Sun-Earth-Moon' },
@@ -14,6 +15,7 @@ export const mainMenuLinks = [
   { label: 'HUD Playground', path: testHudPath },
   { label: 'Earth Spike', path: spikeEarthPath },
   { label: 'Dawn Spike', path: spikeDawnPath },
+  { label: 'Atmosphere Spike', path: spikeAtmospherePath },
 ] as const;
 
 export type ScenarioId = (typeof scenarios)[number]['id'];
