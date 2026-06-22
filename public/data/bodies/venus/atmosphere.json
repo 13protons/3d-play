@@ -1,0 +1,23 @@
+{
+  "$comment": "Render-side atmosphere for Venus. Thick CO2 + sulfuric-acid cloud — a bright yellowish-white limb from orbit, and a dim, uniform ochre/orange sky at the surface where the sun is never a sharp disc through the overcast. All lengths in metres.",
+  "shellHeight": 90000,
+  "rayleigh": {
+    "coefficients": [33e-6, 25e-6, 12e-6],
+    "scaleHeight": 15900
+  },
+  "mie": {
+    "coefficient": 50e-6,
+    "scaleHeight": 6000,
+    "anisotropy": 0.7
+  },
+  "sunIntensity": 8,
+  "viewSamples": 16,
+  "lightSamples": 8,
+  "sky": {
+    "zenith": "#9c6b35",
+    "horizon": "#7a4a22",
+    "sunHalo": "#c89a55",
+    "lowSunGlow": "#b07a3a",
+    "lowSunDeep": "#6e3f1c"
+  }
+}

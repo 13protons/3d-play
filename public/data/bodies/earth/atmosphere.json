@@ -12,5 +12,12 @@
   },
   "sunIntensity": 22,
   "viewSamples": 16,
-  "lightSamples": 8
+  "lightSamples": 8,
+  "sky": {
+    "zenith": "#2a62c4",
+    "horizon": "#a9c6ec",
+    "sunHalo": "#fff0d8",
+    "lowSunGlow": "#ff7a26",
+    "lowSunDeep": "#ff3a0e"
+  }
 }

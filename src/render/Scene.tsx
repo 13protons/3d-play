@@ -39,7 +39,7 @@ export function Scene() {
       }}
     >
       <PerfLogger view='orbital' />
-      <RenderPipeline />
+      <RenderPipeline withBloom />
       <ambientLight intensity={0.04} />
       <WebGPUStars
         radius={1e14}

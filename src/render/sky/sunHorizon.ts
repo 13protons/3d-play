@@ -113,8 +113,13 @@ export const NAKED_EYE_LIMIT = 6.5
  *  −18° astro. dusk   → ~ +6.5 (full naked-eye sky)
  *
  * `airAbove` (from sampleTwilightColumn) lifts the limit toward the dark-sky value as the
- * observer climbs out of the atmosphere: with no air overhead the sky is black and the
- * full starfield shows even with the sun up.
+ * observer climbs out of the atmosphere. The lift is *logarithmic*, not linear: daytime sky
+ * brightness scales ~linearly with the air mass still overhead, and the eye sees ~1 magnitude
+ * fainter for each 2.5× the sky dims — so the limit improves by −2.5·log10(airAbove). A linear
+ * lift wildly overstates it (8% air left ≠ 92% of the way to a black sky): at 20 km the log
+ * form adds only ~2.7 mag (daytime limit ≈ −1.3, just Sirius + bright planets), where the
+ * linear form gave ≈ +5.6 (nearly the whole naked-eye sky in daylight — plainly wrong).
+ * Capped at the naked-eye limit; airAbove = 0 (space) → log10(0) = −∞ → full dark-sky sky.
  */
 export function limitingMagnitude(sunAltitude: number, airAbove = 1): number {
   const deg = sunAltitude / DEG
@@ -124,7 +129,7 @@ export function limitingMagnitude(sunAltitude: number, airAbove = 1): number {
   else if (deg >= -12) ground = 1 + 0.5 * (-deg - 6) // −6°→+1, −12°→+4
   else if (deg >= -18) ground = 4 + (2.5 / 6) * (-deg - 12) // −12°→+4, −18°→+6.5
   else ground = NAKED_EYE_LIMIT
-  return ground + (NAKED_EYE_LIMIT - ground) * (1 - clamp(airAbove, 0, 1))
+  return Math.min(NAKED_EYE_LIMIT, ground - 2.5 * Math.log10(clamp(airAbove, 0, 1)))
 }
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
@@ -263,6 +268,106 @@ export function sampleTwilightColumn(params: TwilightColumnParams): TwilightColu
   }
 
   return { litFraction, intensity, redness, shadowHeight, airmass, airAbove, skyIllumination, samples }
+}
+
+/**
+ * Cheap broad-phase: is the observer close enough to this body's atmosphere for it to
+ * matter at all? Beyond this, skip the per-frame atmosphere work entirely — sky tint AND
+ * drag. Squared-distance compare, no sqrt. `marginFraction` expands the shell slightly so
+ * the gate opens a touch before effects would actually appear.
+ */
+export function withinAtmosphere(
+  observer: Vec3Like,
+  planetCenter: Vec3Like,
+  planetRadius: number,
+  atmosphereThickness: number,
+  marginFraction = 0.05,
+): boolean {
+  const dx = observer.x - planetCenter.x
+  const dy = observer.y - planetCenter.y
+  const dz = observer.z - planetCenter.z
+  const reach = (planetRadius + atmosphereThickness) * (1 + marginFraction)
+  return dx * dx + dy * dy + dz * dz <= reach * reach
+}
+
+// The result when the observer is outside any atmosphere: no air, no sky. Shared, treat as
+// read-only (callers don't mutate the returned column).
+const SPACE_COLUMN: TwilightColumn = {
+  litFraction: 0,
+  intensity: 0,
+  redness: 0,
+  shadowHeight: 0,
+  airmass: 1,
+  airAbove: 0,
+  skyIllumination: 0,
+}
+
+export interface TwilightColumnSamplerOptions {
+  /** Sun-altitude bucket size (radians) below which a recompute is skipped. Default 0.02°. */
+  sunAltitudeStep?: number
+  /** Observer-altitude bucket as a fraction of atmosphere thickness. Default 1/128. */
+  altitudeStepFraction?: number
+  /** Far-field skip margin, passed to withinAtmosphere. Default 0.05. */
+  marginFraction?: number
+}
+
+export interface TwilightColumnSampler {
+  /** Sample with far-field skip + quantized recompute; returns a cached result between buckets. */
+  sample(params: TwilightColumnParams): TwilightColumn
+  /** Whether the last sample() was within atmospheric reach (true) or skipped as space (false). */
+  active: boolean
+  /** Count of real sampleTwilightColumn evaluations so far (excludes cached + skipped returns). */
+  recomputes: number
+}
+
+/**
+ * Stateful wrapper over {@link sampleTwilightColumn} that does two things the per-frame
+ * caller wants but the pure function shouldn't own:
+ *
+ *  1. Far-field skip — if the observer is outside atmospheric reach, return the constant
+ *     space result without computing anything (the same gate atmospheric drag should use).
+ *  2. Change-driven throttle — recompute only when the sun altitude or observer altitude
+ *     crosses a fine bucket, so work tracks real motion (time-warp-correct) instead of
+ *     frame rate. Buckets are small enough that the snaps are sub-perceptual; no
+ *     interpolation needed.
+ */
+export function createTwilightColumnSampler(options: TwilightColumnSamplerOptions = {}): TwilightColumnSampler {
+  const sunStep = options.sunAltitudeStep ?? 0.02 * DEG
+  const altStepFraction = options.altitudeStepFraction ?? 1 / 128
+  const margin = options.marginFraction ?? 0.05
+  let lastKey = ''
+  let cached: TwilightColumn = SPACE_COLUMN
+
+  const sampler: TwilightColumnSampler = {
+    active: false,
+    recomputes: 0,
+    sample(params) {
+      const { observer, planetCenter, sunDirection } = params
+      const R = params.planetRadius
+      if (!withinAtmosphere(observer, planetCenter, R, params.atmosphereThickness, margin)) {
+        sampler.active = false
+        lastKey = 'space'
+        cached = SPACE_COLUMN
+        return cached
+      }
+      sampler.active = true
+      const dx = observer.x - planetCenter.x
+      const dy = observer.y - planetCenter.y
+      const dz = observer.z - planetCenter.z
+      const rObs = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
+      const s = clamp((dx * sunDirection.x + dy * sunDirection.y + dz * sunDirection.z) / rObs, -1, 1)
+      const sunBucket = Math.round(Math.asin(s) / sunStep)
+      const altBucket = Math.round((rObs - R) / (params.atmosphereThickness * altStepFraction))
+      const key = sunBucket + ':' + altBucket
+      if (key !== lastKey) {
+        cached = sampleTwilightColumn(params)
+        lastKey = key
+        sampler.recomputes++
+      }
+      return cached
+    },
+  }
+  return sampler
 }
 
 /**

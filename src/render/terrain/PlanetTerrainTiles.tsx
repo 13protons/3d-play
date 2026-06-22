@@ -232,7 +232,7 @@ function TerrainTileBatchMesh({
   // no frame where the offset and the geometry disagree.
   return (
     <mesh ref={meshRef} geometry={geometry} position={renderOrigin}>
-      <BodyMaterial body={body} />
+      <BodyMaterial body={body} rim='haze' />
     </mesh>
   )
 }

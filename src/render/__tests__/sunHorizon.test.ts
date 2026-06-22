@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   computeSunHorizon,
+  createTwilightColumnSampler,
   limitingMagnitude,
   sampleTwilightColumn,
   twilightEndAltitude,
   twilightPhase,
+  withinAtmosphere,
   NAKED_EYE_LIMIT,
   SUN_ANGULAR_RADIUS,
 } from '../sky/sunHorizon'
@@ -228,6 +230,84 @@ describe('limitingMagnitude', () => {
     const mid = limitingMagnitude(30 * DEG, 0.5)
     expect(mid).toBeGreaterThan(-4)
     expect(mid).toBeLessThan(NAKED_EYE_LIMIT)
+  })
+
+  it('darkens with altitude logarithmically, not linearly (no daytime full sky at 20 km)', () => {
+    // ~20 km on Earth (8 km scale height) leaves ~8% of the air column overhead.
+    const airAbove = Math.exp(-20000 / 8000)
+    const limit = limitingMagnitude(30 * DEG, airAbove)
+    // ground(−4) − 2.5·log10(0.082) ≈ −1.3 — Sirius + bright planets only, NOT the near-full
+    // naked-eye sky (~+5.6) a linear lift would wrongly reveal in broad daylight.
+    expect(limit).toBeCloseTo(-4 - 2.5 * Math.log10(airAbove), 6)
+    expect(limit).toBeLessThan(0)
+  })
+})
+
+describe('withinAtmosphere', () => {
+  const R = 100
+  const T = 5
+
+  it('is true at the surface and inside the shell', () => {
+    expect(withinAtmosphere({ x: 0, y: R, z: 0 }, center, R, T)).toBe(true)
+    expect(withinAtmosphere({ x: 0, y: R + T - 0.1, z: 0 }, center, R, T)).toBe(true)
+  })
+
+  it('is false well beyond the shell', () => {
+    expect(withinAtmosphere({ x: 0, y: 3 * R, z: 0 }, center, R, T)).toBe(false)
+  })
+
+  it('opens slightly past the shell top by the margin, then closes', () => {
+    const justInsideMargin = (R + T) * 1.04
+    const beyondMargin = (R + T) * 1.06
+    expect(withinAtmosphere({ x: 0, y: justInsideMargin, z: 0 }, center, R, T, 0.05)).toBe(true)
+    expect(withinAtmosphere({ x: 0, y: beyondMargin, z: 0 }, center, R, T, 0.05)).toBe(false)
+  })
+})
+
+describe('createTwilightColumnSampler', () => {
+  const base = { planetCenter: center, planetRadius: R, atmosphereThickness: 5 }
+  const surface = { x: 0, y: R, z: 0 }
+  const overhead = { x: 0, y: 1, z: 0 }
+
+  it('skips entirely when the observer is far from the atmosphere', () => {
+    const sampler = createTwilightColumnSampler()
+    const far = sampler.sample({ ...base, observer: { x: 0, y: 5 * R, z: 0 }, sunDirection: overhead })
+    expect(sampler.active).toBe(false)
+    expect(sampler.recomputes).toBe(0)
+    expect(far.airAbove).toBe(0)
+    expect(far.skyIllumination).toBe(0)
+  })
+
+  it('computes once then caches identical repeats', () => {
+    const sampler = createTwilightColumnSampler()
+    for (let i = 0; i < 5; i++) sampler.sample({ ...base, observer: surface, sunDirection: overhead })
+    expect(sampler.active).toBe(true)
+    expect(sampler.recomputes).toBe(1)
+  })
+
+  it('recomputes when the sun crosses a bucket', () => {
+    const sampler = createTwilightColumnSampler()
+    sampler.sample({ ...base, observer: surface, sunDirection: overhead })
+    sampler.sample({ ...base, observer: surface, sunDirection: { x: Math.cos(-0.5), y: Math.sin(-0.5), z: 0 } })
+    expect(sampler.recomputes).toBe(2)
+  })
+
+  it('matches the pure function for the computed bucket', () => {
+    const sampler = createTwilightColumnSampler()
+    const sun = { x: Math.cos(-0.1), y: Math.sin(-0.1), z: 0 }
+    const cached = sampler.sample({ ...base, observer: surface, sunDirection: sun })
+    const direct = sampleTwilightColumn({ ...base, observer: surface, sunDirection: sun })
+    expect(cached.litFraction).toBeCloseTo(direct.litFraction, 10)
+    expect(cached.airAbove).toBeCloseTo(direct.airAbove, 10)
+  })
+
+  it('stops recomputing once the observer leaves the atmosphere', () => {
+    const sampler = createTwilightColumnSampler()
+    sampler.sample({ ...base, observer: surface, sunDirection: overhead })
+    expect(sampler.recomputes).toBe(1)
+    sampler.sample({ ...base, observer: { x: 0, y: 5 * R, z: 0 }, sunDirection: overhead })
+    expect(sampler.active).toBe(false)
+    expect(sampler.recomputes).toBe(1) // no further work
   })
 })
 

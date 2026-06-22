@@ -14,6 +14,7 @@
     "color": "#c65f3a",
     "texture": "/data/bodies/mars/textures/surface.png",
     "emissive": false,
-    "minimumLight": 0.03
+    "minimumLight": 0.03,
+    "atmosphere": "/data/bodies/mars/atmosphere.json"
   }
 }

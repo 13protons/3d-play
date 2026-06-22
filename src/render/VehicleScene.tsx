@@ -36,29 +36,29 @@ import { vehiclePlanetSurfaceRenderDecision } from './terrain/terrainLodPolicy';
 import { createBodySurfaceGeometry } from './bodySurfaceGeometry';
 import { PerfLogger } from './PerfLogger';
 import { countRender } from './perfCounters';
-import { WebGPUStars } from './WebGPUStars';
+import { VehicleSky } from './sky/VehicleSky';
 import { RenderPipeline } from './RenderPipeline';
 import { makeWebGPURenderer } from './webgpuRenderer';
 
 const SUN_RENDER_DISTANCE = 5e8;
 
 // How far the vehicle camera may orbit out from the craft, as a multiple of the
-// parent body's radius. ~half a radius shows the limb and a good slice of the planet
-// without the view turning to mush or reaching the star shell. Surveying the whole
-// system is the orbital map's job (V key). Falls back when there's no parent body.
+// parent body's radius. Tiny bodies cap on radius; larger ones hit the absolute
+// distance cap below first. Surveying the whole system is the orbital map's job (V key).
+// Falls back when there's no parent body.
 const VEHICLE_VIEW_MAX_RADII = 0.4;
 const VEHICLE_VIEW_MAX_DISTANCE_FALLBACK = 2e7;
+
+// Absolute zoom-out cap, scene units == metres: keep the camera within 10 km of the craft so the
+// sky-dome illusion holds — beyond this the planet starts reading as a ball and the camera-locked
+// sky stops being convincing. Anything wider is the orbital map's job.
+const VEHICLE_VIEW_MAX_DISTANCE = 10_000;
 
 // Closest the vehicle camera may zoom to the craft. Small so it can tuck in low and
 // beside the rocket to angle up toward the sky — the surface sphere clamp still stops
 // it at the ground, so it can't break the ground plane. (Orbit-around-the-craft can't
 // fully reach the zenith; this just gets as close as the geometry allows.)
 const VEHICLE_VIEW_MIN_DISTANCE = 2.5;
-
-// Radius of the vehicle-view star shell, centred on the craft. Pushed far enough
-// beyond the camera's max orbit distance that the camera can never reach it; with
-// non-attenuated point size the large radius doesn't change how stars look.
-const STAR_SHELL_RADIUS = 5e8;
 
 /**
  * Walk up from vehicleParentId to root, collecting ancestors and their direct children.
@@ -388,12 +388,12 @@ function VehicleSceneContent() {
   return (
     <>
       <VehicleAmbientLight />
-      <WebGPUStars
-        radius={STAR_SHELL_RADIUS}
-        count={3000}
-      />
+      <VehicleSky />
       <VehicleViewControls />
-      <RenderPipeline />
+      <RenderPipeline
+        withBloom
+        withLensFlare
+      />
       <EnableSceneLayers />
       <VehicleMesh />
       {firstVehicle && (
@@ -430,13 +430,16 @@ function VehicleViewControls() {
   const surfaceCameraInitializedRef = useRef(false);
   const camera = useThree((s) => s.camera);
 
-  // Cap zoom-out at ~1 parent radius (reactive: re-evaluates if the parent changes).
+  // Cap zoom-out (reactive: re-evaluates if the parent changes), clamped to 10 km below.
   const parentRadius = useTrajectoriesStore((s) => {
     const vehicle = Object.values(s.vehicles)[0];
     const parent = vehicle ? s.bodies[vehicle.parentId] : undefined;
     return parent?.radius;
   });
-  const maxDistance = parentRadius != null ? parentRadius * VEHICLE_VIEW_MAX_RADII : VEHICLE_VIEW_MAX_DISTANCE_FALLBACK;
+  const maxDistance = Math.min(
+    parentRadius != null ? parentRadius * VEHICLE_VIEW_MAX_RADII : VEHICLE_VIEW_MAX_DISTANCE_FALLBACK,
+    VEHICLE_VIEW_MAX_DISTANCE,
+  );
 
   useFrame((_, delta) => {
     const store = useTrajectoriesStore.getState();

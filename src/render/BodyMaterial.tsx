@@ -21,12 +21,30 @@ import { useTrajectoriesStore } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
 import type { BodyMeta } from '../state/trajectories'
 
+/**
+ * Atmosphere fresnel treatment for the surface material:
+ *  - `'limb'` (default): the from-orbit limb glow — a fairly broad, bright rim that reads as
+ *    the atmosphere ringing the planet disk. Right for the orbital view and the flying-high
+ *    fallback sphere.
+ *  - `'haze'`: a thin, gentle distance haze for the surface terrain — concentrated at the
+ *    horizon and tinted to the sky's own horizon colour, so far ground softly fades into the
+ *    dome instead of ending at a hard line. Avoids the broad blue-white wash `'limb'` produces
+ *    on flat grazing ground.
+ */
+type RimMode = 'limb' | 'haze'
+
 interface BodyMaterialProps {
   body: BodyMeta
+  rim?: RimMode
 }
 
 // Twilight rim colour (warm) the day-side rim blends toward at the terminator.
 const TWILIGHT_RIM: [number, number, number] = [0.74, 0.29, 0.04]
+
+// HDR multiplier for emissive bodies (the Sun): pushes the disc above 1.0 so the pipeline's
+// bloom (thresholded at 1.0) catches the sun and nothing else — lit surfaces stay ≤1 and don't
+// bloom. Drives the lens flare too.
+const SUN_HDR_GAIN = 4
 
 // Surface textures are equirectangular and authored in sRGB. Tag the colour space so
 // the texture isn't sampled as linear (which over-brightens the day side), and repeat
@@ -83,12 +101,12 @@ function useSunDirectionUniform(bodyId: string, materialRef: RefObject<MeshBasic
  *    tinted from their own scattering coefficients. The off-surface halo is a separate
  *    shell (AtmosphereGlowMaterial).
  */
-function buildPlanetMaterial(body: BodyMeta, map: Texture | null): MeshBasicNodeMaterial {
+function buildPlanetMaterial(body: BodyMeta, map: Texture | null, rim: RimMode): MeshBasicNodeMaterial {
   const material = new MeshBasicNodeMaterial()
   const albedo = map ? texture(map) : color(body.color)
 
   if (body.emissive) {
-    material.colorNode = albedo
+    material.colorNode = albedo.mul(SUN_HDR_GAIN)
     return material
   }
 
@@ -100,36 +118,46 @@ function buildPlanetMaterial(body: BodyMeta, map: Texture | null): MeshBasicNode
 
   const atmosphere = body.atmosphereRender
   if (atmosphere) {
-    const [dr, dg, db] = dayRimColor(atmosphere.rayleigh.coefficients)
-    const atmosphereColor = mix(vec3(...TWILIGHT_RIM), vec3(dr, dg, db), dayStrength)
+    // fresnel → 1 at grazing incidence (the horizon / the planet's limb); gate to the lit side.
     const fresnel = positionWorld.sub(cameraPosition).normalize().dot(normalWorldGeometry).abs().oneMinus()
-    const atmosphereDayStrength = sunOrientation.smoothstep(-0.5, 1)
-    const atmosphereMix = atmosphereDayStrength.mul(fresnel.pow(2)).clamp(0, 1)
-    lit = mix(lit, atmosphereColor, atmosphereMix)
+    const dayGate = sunOrientation.smoothstep(-0.5, 1)
+    if (rim === 'haze') {
+      // Thin, gentle horizon haze: high fresnel power keeps it near the limb, low strength keeps
+      // it subtle, tinted to the sky's own horizon colour so far ground fades into the dome.
+      const haze = atmosphere.sky ? color(atmosphere.sky.horizon) : vec3(...dayRimColor(atmosphere.rayleigh.coefficients))
+      const hazeMix = dayGate.mul(fresnel.pow(3)).mul(0.35).clamp(0, 1)
+      lit = mix(lit, haze, hazeMix)
+    } else {
+      // 'limb': the broad, bright from-orbit limb glow.
+      const [dr, dg, db] = dayRimColor(atmosphere.rayleigh.coefficients)
+      const atmosphereColor = mix(vec3(...TWILIGHT_RIM), vec3(dr, dg, db), dayStrength)
+      const atmosphereMix = dayGate.mul(fresnel.pow(2)).clamp(0, 1)
+      lit = mix(lit, atmosphereColor, atmosphereMix)
+    }
   }
 
   material.colorNode = lit
   return material
 }
 
-function PlanetMaterial({ body, map }: { body: BodyMeta; map: Texture | null }) {
+function PlanetMaterial({ body, map, rim }: { body: BodyMeta; map: Texture | null; rim: RimMode }) {
   const materialRef = useRef<MeshBasicNodeMaterial>(null)
-  const material = useMemo(() => buildPlanetMaterial(body, map), [body, map])
+  const material = useMemo(() => buildPlanetMaterial(body, map, rim), [body, map, rim])
   useEffect(() => () => material.dispose(), [material])
   useSunDirectionUniform(body.id, materialRef)
   return <primitive object={material} attach="material" ref={materialRef} />
 }
 
-export function BodyMaterial({ body }: BodyMaterialProps) {
+export function BodyMaterial({ body, rim = 'limb' }: BodyMaterialProps) {
   if (body.texture) {
-    return <TexturedBodyMaterial body={body} texture={body.texture} />
+    return <TexturedBodyMaterial body={body} texture={body.texture} rim={rim} />
   }
-  return <PlanetMaterial body={body} map={null} />
+  return <PlanetMaterial body={body} map={null} rim={rim} />
 }
 
-function TexturedBodyMaterial({ body, texture: textureUrl }: BodyMaterialProps & { texture: string }) {
+function TexturedBodyMaterial({ body, texture: textureUrl, rim }: BodyMaterialProps & { texture: string; rim: RimMode }) {
   const map = useTexture(textureUrl, configureSurfaceTexture)
-  return <PlanetMaterial body={body} map={map} />
+  return <PlanetMaterial body={body} map={map} rim={rim} />
 }
 
 /**

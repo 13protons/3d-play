@@ -56,6 +56,26 @@ export interface AtmosphereRenderConfig {
   sunIntensity: number
   viewSamples: number
   lightSamples: number
+  /**
+   * Cheap analytic sky-dome palette for the from-the-ground (vehicle) view — the
+   * good-enough stand-in for full scattering. Hex colours; absent on bodies with no
+   * walkable sky. Earth is blue day / red dusk; Mars inverts it (butterscotch day,
+   * blue dusk); Venus is uniformly ochre. See src/render/sky/VehicleSky.tsx.
+   */
+  sky?: AtmosphereSkyColors
+}
+
+export interface AtmosphereSkyColors {
+  /** Overhead day-sky colour. */
+  zenith: string
+  /** Pale haze colour at the horizon by day. */
+  horizon: string
+  /** Whitening immediately around the sun disc. */
+  sunHalo: string
+  /** Bright band toward the sun at low sun (Earth orange; Mars blue). */
+  lowSunGlow: string
+  /** Deep colour the sky base shifts toward near the horizon toward a low sun. */
+  lowSunDeep: string
 }
 
 export interface BodyMeta {
