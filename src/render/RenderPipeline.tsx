@@ -40,15 +40,19 @@ export function RenderPipeline({
   const scene = useThree((s) => s.scene)
   const camera = useThree((s) => s.camera)
 
-  const pipeline = useMemo(() => {
+  const { pipeline, disposables } = useMemo(() => {
     const pipeline = new WebGPURenderPipeline(gl)
     const scenePass = pass(scene, camera)
     const sceneColor = scenePass.getTextureNode('output')
+    // These nodes own GPU render targets that pipeline.dispose() does NOT free (it only disposes
+    // the output quad material). Track them so the cleanup below releases them too.
+    const disposables: Array<{ dispose: () => void }> = [scenePass]
     if (!withBloom && !withLensFlare) {
       pipeline.outputNode = sceneColor
-      return pipeline
+      return { pipeline, disposables }
     }
     const bloomPass = bloom(sceneColor, 0.8, 0.8, 2.0)
+    disposables.push(bloomPass)
     let output = sceneColor.add(bloomPass)
     if (withLensFlare) {
       const flare = lensflare(bloomPass, {
@@ -60,15 +64,22 @@ export function RenderPipeline({
         ghostSpacing: float(0.25),
         ghostAttenuationFactor: float(25),
       })
+      disposables.push(flare)
       // @types/three TSL gap: LensflareNode (a TempNode) lacks the Node<"color"> extension
       // members the .add() overload wants. Cast to Node — it is a valid colour-producing node.
       output = output.add(flare as unknown as Node<'color'>)
     }
     pipeline.outputNode = output
-    return pipeline
+    return { pipeline, disposables }
   }, [gl, scene, camera, withBloom, withLensFlare])
 
-  useEffect(() => () => pipeline.dispose(), [pipeline])
+  useEffect(
+    () => () => {
+      pipeline.dispose()
+      for (const node of disposables) node.dispose()
+    },
+    [pipeline, disposables],
+  )
 
   useFrame(() => {
     pipeline.render()

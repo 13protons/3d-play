@@ -80,6 +80,9 @@ export function PlanetTerrainTiles({
     [],
   )
   const renderedTileKeyRef = useRef('')
+  // Async tile loads below resolve off the frame loop; don't setState after unmount.
+  const mountedRef = useRef(true)
+  useEffect(() => () => { mountedRef.current = false }, [])
 
   useFrame(() => {
     const group = groupRef.current
@@ -131,7 +134,11 @@ export function PlanetTerrainTiles({
       fovRadians,
       viewportHeight: viewport.height,
     })
-    selectedTileIds.sort((a, b) => (terrainTileKey(a) < terrainTileKey(b) ? -1 : 1))
+    selectedTileIds.sort((a, b) => {
+      const ka = terrainTileKey(a)
+      const kb = terrainTileKey(b)
+      return ka < kb ? -1 : ka > kb ? 1 : 0
+    })
     const selectedTileKey = terrainTileSelectionKey(selectedTileIds)
 
     // Render origin = the body-local point under the scene origin (the vehicle in
@@ -159,7 +166,9 @@ export function PlanetTerrainTiles({
     if (loadingKeyRef.current !== selectedTileKey) {
       loadingKeyRef.current = selectedTileKey
       void Promise.all(selectedTileIds.map((tileId) => cache.getTile(tileId, { bodyRadius: body.radius })))
-        .then(() => setVersion((value) => value + 1))
+        .then(() => {
+          if (mountedRef.current) setVersion((value) => value + 1)
+        })
     }
   })
 
@@ -217,6 +226,15 @@ function TerrainTileBatchMesh({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cache, tileIds, version, renderOrigin])
   const meshRef = useRef<Mesh>(null)
+
+  // The geometry is rebuilt imperatively (new BufferGeometry) whenever the tile set,
+  // render origin, or cache version changes — which happens constantly while moving.
+  // R3F doesn't own a geometry passed as a prop, so dispose the previous one ourselves
+  // (and on unmount) or its GPU buffers leak each rebuild.
+  useEffect(() => {
+    if (!geometry) return
+    return () => geometry.dispose()
+  }, [geometry])
 
   // The batch mesh's render layer only changes with renderLayer (or when the
   // mesh first mounts as geometry arrives) — set it then, not every frame.

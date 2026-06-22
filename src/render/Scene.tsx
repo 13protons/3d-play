@@ -41,7 +41,9 @@ export function Scene() {
       <PerfLogger view='orbital' />
       <RenderPipeline withBloom />
       <ambientLight intensity={0.04} />
-      <MagnitudeStars radius={1e14} />
+      {/* Airless space: light the whole catalogue (≤ mag 6.5) fully — a limit above the faint
+          cutoff + the fade band, so faint stars aren't left half-dimmed as they are at the naked-eye limit. */}
+      <MagnitudeStars radius={1e14} limit={8} />
       <CameraRig />
       {bodyIds.map((id) => (
         <Body

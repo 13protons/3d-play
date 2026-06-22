@@ -50,6 +50,10 @@ export class VehicleStructure {
   private skeleton: DrySkeleton
   /** Current propellant per tank instance id. */
   private fuel: Map<string, number>
+  /** Memoized mass properties; invalidated whenever fuel or the skeleton changes. The worker
+   *  calls aggregate() several times per step (thrust, MoI, ground clearance), so caching it
+   *  between mutations avoids recomputing the same result. */
+  private aggregateCache: VehicleAggregate | undefined
   currentStage: number
 
   constructor(parts: PartInstance[], definitions: Map<string, PartDefinition>, currentStage = 0) {
@@ -90,9 +94,10 @@ export class VehicleStructure {
     return new VehicleStructure([part], new Map([[def.id, def]]))
   }
 
-  /** Mass properties for the current fuel state (all active parts). */
+  /** Mass properties for the current fuel state (all active parts). Memoized between mutations. */
   aggregate(): VehicleAggregate {
-    return aggregate(this.skeleton, this.fuel)
+    if (!this.aggregateCache) this.aggregateCache = aggregate(this.skeleton, this.fuel)
+    return this.aggregateCache
   }
 
   /**
@@ -199,6 +204,7 @@ export class VehicleStructure {
       const fuel = this.fuel.get(t.instanceId) ?? 0
       if (fuel > 0) this.fuel.set(t.instanceId, Math.max(0, fuel - fuel * fraction))
     }
+    this.aggregateCache = undefined // fuel changed
   }
 
   /**
@@ -259,6 +265,7 @@ export class VehicleStructure {
     }
     this.currentStage += 1
     this.skeleton = buildSkeleton(this.parts, this.definitions)
+    this.aggregateCache = undefined // skeleton changed
     // Keep only fuel for tanks that survived; seed any newly-relevant tanks.
     const survivors = new Map<string, number>()
     for (const tank of this.skeleton.tanks) survivors.set(tank.instanceId, this.fuel.get(tank.instanceId) ?? 0)

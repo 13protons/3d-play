@@ -41,10 +41,12 @@ interface BodyMaterialProps {
 // Twilight rim colour (warm) the day-side rim blends toward at the terminator.
 const TWILIGHT_RIM: [number, number, number] = [0.74, 0.29, 0.04]
 
-// HDR multiplier for emissive bodies (the Sun): pushes the disc above 1.0 so the pipeline's
-// bloom (thresholded at 1.0) catches the sun and nothing else — lit surfaces stay ≤1 and don't
-// bloom. Drives the lens flare too.
-const SUN_HDR_GAIN = 4
+// HDR multiplier for emissive bodies (the Sun). It must sit far above everything else the bloom
+// pass sees so the sun reads as overwhelmingly the brightest object — well past the brightest
+// stars (which peak ~8× via their own HDR boost) so it doesn't look like just another star.
+// Drives the lens flare too (a brighter source → a more dramatic flare). Lit surfaces stay ≤1
+// and never reach the 2.0 bloom threshold (see RenderPipeline).
+const SUN_HDR_GAIN = 40
 
 // Surface textures are equirectangular and authored in sRGB. Tag the colour space so
 // the texture isn't sampled as linear (which over-brightens the day side), and repeat
@@ -69,24 +71,37 @@ function dayRimColor(coefficients: [number, number, number]): [number, number, n
   }) as [number, number, number]
 }
 
+// The sun's world position is identical for every body material in a given frame, but the lookup
+// (Object.values + find emissive) and curve eval would otherwise run once per material per frame.
+// Cache it for the frame, keyed by R3F's clock.elapsedTime (set once per frame, unlike getSimTime
+// which interpolates off performance.now() per call). Module-level is fine — render is single-threaded.
+let sunPosFrame: { key: number; pos: [number, number, number] | null } | undefined
+
+function sunPositionForFrame(frameKey: number): [number, number, number] | null {
+  if (sunPosFrame?.key === frameKey) return sunPosFrame.pos
+  const store = useTrajectoriesStore.getState()
+  const sun = Object.values(store.bodies).find((b) => b.emissive)
+  const sunCurve = sun ? store.curves[sun.id] : undefined
+  const pos = sunCurve ? (evaluateCurve(sunCurve, store.getSimTime()) as [number, number, number]) : null
+  sunPosFrame = { key: frameKey, pos }
+  return pos
+}
+
 /**
  * Drive a material's `userData.sunDirection` uniform from the sim each frame: the
  * direction from this body to the (emissive) sun. Directions are translation-
  * invariant, so the floating-origin offset drops out. Materials without the uniform
- * (emissive bodies) are skipped.
+ * (emissive bodies) are skipped. The sun position is resolved once per frame and shared.
  */
 function useSunDirectionUniform(bodyId: string, materialRef: RefObject<MeshBasicNodeMaterial | null>): void {
-  useFrame(() => {
+  useFrame((frame) => {
     const sunDirection = materialRef.current?.userData.sunDirection as { value: Vector3 } | undefined
     if (!sunDirection) return
+    const sunPos = sunPositionForFrame(frame.clock.elapsedTime)
     const store = useTrajectoriesStore.getState()
-    const sun = Object.values(store.bodies).find((b) => b.emissive)
-    const sunCurve = sun ? store.curves[sun.id] : undefined
     const bodyCurve = store.curves[bodyId]
-    if (!sun || !sunCurve || !bodyCurve) return
-    const t = store.getSimTime()
-    const sunPos = evaluateCurve(sunCurve, t) as [number, number, number]
-    const bodyPos = evaluateCurve(bodyCurve, t) as [number, number, number]
+    if (!sunPos || !bodyCurve) return
+    const bodyPos = evaluateCurve(bodyCurve, store.getSimTime()) as [number, number, number]
     sunDirection.value.set(sunPos[0] - bodyPos[0], sunPos[1] - bodyPos[1], sunPos[2] - bodyPos[2]).normalize()
   })
 }

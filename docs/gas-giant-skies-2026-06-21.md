@@ -42,7 +42,7 @@ not photographs (no probe has imaged these skies):
 - **Saturn** — like Jupiter but paler and more golden. `zenith #8aa0cf`, `horizon #d8c294`,
   `sunHalo #fff3da`, low-sun `#d2ad62` → `#8a6a34`.
 - **Uranus** — methane absorbs red, leaving a cyan/aquamarine sky. `zenith #4fb7c0`,
-  `horizon #b6e6e6`, `sunHalo `#eafcff`, low-sun `#6fcfc4` → `#2f7e84`.
+  `horizon #b6e6e6`, `sunHalo #eafcff`, low-sun `#6fcfc4` → `#2f7e84`.
 - **Neptune** — deeper methane blue/azure. `zenith #2a5fb0`, `horizon #8fb8e8`,
   `sunHalo #eaf2ff`, low-sun `#4f86c8` → `#1f3f80`.
 
