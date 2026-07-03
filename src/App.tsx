@@ -2,11 +2,15 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { useModeStore } from './state/mode';
-import { startSim, stopSim } from './state/bridge';
+import { loadBodyResolveMeta, startSim, startSimWithScenario, stopSim } from './state/bridge';
+import { loadScene } from './state/scenarioStorage';
+import { resolveScene } from './data/sceneDraft';
 import { MainMenu } from './ui/MainMenu';
 import { HudTestPage } from './ui/HudTestPage';
 import { Flight } from './modes/Flight';
-import { isKnownScenarioId, mainPath, missionPath, spikeEarthPath, spikeDawnPath, spikeAtmospherePath, testHudPath } from './appRoutes';
+import { SceneList } from './modes/SceneList';
+import { SceneEditor } from './modes/SceneEditor';
+import { editorPath, isKnownScenarioId, mainPath, missionPath, spikeEarthPath, spikeDawnPath, spikeAtmospherePath, testHudPath } from './appRoutes';
 
 // Lazy so the TSL spike deps stay out of the main flight bundle.
 const EarthSpikePage = lazy(() => import('./spike/EarthSpike').then((m) => ({ default: m.EarthSpikePage })));
@@ -74,6 +78,18 @@ export default function App() {
             <AtmosphereSpikePage />
           </Suspense>
         }
+      />
+      <Route
+        path={editorPath}
+        element={<SceneList />}
+      />
+      <Route
+        path='/editor/:sceneId'
+        element={<SceneEditor />}
+      />
+      <Route
+        path='/play/:sceneId'
+        element={<PlaySceneRoute />}
       />
       <Route
         path='/mission/:scenarioId'
@@ -154,6 +170,49 @@ function MissionRoute() {
 
   if (status === 'loading') return <LoadingMission scenarioId={scenarioId} />;
 
+  return <Flight />;
+}
+
+function PlaySceneRoute() {
+  const { sceneId } = useParams();
+  const enterFlight = useModeStore((s) => s.enterFlight);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+
+  useEffect(() => {
+    if (!sceneId) return;
+    let cancelled = false;
+
+    async function launch() {
+      setStatus('loading');
+      stopSim();
+      try {
+        const draft = loadScene(sceneId!);
+        if (!draft) throw new Error(`No saved scene: ${sceneId}`);
+        const meta = await loadBodyResolveMeta(Object.keys(draft.bodies));
+        const scenario = resolveScene(draft, meta);
+        await startSimWithScenario(scenario);
+        if (!cancelled) {
+          enterFlight(draft.id);
+          setStatus('ready');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error(error);
+          setStatus('failed');
+        }
+      }
+    }
+
+    void launch();
+    return () => {
+      cancelled = true;
+    };
+  }, [enterFlight, sceneId]);
+
+  if (status === 'failed') {
+    return <NotFound title='Scene failed to load' detail={`Could not play ${sceneId}.`} />;
+  }
+  if (status === 'loading') return <LoadingMission scenarioId={sceneId ?? ''} />;
   return <Flight />;
 }
 

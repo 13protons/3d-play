@@ -1,5 +1,25 @@
 export const mainPath = '/main';
+export const editorPath = '/editor';
 export const testHudPath = '/_test/hud';
+
+export function editorScenePath(sceneId: string): string {
+  return `/editor/${encodeURIComponent(sceneId)}`;
+}
+
+export function playScenePath(sceneId: string): string {
+  return `/play/${encodeURIComponent(sceneId)}`;
+}
+
+/**
+ * Built-in scenarios usable as a starting body set for a new scene. Excludes
+ * `jpl-ecliptic` scenarios, whose stored axes don't match the editor's y-up
+ * orbital-element conventions.
+ */
+export const editorBaseScenarios = [
+  { id: 'sun-earth-moon', label: 'Sun-Earth-Moon' },
+  { id: 'inner-solar-system', label: 'Inner Solar System' },
+  { id: 'two-stage-ascent', label: 'Two-Stage Ascent' },
+] as const;
 export const spikeEarthPath = '/_spike/earth';
 export const spikeDawnPath = '/_spike/dawn';
 export const spikeAtmospherePath = '/_spike/atmosphere';
