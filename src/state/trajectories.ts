@@ -96,6 +96,27 @@ export interface BodyMeta {
   atmosphereRender?: AtmosphereRenderConfig
 }
 
+/**
+ * Replace an id-keyed map, preserving object identity for entries whose content
+ * is unchanged (JSON-equal). Render components memoize materials/geometry on
+ * these references — churning identity on every sim restart forces a
+ * dispose/rebuild wave across the whole scene, which three's WebGPU backend
+ * intermittently mishandles (destroyed buffers left in cached submits → the
+ * render pass silently drops every frame).
+ */
+function stableEntityMap<T extends { id: string }>(
+  previous: Record<string, T>,
+  next: T[],
+): Record<string, T> {
+  return Object.fromEntries(
+    next.map((entry) => {
+      const prev = previous[entry.id]
+      const keep = prev && JSON.stringify(prev) === JSON.stringify(entry)
+      return [entry.id, keep ? prev : entry]
+    }),
+  )
+}
+
 interface TrajectoriesState {
   curves: Record<string, TrajectoryCurve>
   bodies: Record<string, BodyMeta>
@@ -149,14 +170,14 @@ export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
     }),
 
   setBodies: (bodies) =>
-    set({
-      bodies: Object.fromEntries(bodies.map((b) => [b.id, b])),
-    }),
+    set((state) => ({
+      bodies: stableEntityMap(state.bodies, bodies),
+    })),
 
   setVehicles: (vehicles) =>
-    set({
-      vehicles: Object.fromEntries(vehicles.map((v) => [v.id, v])),
-    }),
+    set((state) => ({
+      vehicles: stableEntityMap(state.vehicles, vehicles),
+    })),
 
   setVehicleControl: (vehicleId, control) =>
     set((state) => ({

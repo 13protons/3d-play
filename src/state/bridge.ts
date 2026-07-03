@@ -554,7 +554,7 @@ function flushCommands(): void {
   }
 }
 
-export function stopSim(): void {
+export function stopSim(options: { preserveScene?: boolean } = {}): void {
   if (animFrameId !== null) {
     cancelAnimationFrame(animFrameId)
     animFrameId = null
@@ -578,6 +578,13 @@ export function stopSim(): void {
   bodySurfaceMap.clear()
   activeVehicleId = null
   activeVehicleParentId = null
+  // preserveScene (the editor's restart-on-apply): keep the trajectory store
+  // populated so mounted render components survive the restart. A full reset
+  // unmounts every body/orbit-line and the resulting mass geometry disposal
+  // intermittently wedges the live WebGPU canvas (destroyed buffers stay
+  // referenced by cached submits → the scene pass drops every frame until a
+  // later rebuild). The incoming run overwrites curves/bodies/vehicles anyway.
+  if (options.preserveScene) return
   useTrajectoriesStore.getState().reset()
   useVehicleStore.getState().reset()
   useAutopilotStore.getState().reset()

@@ -26,6 +26,11 @@ const APPLY_DEBOUNCE_MS = 300
 
 const RAD = Math.PI / 180
 
+interface ApplyOptions {
+  /** Re-frame the camera to ~4× this radius (used when the parent body changes). */
+  frameRadius?: number
+}
+
 /** Scene editor: live preview (restart-on-apply) + placement + edit-time clock. */
 export function SceneEditor() {
   const { sceneId } = useParams()
@@ -38,20 +43,35 @@ export function SceneEditor() {
   const [stepSeconds, setStepSeconds] = useState(10)
   const applyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Apply the current draft to the live sim (stop + restart + re-pause). The
-  // camera pose is captured relative to the focal point and restored after the
-  // restart, so tweaking values doesn't fling the view off the subject.
-  const apply = useCallback(async (d: SceneDraft) => {
+  // Apply the current draft to the live sim (stop + restart + re-pause).
+  // preserveScene keeps the render stores populated across the restart so the
+  // mounted scene survives (a full teardown intermittently wedges the live
+  // WebGPU canvas — see stopSim). The camera pose is captured relative to the
+  // focal point and restored after the restart, so tweaking values doesn't
+  // fling the view off the subject; `frameRadius` (parent switch) instead
+  // re-frames to the new body's scale, keeping only the view direction.
+  const apply = useCallback(async (d: SceneDraft, opts?: ApplyOptions) => {
     setErrorMsg(null)
     const pose = captureCameraPose()
     try {
-      stopSim()
+      stopSim({ preserveScene: true })
       const scenario = resolveScene(d, metaRef.current)
       await startSimWithScenario(scenario)
       useModeStore.getState().enterFlight(d.id)
       pauseSim()
       setPaused(true)
-      if (pose) restoreCameraPose(pose)
+      if (pose) {
+        if (opts?.frameRadius) {
+          const distance = Math.hypot(...pose.position)
+          const scale = distance > 0 ? (opts.frameRadius * 4) / distance : 1
+          restoreCameraPose({
+            position: [pose.position[0] * scale, pose.position[1] * scale, pose.position[2] * scale],
+            target: [0, 0, 0],
+          })
+        } else {
+          restoreCameraPose(pose)
+        }
+      }
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e))
     }
@@ -60,9 +80,9 @@ export function SceneEditor() {
   // Debounced auto-apply: edits settle for a beat, then the scene re-resolves
   // and restarts. Replaces an explicit Apply button.
   const scheduleApply = useCallback(
-    (next: SceneDraft) => {
+    (next: SceneDraft, opts?: ApplyOptions) => {
       if (applyTimerRef.current) clearTimeout(applyTimerRef.current)
-      applyTimerRef.current = setTimeout(() => void apply(next), APPLY_DEBOUNCE_MS)
+      applyTimerRef.current = setTimeout(() => void apply(next, opts), APPLY_DEBOUNCE_MS)
     },
     [apply],
   )
@@ -104,11 +124,11 @@ export function SceneEditor() {
     }
   }, [])
 
-  function update(mutate: (d: SceneDraft) => SceneDraft) {
+  function update(mutate: (d: SceneDraft) => SceneDraft, opts?: ApplyOptions) {
     if (!draft) return
     const next = mutate(structuredClone(draft))
     setDraft(next)
-    scheduleApply(next)
+    scheduleApply(next, opts)
   }
 
   function setPlacement(placement: VehiclePlacement) {
@@ -119,15 +139,20 @@ export function SceneEditor() {
   }
 
   function changeParent(parentId: string) {
-    update((d) => {
-      d.vehicle.parentId = parentId
-      // Elements are parent-relative; reset to a clean low orbit around the new
-      // parent so stale values from the old parent don't place the craft absurdly.
-      const radius = metaRef.current[parentId]?.radius ?? 1_000_000
-      d.vehicle.placement = { mode: 'orbital', a: radius * 1.2, e: 0, i: 0, lan: 0, aop: 0, ta: 0 }
-      d.parentScrub = { deltaTrueAnomaly: 0 }
-      return d
-    })
+    const radius = metaRef.current[parentId]?.radius ?? 1_000_000
+    update(
+      (d) => {
+        d.vehicle.parentId = parentId
+        // Elements are parent-relative; reset to a clean low orbit around the new
+        // parent so stale values from the old parent don't place the craft absurdly.
+        d.vehicle.placement = { mode: 'orbital', a: radius * 1.2, e: 0, i: 0, lan: 0, aop: 0, ta: 0 }
+        d.parentScrub = { deltaTrueAnomaly: 0 }
+        return d
+      },
+      // Re-frame the camera to the new parent's scale — holding an Earth-sized
+      // viewing distance leaves a Moon-sized parent an invisible speck.
+      { frameRadius: radius },
+    )
   }
 
   function save(asNew: boolean) {
