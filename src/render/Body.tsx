@@ -26,6 +26,10 @@ import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
 const MESH_THRESHOLD_PX = 6
 const SPRITE_SIZE_PX = 12
 const CHILD_COLLAPSE_THRESHOLD_PX = 18
+// HDR gain for an emissive body's marker sprite. When the Sun's disc drops below
+// MESH_THRESHOLD_PX it swaps to the sprite, which must still out-bloom the
+// brightest stars (~8× HDR, see MagnitudeStars) or the sun reads as a flat dot.
+const EMISSIVE_SPRITE_HDR_GAIN = 16
 
 interface BodyProps {
   bodyId: string
@@ -186,6 +190,7 @@ export function Body({ bodyId }: BodyProps) {
         color={body.color}
         shape="circle"
         bodyId={body.id}
+        hdrBoost={body.emissive ? EMISSIVE_SPRITE_HDR_GAIN : undefined}
       />
       {body.emissive && (
         <pointLight

@@ -8,6 +8,13 @@ interface OrbitalMarkerProps {
   color: string
   shape: OrbitalMarkerShape
   bodyId?: string
+  /**
+   * HDR multiplier on the marker colour so the sprite crosses the bloom
+   * threshold (2.0) and glows. Used for emissive bodies: at orbital distances
+   * the Sun falls below the mesh-vs-sprite pixel threshold, and without this
+   * its 40× HDR disc is replaced by a flat LDR dot that never blooms.
+   */
+  hdrBoost?: number
 }
 
 function makeMarkerTexture(
@@ -61,16 +68,20 @@ function makeMarkerTexture(
 }
 
 export const OrbitalMarker = forwardRef<Sprite, OrbitalMarkerProps>(
-  function OrbitalMarker({ color, shape, bodyId }, ref) {
+  function OrbitalMarker({ color, shape, bodyId, hdrBoost }, ref) {
     const material = useMemo(() => {
       const texture = makeMarkerTexture(color, shape, bodyId)
-      return new SpriteMaterial({
+      const material = new SpriteMaterial({
         map: texture,
         transparent: true,
         depthWrite: false,
         depthTest: true,
       })
-    }, [color, shape, bodyId])
+      // Raw component multiplier (not a colour-space conversion) — the canvas
+      // texture carries the tint, this pushes it into HDR for bloom.
+      if (hdrBoost !== undefined) material.color.setScalar(hdrBoost)
+      return material
+    }, [color, shape, bodyId, hdrBoost])
 
     return <sprite ref={ref} material={material} />
   },

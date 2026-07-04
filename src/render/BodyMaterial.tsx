@@ -197,7 +197,16 @@ function buildAtmosphereGlowMaterial(body: BodyMeta): MeshBasicNodeMaterial {
   const dayStrength = sunOrientation.smoothstep(-0.25, 0.5)
   const atmosphereColor = mix(vec3(...TWILIGHT_RIM), vec3(dr, dg, db), dayStrength)
   const fresnel = positionWorld.sub(cameraPosition).normalize().dot(normalWorldGeometry).abs().oneMinus()
-  const alpha = fresnel.remap(0.73, 1, 1, 0).pow(3).mul(sunOrientation.smoothstep(-0.5, 1))
+  // TSL remap does NOT clamp: below the limb band (fresnel < 0.73) it extrapolates
+  // alpha past 1 — up to ~3.7 at the shell's centre, ~50 after pow(3). From orbit the
+  // planet's disc hides that region, but from far away depth precision collapses and
+  // the shell's interior wins the depth test in bands, blasting an HDR glare through
+  // the bloom pass (the "blown-out white disc with banding" seen from the Moon).
+  // Clamp the band, and fade the glow to zero on the interior side — it's a limb
+  // phenomenon; nothing inward of the limb should glow.
+  const limbBand = fresnel.remap(0.73, 1, 1, 0).clamp(0, 1)
+  const interiorFade = fresnel.smoothstep(0.45, 0.7)
+  const alpha = limbBand.pow(3).mul(interiorFade).mul(sunOrientation.smoothstep(-0.5, 1))
   material.outputNode = vec4(atmosphereColor, alpha)
   return material
 }

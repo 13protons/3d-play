@@ -15,9 +15,11 @@ import { lensflare } from 'three/examples/jsm/tsl/display/LensflareNode.js'
  * terrain overlay, vehicle) into one depth buffer.
  *
  * Each effect is opt-in per mount (every mount is its own pipeline instance):
- *  - `withBloom`: scene → bloom, summed back. Thresholded at 2.0 so only the HDR sun disc
- *    glows (rendered at SUN_HDR_GAIN = 4×, see BodyMaterial). The threshold sits above the
- *    brightest non-sun content — the daytime sky and the on-surface atmosphere rim peak near
+ *  - `withBloom`: scene → bloom, summed back. Thresholded at 2.0 so only genuinely HDR
+ *    sources glow: the sun disc (SUN_HDR_GAIN = 40×, see BodyMaterial), the sun's marker
+ *    sprite when the disc is sub-threshold-size (EMISSIVE_SPRITE_HDR_GAIN, see Body), and
+ *    the brightest stars (~8×, see MagnitudeStars). The threshold sits above the brightest
+ *    non-emissive content — the daytime sky and the on-surface atmosphere rim peak near
  *    1.0–1.4 — so the lit ground no longer blooms into a white wash. Wanted in both views.
  *  - `withLensFlare`: samples that bloom to throw ghosts pivoting around screen-centre. Only
  *    sensible standing on the ground (vehicle view); in the orbital map it keys off the bright
