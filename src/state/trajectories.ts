@@ -96,6 +96,27 @@ export interface BodyMeta {
   atmosphereRender?: AtmosphereRenderConfig
 }
 
+/**
+ * Replace an id-keyed map, preserving object identity for entries whose content
+ * is unchanged (JSON-equal). Render components memoize materials/geometry on
+ * these references — churning identity on every sim restart forces a
+ * dispose/rebuild wave across the whole scene, which three's WebGPU backend
+ * intermittently mishandles (destroyed buffers left in cached submits → the
+ * render pass silently drops every frame).
+ */
+function stableEntityMap<T extends { id: string }>(
+  previous: Record<string, T>,
+  next: T[],
+): Record<string, T> {
+  return Object.fromEntries(
+    next.map((entry) => {
+      const prev = previous[entry.id]
+      const keep = prev && JSON.stringify(prev) === JSON.stringify(entry)
+      return [entry.id, keep ? prev : entry]
+    }),
+  )
+}
+
 interface TrajectoriesState {
   curves: Record<string, TrajectoryCurve>
   bodies: Record<string, BodyMeta>
@@ -104,6 +125,8 @@ interface TrajectoriesState {
   simTime: number
   warpRate: number
   lastUpdateWallTime: number
+  /** Mirrors the bridge clock's pause flag so the read-side time stops too. */
+  paused: boolean
 
   updateCurves: (curves: TrajectoryCurve[], simTime: number) => void
   /** Merge curves into the store without touching simTime. Used by vehicle worker. */
@@ -112,6 +135,7 @@ interface TrajectoriesState {
   setVehicles: (vehicles: VehicleMeta[]) => void
   setVehicleControl: (vehicleId: string, control: VehicleControlMeta) => void
   setWarpRate: (rate: number) => void
+  setPaused: (paused: boolean) => void
   reset: () => void
   /** Interpolated sim time — use this everywhere for consistent positioning. */
   getSimTime: () => number
@@ -125,6 +149,7 @@ export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
   simTime: 0,
   warpRate: 1,
   lastUpdateWallTime: performance.now(),
+  paused: false,
 
   updateCurves: (curves, simTime) =>
     set((state) => {
@@ -145,14 +170,14 @@ export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
     }),
 
   setBodies: (bodies) =>
-    set({
-      bodies: Object.fromEntries(bodies.map((b) => [b.id, b])),
-    }),
+    set((state) => ({
+      bodies: stableEntityMap(state.bodies, bodies),
+    })),
 
   setVehicles: (vehicles) =>
-    set({
-      vehicles: Object.fromEntries(vehicles.map((v) => [v.id, v])),
-    }),
+    set((state) => ({
+      vehicles: stableEntityMap(state.vehicles, vehicles),
+    })),
 
   setVehicleControl: (vehicleId, control) =>
     set((state) => ({
@@ -161,11 +186,19 @@ export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
 
   setWarpRate: (rate) => set({ warpRate: rate }),
 
+  // Re-anchor the interpolation clock on resume so the paused wall-time isn't
+  // counted as elapsed sim-time (which would make getSimTime jump forward).
+  setPaused: (paused) =>
+    set(paused ? { paused: true } : { paused: false, lastUpdateWallTime: performance.now() }),
+
   getSimTime: () => {
-    const { simTime, warpRate, lastUpdateWallTime } = get()
+    const { simTime, warpRate, lastUpdateWallTime, paused } = get()
+    // While paused the bridge isn't advancing the workers, so freeze the
+    // read-side clock too — otherwise wall-clock interpolation marches on and
+    // consumers extrapolate stale curves (orbit predictions diverge to escape).
+    if (paused || warpRate > 100) return simTime
     // At high warp, worker updates carry enough sim-time per tick
     // that interpolation just causes overshoot. Only interpolate at low warp.
-    if (warpRate > 100) return simTime
     const wallDelta = (performance.now() - lastUpdateWallTime) / 1000
     return simTime + wallDelta * warpRate
   },
@@ -179,5 +212,6 @@ export const useTrajectoriesStore = create<TrajectoriesState>((set, get) => ({
       simTime: 0,
       warpRate: 1,
       lastUpdateWallTime: performance.now(),
+      paused: false,
     }),
 }))

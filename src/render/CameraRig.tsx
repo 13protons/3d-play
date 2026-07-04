@@ -6,6 +6,7 @@ import { useModeStore } from '../state/mode'
 import { useTrajectoriesStore } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
 import { clampOutsideSphere } from './cameraClamp'
+import { registerCameraControl } from './cameraControl'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 
 // Keep the camera this far above a surface when it's pushed out of a body.
@@ -50,6 +51,29 @@ export function CameraRig() {
       )
     }
   }, 1)
+
+  // Expose capture/restore so the scene editor can preserve the view across a
+  // restart-on-apply (position + target are already follow-target-relative).
+  useEffect(() => {
+    return registerCameraControl({
+      capture: () => {
+        const controls = controlsRef.current
+        if (!controls) return null
+        return {
+          position: [camera.position.x, camera.position.y, camera.position.z],
+          target: [controls.target.x, controls.target.y, controls.target.z],
+        }
+      },
+      restore: (pose) => {
+        camera.position.set(pose.position[0], pose.position[1], pose.position[2])
+        const controls = controlsRef.current
+        if (controls) {
+          controls.target.set(pose.target[0], pose.target[1], pose.target[2])
+          controls.update()
+        }
+      },
+    })
+  }, [camera])
 
   // When follow target changes, reset camera distance to ~4x body radius
   useEffect(() => {

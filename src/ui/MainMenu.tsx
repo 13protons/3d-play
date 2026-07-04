@@ -1,4 +1,4 @@
-import { mainMenuLinks, scenarios } from '../appRoutes'
+import { editorPath, mainMenuLinks, scenarios } from '../appRoutes'
 
 interface MainMenuProps {
   onLaunch: (scenarioId: string) => void
@@ -43,6 +43,24 @@ export function MainMenu({ onLaunch }: MainMenuProps) {
             {scenario.label}
           </button>
         ))}
+        <a
+          href={editorPath}
+          style={{
+            padding: '12px 32px',
+            fontSize: 15,
+            background: 'rgba(120,230,255,0.12)',
+            color: '#d8f8ff',
+            border: '1px solid rgba(120,230,255,0.4)',
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            textAlign: 'center',
+            textDecoration: 'none',
+            marginTop: 8,
+          }}
+        >
+          Scene Editor
+        </a>
         {mainMenuLinks.map((link) => (
           <a
             key={link.path}

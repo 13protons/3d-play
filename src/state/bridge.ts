@@ -10,7 +10,8 @@ import { useManeuverStore } from './maneuver'
 import { useVehicleStore } from './vehicle'
 import { useAutopilotStore } from './autopilot'
 import type { AtmosphereRenderConfig, BodyMeta } from './trajectories'
-import type { PartInstance, VehicleAero, VehicleAttitude, VehicleEngine, VehicleResources } from '../sim/types'
+import type { PartInstance, SectorPosition, VehicleAero, VehicleAttitude, VehicleEngine, VehicleResources } from '../sim/types'
+import type { BodyResolveMeta } from '../data/sceneDraft'
 import type { TrajectoryCurve } from '../sim/types'
 import type { PartDefinition } from '../sim/vehicle/parts'
 import { G } from '../sim/constants'
@@ -71,6 +72,8 @@ let simTime = 0
 let warpRate = 1
 let lastWallTime = 0
 let paused = false
+// One-shot sim-seconds to advance while paused (editor "step forward").
+let pendingStepSeconds = 0
 
 // Worker state machine
 type WorkerState = 'idle' | 'busy'
@@ -128,12 +131,48 @@ function addVector(
 }
 
 export async function startSim(scenarioId: string): Promise<void> {
-  useVehicleStore.getState().reset()
   const scenarioResp = await fetch(`/data/scenarios/${scenarioId}.json`)
   if (!scenarioResp.ok) {
     throw new Error(`Failed to load scenario: ${scenarioId} (${scenarioResp.status})`)
   }
   const scenario = await scenarioResp.json()
+  await startSimWithScenario(scenario)
+}
+
+/**
+ * Load body-resolution metadata (GM, parent, radius, tilt, spin) for a set of
+ * bodies. Used by the scene editor to resolve authoring drafts into runtime
+ * scenarios. Reuses the same manifest-loading path as `startSim`.
+ */
+export async function loadBodyResolveMeta(
+  ids: string[],
+): Promise<Record<string, BodyResolveMeta>> {
+  const defs = await Promise.all(ids.map(loadBodyDef))
+  const meta: Record<string, BodyResolveMeta> = {}
+  for (const def of defs) {
+    const physics = def.physics as Record<string, unknown>
+    meta[def.id as string] = {
+      parentId: (def.parentId as string | null) ?? null,
+      gm: (physics.gm as number | undefined) ?? G * (physics.mass as number),
+      radius: physics.radius as number,
+      axialTilt: physics.axialTilt as number,
+      angularVelocity: physics.angularVelocity as number,
+    }
+  }
+  return meta
+}
+
+/**
+ * Start the sim from an in-memory scenario object (already-parsed JSON). The
+ * scene editor uses this to launch a resolved draft without round-tripping
+ * through a fetched file; `startSim` fetches then delegates here.
+ */
+export async function startSimWithScenario(scenario: {
+  coordinateFrame?: string
+  bodies: Record<string, { position: SectorPosition; velocity: [number, number, number]; rotationPhase?: number }>
+  vehicles?: Record<string, unknown>[]
+}): Promise<void> {
+  useVehicleStore.getState().reset()
   const isJplEclipticFrame = scenario.coordinateFrame === 'jpl-ecliptic'
 
   const bodyIds = Object.keys(scenario.bodies)
@@ -257,7 +296,7 @@ export async function startSim(scenarioId: string): Promise<void> {
   const vehicles = scenario.vehicles ?? []
   if (vehicles.length > 0) {
     const vehicleMetas = vehicles.map((v: Record<string, unknown>) => ({
-      id: v.id, name: v.name, parentId: v.parentId, mesh: v.mesh,
+      id: v.id as string, name: v.name as string, parentId: v.parentId as string, mesh: v.mesh as string,
     }))
     useTrajectoriesStore.getState().setVehicles(vehicleMetas)
     const firstVehicleId = vehicleMetas[0]?.id
@@ -284,7 +323,12 @@ export async function startSim(scenarioId: string): Promise<void> {
 
     await orbitalReady
 
-    const v = vehicles[0]
+    const v = vehicles[0] as {
+      id: string
+      parentId: string
+      position: SectorPosition
+      velocity: [number, number, number]
+    }
     let vehiclePosition = v.position
     let vehicleVelocity = v.velocity
     if (isJplEclipticFrame) {
@@ -385,6 +429,15 @@ export async function startSim(scenarioId: string): Promise<void> {
     // Flush input commands (warp changes)
     flushCommands()
     if (paused) {
+      // Editor step-forward: consume a queued one-shot advance even while paused.
+      if (pendingStepSeconds > 0 && orbitalWorker && orbitalState === 'idle') {
+        const targetTime = simTime + pendingStepSeconds
+        pendingStepSeconds = 0
+        orbitalState = 'busy'
+        pendingTargetTime = vehicleWorker ? targetTime : null
+        orbitalWorker.postMessage({ type: 'advance', targetTime })
+        simTime = targetTime
+      }
       animFrameId = requestAnimationFrame(loop)
       return
     }
@@ -501,7 +554,7 @@ function flushCommands(): void {
   }
 }
 
-export function stopSim(): void {
+export function stopSim(options: { preserveScene?: boolean } = {}): void {
   if (animFrameId !== null) {
     cancelAnimationFrame(animFrameId)
     animFrameId = null
@@ -517,6 +570,7 @@ export function stopSim(): void {
   simTime = 0
   warpRate = 1
   paused = false
+  pendingStepSeconds = 0
   orbitalState = 'idle'
   vehicleState = 'idle'
   pendingTargetTime = null
@@ -524,6 +578,13 @@ export function stopSim(): void {
   bodySurfaceMap.clear()
   activeVehicleId = null
   activeVehicleParentId = null
+  // preserveScene (the editor's restart-on-apply): keep the trajectory store
+  // populated so mounted render components survive the restart. A full reset
+  // unmounts every body/orbit-line and the resulting mass geometry disposal
+  // intermittently wedges the live WebGPU canvas (destroyed buffers stay
+  // referenced by cached submits → the scene pass drops every frame until a
+  // later rebuild). The incoming run overwrites curves/bodies/vehicles anyway.
+  if (options.preserveScene) return
   useTrajectoriesStore.getState().reset()
   useVehicleStore.getState().reset()
   useAutopilotStore.getState().reset()
@@ -531,10 +592,23 @@ export function stopSim(): void {
 
 export function pauseSim(): void {
   paused = true
+  // Freeze the render-side interpolation clock too (getSimTime), or consumers
+  // keep extrapolating stale curves while the workers sit still.
+  useTrajectoriesStore.getState().setPaused(true)
+}
+
+/**
+ * Advance the sim by a fixed number of sim-seconds on the next frame, even
+ * while paused. Used by the scene editor to step the world forward without
+ * leaving edit-mode pause. No-op until the previous step has been dispatched.
+ */
+export function stepSim(seconds: number): void {
+  if (seconds > 0) pendingStepSeconds = seconds
 }
 
 export function resumeSim(): void {
   paused = false
+  useTrajectoriesStore.getState().setPaused(false)
 }
 
 export function isSimPaused(): boolean {
