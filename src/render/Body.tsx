@@ -23,7 +23,17 @@ import {
 import { orbitalPlanetSurfaceRenderDecision } from './terrain/terrainLodPolicy'
 import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
 
-const MESH_THRESHOLD_PX = 6
+// Bodies swap to their marker sprite below this projected radius. Kept low
+// enough that an eclipsing body stays a real, depth-writing mesh: the Moon
+// covering the Sun from Earth orbit projects to ~6 px, and as a sprite
+// (depthWrite: false) it can't silhouette the sun sprite or shadow the
+// god-rays — full sunshine through a total eclipse.
+const MESH_THRESHOLD_PX = 2.5
+// Emissive bodies are light sources, never occluders, and their small-size
+// mesh (a few HDR pixels feeding bloom) flickers with subpixel motion — the
+// baked-halo sprite is the stable rendering. Keep them on the sprite below
+// the original threshold.
+const EMISSIVE_MESH_THRESHOLD_PX = 6
 const SPRITE_SIZE_PX = 12
 const CHILD_COLLAPSE_THRESHOLD_PX = 18
 // Emissive (sun) glow sprite. When the Sun's disc drops below MESH_THRESHOLD_PX
@@ -109,7 +119,10 @@ export function Body({ bodyId }: BodyProps) {
     const scenePositionVector = new Vector3(...scenePosition)
     const distanceToCamera = scenePositionVector.distanceTo(camera.position)
     const radiusPx = projectedRadiusPx(body.radius, distanceToCamera, pixelsPerRadian)
-    const useSprite = shouldUseBodySprite(radiusPx, MESH_THRESHOLD_PX)
+    const useSprite = shouldUseBodySprite(
+      radiusPx,
+      body.emissive ? EMISSIVE_MESH_THRESHOLD_PX : MESH_THRESHOLD_PX,
+    )
     const surfaceDecision = orbitalPlanetSurfaceRenderDecision({
       bodyRadius: body.radius,
       cameraDistance: distanceToCamera,

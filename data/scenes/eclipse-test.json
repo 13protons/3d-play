@@ -1,0 +1,118 @@
+{
+  "id": "eclipse-test",
+  "name": "Eclipse Test",
+  "epoch": 0,
+  "baseScenarioId": "sun-earth-moon",
+  "bodies": {
+    "sun": {
+      "position": {
+        "sector": [
+          0,
+          0,
+          0
+        ],
+        "local": [
+          0,
+          0,
+          0
+        ]
+      },
+      "velocity": [
+        0,
+        0,
+        0
+      ],
+      "rotationPhase": 0
+    },
+    "earth": {
+      "position": {
+        "sector": [
+          149600,
+          0,
+          0
+        ],
+        "local": [
+          0,
+          0,
+          0
+        ]
+      },
+      "velocity": [
+        0,
+        0,
+        29783
+      ],
+      "rotationPhase": 0
+    },
+    "moon": {
+      "position": {
+        "sector": [
+          149240,
+          0,
+          0
+        ],
+        "local": [
+          0,
+          0,
+          0
+        ]
+      },
+      "velocity": [
+        0,
+        0,
+        28731
+      ],
+      "rotationPhase": 0
+    }
+  },
+  "parentScrub": {
+    "deltaTrueAnomaly": 0
+  },
+  "vehicle": {
+    "id": "vehicle-1",
+    "name": "Orbiter",
+    "parentId": "earth",
+    "placement": {
+      "mode": "orbital",
+      "a": 6689550,
+      "e": 0,
+      "i": 0,
+      "lan": 0,
+      "aop": 0,
+      "ta": 3.141592653589793
+    },
+    "mesh": "cylinder",
+    "resources": {
+      "dryMass": 9000,
+      "fuelMass": 141000
+    },
+    "engine": {
+      "maxThrust": 2100000,
+      "isp": 350
+    },
+    "attitude": {
+      "momentOfInertia": [
+        12000,
+        12000,
+        8000
+      ],
+      "reactionWheelTorque": [
+        4800,
+        4800,
+        3200
+      ]
+    },
+    "aero": {
+      "model": "simple-drag",
+      "dragCoefficient": 2.2,
+      "referenceArea": 10,
+      "referenceLength": 2,
+      "centerOfPressureBody": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "_comment": "Total solar eclipse test scene: the Moon sits between Earth and Sun at 3.6e8 m (slightly inside its real distance so its disc fully covers the Sun), the vehicle in LEO on the sunward side (ta=180 deg) right on the alignment line. Import via the scene editor's 'Import scene JSON' button, then look sunward (-x) from the vehicle."
+}
