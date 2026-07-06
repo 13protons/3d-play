@@ -79,7 +79,7 @@
       "i": 0,
       "lan": 0,
       "aop": 0,
-      "ta": 3.141592653589793
+      "ta": 3.0019663134302466
     },
     "mesh": "cylinder",
     "resources": {
@@ -114,5 +114,5 @@
       ]
     }
   },
-  "_comment": "Total solar eclipse test scene: the Moon sits between Earth and Sun at 3.6e8 m (slightly inside its real distance so its disc fully covers the Sun), the vehicle in LEO on the sunward side (ta=180 deg) right on the alignment line. Import via the scene editor's 'Import scene JSON' button, then look sunward (-x) from the vehicle."
+  "_comment": "Total solar eclipse scene: the Moon sits between Earth and Sun at 3.6e8 m (slightly inside its real distance so its disc fully covers the Sun) and the vehicle spawns in LEO ~8 deg before the alignment line (ta=172 deg) \u2014 watch a deepening partial phase from T+0, totality around T+2min for about a minute, then egress; the cycle repeats every ~91 min orbit. Import via the scene editor's 'Import scene JSON' button, Play, press M for vehicle view, and look sunward."
 }
