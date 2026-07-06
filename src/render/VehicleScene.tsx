@@ -391,9 +391,14 @@ function VehicleSceneContent() {
       <VehicleAmbientLight />
       <VehicleSky />
       <VehicleViewControls />
+      {/* God-rays replace the lens flare: the same sun glow + terrain/planet
+          occlusion the flare approximated, but anchored to the real sun and
+          shadowed by the actual scene depth. */}
       <RenderPipeline
         withBloom
-        withLensFlare
+        withGodRays
+        reversedDepth
+        godRaysOrigin='vehicle'
       />
       <EnableSceneLayers />
       <VehicleMesh />

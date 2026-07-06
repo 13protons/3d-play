@@ -50,8 +50,12 @@ const SUN_DISC_RADIUS = 0.04
 // rays are LDR scene light, not a bloom source, so they cannot re-introduce
 // the subpixel bloom flicker the baked-halo sun removed.
 const EXPOSURE = 2.4
-// Standard (non-reversed) depth clears to 1.0; anything drawn lands below it.
-// The margin covers float32 depth rounding for bodies out to ~1e10 m.
+// Sky test threshold for STANDARD depth: cleared texels sit at 1.0 and drawn
+// geometry lands below; the margin covers float32 rounding for bodies out to
+// ~1e10 m (beyond that a body's depth rounds to 1.0 and it reads as sky — such
+// bodies are sub-pixel and can't meaningfully occlude anyway). On REVERSED-Z
+// canvases (the vehicle view) the clear value is 0.0 and any drawn geometry
+// writes a strictly positive value, so the test is an exact compare against 0.
 const SKY_DEPTH = 0.9999999
 
 /** The uniform handles the caller drives per frame (typed by their `.value`). */
@@ -62,7 +66,15 @@ export interface GodRaysControls {
   aspect: { value: number }
 }
 
-export function buildGodRays(depthNode: TextureNode): { node: Node; controls: GodRaysControls } {
+export interface GodRaysOptions {
+  /** Set when the canvas uses a reversed-Z depth buffer (the vehicle view). */
+  reversedDepth?: boolean
+}
+
+export function buildGodRays(
+  depthNode: TextureNode,
+  { reversedDepth = false }: GodRaysOptions = {},
+): { node: Node; controls: GodRaysControls } {
   const sunUv = uniform(new Vector2(0.5, 0.5))
   const intensity = uniform(0)
   const tint = uniform(new Color(1, 0.66, 0.25))
@@ -87,8 +99,11 @@ export function buildGodRays(depthNode: TextureNode): { node: Node; controls: Go
         // Soft emitting disc around the sun, round in pixel space (aspect-corrected).
         const d = pos.sub(sunUv).mul(vec2(aspect, 1)).length()
         const disc = smoothstep(float(SUN_DISC_RADIUS), float(SUN_DISC_RADIUS * 0.3), d)
-        // Only sky emits: drawn geometry (depth < clear) blocks the disc.
-        const sky = step(float(SKY_DEPTH), depthNode.sample(pos).r)
+        // Only sky emits: drawn geometry blocks the disc (see SKY_DEPTH note).
+        const depth = depthNode.sample(pos).r
+        const sky = reversedDepth
+          ? step(depth, float(0)) // 1 only where depth is exactly the 0.0 clear
+          : step(float(SKY_DEPTH), depth)
         sum.addAssign(disc.mul(sky).mul(illum))
         illum.mulAssign(DECAY)
       })

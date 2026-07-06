@@ -43,10 +43,19 @@ export function RenderPipeline({
   withBloom = false,
   withLensFlare = false,
   withGodRays = false,
+  reversedDepth = false,
+  godRaysOrigin = 'follow',
 }: {
   withBloom?: boolean
   withLensFlare?: boolean
   withGodRays?: boolean
+  /** Set when this canvas renders with a reversed-Z depth buffer (vehicle view). */
+  reversedDepth?: boolean
+  /**
+   * Which sim position the scene's floating origin tracks: the camera-store
+   * follow target (orbital view) or the active vehicle (vehicle view).
+   */
+  godRaysOrigin?: 'follow' | 'vehicle'
 } = {}) {
   const gl = useThree((s) => s.gl) as unknown as WebGPURenderer
   const scene = useThree((s) => s.scene)
@@ -63,7 +72,7 @@ export function RenderPipeline({
     let godRays: GodRaysControls | null = null
     let output = sceneColor as ReturnType<typeof sceneColor.add>
     if (withGodRays) {
-      const rays = buildGodRays(scenePass.getTextureNode('depth'))
+      const rays = buildGodRays(scenePass.getTextureNode('depth'), { reversedDepth })
       godRays = rays.controls
       // @types/three TSL gap: Fn() returns an untyped Node; it is a valid vec4 producer.
       output = output.add(rays.node as unknown as Node<'color'>)
@@ -92,7 +101,7 @@ export function RenderPipeline({
     }
     pipeline.outputNode = output
     return { pipeline, disposables, godRays }
-  }, [gl, scene, camera, withBloom, withLensFlare, withGodRays])
+  }, [gl, scene, camera, withBloom, withLensFlare, withGodRays, reversedDepth])
 
   useEffect(
     () => () => {
@@ -103,7 +112,7 @@ export function RenderPipeline({
   )
 
   useFrame(() => {
-    if (godRays) updateGodRaysUniforms(godRays, camera, size.width / size.height)
+    if (godRays) updateGodRaysUniforms(godRays, camera, size.width / size.height, godRaysOrigin)
     pipeline.render()
   }, 1)
 
@@ -121,6 +130,7 @@ function updateGodRaysUniforms(
   controls: GodRaysControls,
   camera: Parameters<typeof sunScreenState>[1],
   aspect: number,
+  origin: 'follow' | 'vehicle',
 ): void {
   const store = useTrajectoriesStore.getState()
   const sun = Object.values(store.bodies).find((b) => b.emissive)
@@ -131,7 +141,11 @@ function updateGodRaysUniforms(
   }
   const t = store.getSimTime()
   const sunPos = evaluateCurve(sunCurve, t)
-  const followCurve = store.curves[useCameraStore.getState().followTargetId]
+  const originId =
+    origin === 'vehicle'
+      ? Object.keys(store.vehicles)[0]
+      : useCameraStore.getState().followTargetId
+  const followCurve = originId ? store.curves[originId] : undefined
   const followPos = followCurve ? evaluateCurve(followCurve, t) : [0, 0, 0]
   const { uv, intensity } = sunScreenState(
     [sunPos[0] - followPos[0], sunPos[1] - followPos[1], sunPos[2] - followPos[2]],
