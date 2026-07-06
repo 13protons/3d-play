@@ -8,6 +8,7 @@ import { MeshBasicNodeMaterial } from 'three/webgpu'
 import {
   cameraPosition,
   color,
+  cross,
   float,
   mix,
   normalWorldGeometry,
@@ -95,14 +96,64 @@ function sunPositionForFrame(frameKey: number): [number, number, number] | null 
  */
 function useSunDirectionUniform(bodyId: string, materialRef: RefObject<MeshBasicNodeMaterial | null>): void {
   useFrame((frame) => {
-    const sunDirection = materialRef.current?.userData.sunDirection as { value: Vector3 } | undefined
+    const material = materialRef.current
+    if (!material) return
+    const ud = material.userData as {
+      sunDirection?: { value: Vector3 }
+      sunAngularRadius?: { value: number }
+      occluderOffset?: { value: Vector3 }
+      occluderRadius?: { value: number }
+    }
+    const sunDirection = ud.sunDirection
     if (!sunDirection) return
     const sunPos = sunPositionForFrame(frame.clock.elapsedTime)
     const store = useTrajectoriesStore.getState()
     const bodyCurve = store.curves[bodyId]
     if (!sunPos || !bodyCurve) return
-    const bodyPos = evaluateCurve(bodyCurve, store.getSimTime()) as [number, number, number]
-    sunDirection.value.set(sunPos[0] - bodyPos[0], sunPos[1] - bodyPos[1], sunPos[2] - bodyPos[2]).normalize()
+    const t = store.getSimTime()
+    const bodyPos = evaluateCurve(bodyCurve, t) as [number, number, number]
+    const sx = sunPos[0] - bodyPos[0]
+    const sy = sunPos[1] - bodyPos[1]
+    const sz = sunPos[2] - bodyPos[2]
+    const sunDist = Math.hypot(sx, sy, sz) || 1
+    sunDirection.value.set(sx / sunDist, sy / sunDist, sz / sunDist)
+
+    // Cast-shadow uniforms: sun angular radius + the dominant sibling occluder
+    // (largest angular radius among other non-emissive bodies).
+    const sunAngularRadiusU = ud.sunAngularRadius
+    const occluderOffsetU = ud.occluderOffset
+    const occluderRadiusU = ud.occluderRadius
+    if (sunAngularRadiusU && occluderOffsetU && occluderRadiusU) {
+      const sun = Object.values(store.bodies).find((b) => b.emissive)
+      sunAngularRadiusU.value = sun ? sun.radius / sunDist : 0.00465
+
+      let bestAngular = 0
+      let bestOffset: [number, number, number] | null = null
+      let bestRadius = 0
+      for (const [id, b] of Object.entries(store.bodies)) {
+        if (id === bodyId || b.emissive) continue
+        const curve = store.curves[id]
+        if (!curve) continue
+        const p = evaluateCurve(curve, t) as [number, number, number]
+        const ox = p[0] - bodyPos[0]
+        const oy = p[1] - bodyPos[1]
+        const oz = p[2] - bodyPos[2]
+        const dist = Math.hypot(ox, oy, oz)
+        if (dist === 0) continue
+        const angular = b.radius / dist
+        if (angular > bestAngular) {
+          bestAngular = angular
+          bestOffset = [ox, oy, oz]
+          bestRadius = b.radius
+        }
+      }
+      if (bestOffset) {
+        occluderOffsetU.value.set(bestOffset[0], bestOffset[1], bestOffset[2])
+        occluderRadiusU.value = bestRadius
+      } else {
+        occluderRadiusU.value = 0
+      }
+    }
   })
 }
 
@@ -129,7 +180,46 @@ function buildPlanetMaterial(body: BodyMeta, map: Texture | null, rim: RimMode):
   material.userData.sunDirection = sunDirection
   const sunOrientation = normalWorldGeometry.dot(sunDirection)
   const dayStrength = sunOrientation.smoothstep(-0.25, 0.5)
-  let lit = albedo.mul(mix(float(body.minimumLight), float(1), dayStrength))
+
+  // Cast shadows: dim the lit surface where a sibling body eclipses the sun as
+  // seen from each fragment — the per-pixel form of sunCoverageFraction, so no
+  // ray march. The dominant sibling occluder (its offset from this body's
+  // centre + radius) is fed per frame; a zero radius means no caster and the
+  // term vanishes. Symmetric by construction: Earth's occluder is the Moon
+  // (a solar-eclipse spot sweeps Earth's day side), the Moon's is Earth (the
+  // whole Moon darkens in a lunar eclipse). Including the fragment's own offset
+  // from centre is what gives the shadow its position and umbra size (the
+  // occluder's ~1.7° parallax across the surface).
+  const occluderOffset = uniform(new Vector3(0, 0, 0)) // occluder pos − body centre, sim space
+  const occluderRadius = uniform(0)
+  const sunAngularRadius = uniform(0.00465) // overwritten per frame
+  material.userData.occluderOffset = occluderOffset
+  material.userData.occluderRadius = occluderRadius
+  material.userData.sunAngularRadius = sunAngularRadius
+
+  // Fragment offset from body centre ≈ outward normal × radius (heights are
+  // negligible vs the body radius). Scene space is a pure translation of sim
+  // space, so this shares orientation with occluderOffset and sunDirection.
+  const fragFromCenter = normalWorldGeometry.mul(float(body.radius))
+  const toOcc = occluderOffset.sub(fragFromCenter)
+  const occDist = toOcc.length()
+  const occAngular = occluderRadius.div(occDist)
+  const occDir = toOcc.div(occDist)
+  // Angular separation of the two disc centres. cross-product magnitude is
+  // sin(sep) ≈ sep at these tiny angles, and avoids acos's precision cliff near 1.
+  const sep = cross(occDir, sunDirection).length()
+  const sumAng = occAngular.add(sunAngularRadius)
+  const diffAng = occAngular.sub(sunAngularRadius).abs()
+  // Covered fraction of the sun's disc: 0 when clear, ramping to a max of 1
+  // (total, occluder ≥ sun) or the area ratio (annular). Matches sunCoverageFraction.
+  const maxCoverage = occAngular.mul(occAngular).div(sunAngularRadius.mul(sunAngularRadius).max(float(1e-12))).min(float(1))
+  // Ascending edges (smoothstep needs edge0 < edge1): 0 when the discs are
+  // concentric (sep ≤ diffAng) → full cover; 1 when clear (sep ≥ sumAng).
+  // Invert for coverage.
+  const coverage = sep.smoothstep(diffAng, sumAng).oneMinus().mul(maxCoverage)
+  const sunlight = coverage.oneMinus()
+
+  let lit = albedo.mul(mix(float(body.minimumLight), float(1), dayStrength.mul(sunlight)))
 
   const atmosphere = body.atmosphereRender
   if (atmosphere) {
