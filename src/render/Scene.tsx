@@ -39,7 +39,7 @@ export function Scene() {
       }}
     >
       <PerfLogger view='orbital' />
-      <RenderPipeline withBloom />
+      <RenderPipeline withBloom withGodRays />
       <ambientLight intensity={0.04} />
       {/* Airless space: light the whole catalogue (≤ mag 6.5) fully — a limit above the faint
           cutoff + the fade band, so faint stars aren't left half-dimmed as they are at the naked-eye limit. */}
