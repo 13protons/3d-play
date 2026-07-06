@@ -26,10 +26,16 @@ import { createBodySurfaceGeometry } from './bodySurfaceGeometry'
 const MESH_THRESHOLD_PX = 6
 const SPRITE_SIZE_PX = 12
 const CHILD_COLLAPSE_THRESHOLD_PX = 18
-// HDR gain for an emissive body's marker sprite. When the Sun's disc drops below
-// MESH_THRESHOLD_PX it swaps to the sprite, which must still out-bloom the
-// brightest stars (~8× HDR, see MagnitudeStars) or the sun reads as a flat dot.
-const EMISSIVE_SPRITE_HDR_GAIN = 16
+// Emissive (sun) glow sprite. When the Sun's disc drops below MESH_THRESHOLD_PX
+// it swaps to a sprite that must still read as the sky's brightest object. The
+// glow halo is BAKED into the sprite texture (see OrbitalMarker) and drawn
+// large, and the gain keeps the core's bloom luminance BELOW the 2.0 threshold
+// — the sun takes no part in bloom at all. Bloom of a sub-resolution splat is
+// what made the sun flicker: the thresholded energy modulates with subpixel
+// phase, so the halo pulsed whenever the sun drifted on screen. The gain still
+// saturates the core to a hot white centre after tone mapping.
+const EMISSIVE_SPRITE_SIZE_PX = 56
+const EMISSIVE_SPRITE_HDR_GAIN = 2
 
 interface BodyProps {
   bodyId: string
@@ -155,7 +161,7 @@ export function Body({ bodyId }: BodyProps) {
       )
     }
     const spriteSize = spriteWorldSize(
-      SPRITE_SIZE_PX,
+      body.emissive ? EMISSIVE_SPRITE_SIZE_PX : SPRITE_SIZE_PX,
       distanceToCamera,
       pixelsPerRadian,
     )
