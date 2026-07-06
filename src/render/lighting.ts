@@ -85,6 +85,13 @@ export function vehicleSceneSunLightPosition(
   return directionalLightPosition(observerPosition, sunPosition, distance)
 }
 
-export function vehicleSceneSunLightIntensity(_sunProxyOccluded: boolean): number {
-  return 2
+/**
+ * Target sun-light intensity for the vehicle view: full sun in open space,
+ * zero inside a body's shadow (the occlusion test is already computed by the
+ * caller). The caller eases the light toward this target over a fraction of a
+ * second so crossing the shadow boundary reads as a fast terminator sweep
+ * rather than a single-frame pop.
+ */
+export function vehicleSceneSunLightIntensity(sunOccluded: boolean): number {
+  return sunOccluded ? 0 : 2
 }

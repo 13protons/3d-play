@@ -230,10 +230,15 @@ function VehicleBody({
   );
 }
 
+// How quickly the sun light chases its occlusion target (per second). ~6/s
+// settles in a few tenths of a second: fast enough to read as entering shadow,
+// slow enough not to pop in a single frame.
+const SUN_LIGHT_EASE_RATE = 6;
+
 function VehicleSunLight({ vehicleId, visibleBodyIds }: { vehicleId: string; visibleBodyIds: string[] }) {
   const lightRef = useRef<DirectionalLight>(null);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     if (useModeStore.getState().activeView !== 'vehicle') return;
 
     const light = lightRef.current;
@@ -269,7 +274,9 @@ function VehicleSunLight({ vehicleId, visibleBodyIds }: { vehicleId: string; vis
     );
     const lightPosition = vehicleSceneSunLightPosition(vehiclePos, sunPos, SUN_RENDER_DISTANCE);
     light.position.set(...lightPosition);
-    light.intensity = vehicleSceneSunLightIntensity(sunOccluded);
+    // Ease toward the occlusion target so shadow entry/exit sweeps instead of popping.
+    const target = vehicleSceneSunLightIntensity(sunOccluded);
+    light.intensity += (target - light.intensity) * Math.min(1, delta * SUN_LIGHT_EASE_RATE);
   });
 
   return (

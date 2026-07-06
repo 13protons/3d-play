@@ -80,6 +80,9 @@ describe('vehicleSceneSunLightPosition', () => {
 
     expect(proxyOccluded).toBe(true)
     expect(position).toEqual([50, 0, 0])
-    expect(vehicleSceneSunLightIntensity(proxyOccluded)).toBe(2)
+    // In the parent body's shadow the sun contributes nothing; only the
+    // ambient term (earthshine stand-in) lights the craft.
+    expect(vehicleSceneSunLightIntensity(proxyOccluded)).toBe(0)
+    expect(vehicleSceneSunLightIntensity(false)).toBe(2)
   })
 })
