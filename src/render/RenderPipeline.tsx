@@ -10,6 +10,7 @@ import { useTrajectoriesStore } from '../state/trajectories'
 import { evaluateCurve } from '../sim/curves'
 import { buildGodRays, type GodRaysControls } from './godRays'
 import { sunScreenState } from './godRaysMath'
+import { sunCoverageFraction, type SunOccluder } from './lighting'
 
 /**
  * Render the scene through a WebGPU post-processing node graph instead of the
@@ -151,10 +152,27 @@ function updateGodRaysUniforms(
     [sunPos[0] - followPos[0], sunPos[1] - followPos[1], sunPos[2] - followPos[2]],
     camera,
   )
+  // Eclipse dimming: rays scale with the square of the sun's uncovered disc
+  // fraction (true geometry, independent of drawn exaggeration) — deep partial
+  // phases visibly choke the glow and totality kills the rays outright.
+  const occluders: SunOccluder[] = []
+  for (const [id, body] of Object.entries(store.bodies)) {
+    if (body.emissive) continue
+    const curve = store.curves[id]
+    if (!curve) continue
+    occluders.push({ id, position: evaluateCurve(curve, t) as [number, number, number], radius: body.radius })
+  }
+  const coverage = sunCoverageFraction(
+    followPos as [number, number, number],
+    sunPos as [number, number, number],
+    sun.radius,
+    occluders,
+  )
+  const uncovered = 1 - coverage
   // The post quad's uv() is y-down on the WebGPU backend while NDC is y-up —
   // without the flip the rays emanate from a vertically mirrored phantom sun.
   controls.sunUv.value.set(uv[0], 1 - uv[1])
-  controls.intensity.value = intensity
+  controls.intensity.value = intensity * uncovered * uncovered
   controls.aspect.value = aspect
   if (sunTint.color !== sun.color) {
     sunTint.color = sun.color

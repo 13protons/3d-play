@@ -86,14 +86,66 @@ export function vehicleSceneSunLightPosition(
 }
 
 /**
- * Target sun-light intensity for the vehicle view: full sun in open space,
- * zero inside a body's shadow (the occlusion test is already computed by the
- * caller). The caller eases the light toward this target over a fraction of a
- * second so crossing the shadow boundary reads as a fast terminator sweep
- * rather than a single-frame pop.
+ * Target sun-light intensity for the vehicle view, scaled by how much of the
+ * sun's disc is covered (sunCoverageFraction): full sun in open space, dimmed
+ * through partial eclipse phases, zero at totality / inside a body's shadow.
+ * The caller eases the light toward this target over a fraction of a second
+ * so shadow crossings sweep rather than pop.
  */
-export function vehicleSceneSunLightIntensity(sunOccluded: boolean): number {
-  return sunOccluded ? 0 : 2
+export function vehicleSceneSunLightIntensity(sunCoverage: number): number {
+  return 2 * (1 - Math.min(1, Math.max(0, sunCoverage)))
+}
+
+/**
+ * Fraction of the sun's disc covered by the best-placed occluder, using TRUE
+ * angular sizes (independent of any drawn exaggeration). Standard circle-
+ * overlap area: 0 when the discs are clear of each other, the lens-area
+ * fraction through partial phases, capped at the area ratio for an annular
+ * pass and at 1 for totality. Drives eclipse dimming — sunlight scales with
+ * the uncovered photosphere, so totality actually goes dark.
+ */
+export function sunCoverageFraction(
+  observerPosition: Vec3,
+  sunPosition: Vec3,
+  sunRadius: number,
+  occluders: SunOccluder[],
+): number {
+  const sx = sunPosition[0] - observerPosition[0]
+  const sy = sunPosition[1] - observerPosition[1]
+  const sz = sunPosition[2] - observerPosition[2]
+  const sunDistance = Math.hypot(sx, sy, sz)
+  if (sunDistance === 0) return 0
+  const R = sunRadius / sunDistance // sun angular radius
+
+  let best = 0
+  for (const occluder of occluders) {
+    const ox = occluder.position[0] - observerPosition[0]
+    const oy = occluder.position[1] - observerPosition[1]
+    const oz = occluder.position[2] - observerPosition[2]
+    const occDistance = Math.hypot(ox, oy, oz)
+    if (occDistance === 0 || occDistance >= sunDistance) continue
+    const r = occluder.radius / occDistance // occluder angular radius
+
+    const cos = (sx * ox + sy * oy + sz * oz) / (sunDistance * occDistance)
+    const d = Math.acos(Math.min(1, Math.max(-1, cos))) // angular separation
+
+    let coverage = 0
+    if (d >= R + r) {
+      coverage = 0
+    } else if (d <= Math.abs(r - R)) {
+      // Concentric-enough: full cover (total) or the area ratio (annular).
+      coverage = r >= R ? 1 : (r * r) / (R * R)
+    } else {
+      // Lens area of two overlapping discs.
+      const lens =
+        R * R * Math.acos((d * d + R * R - r * r) / (2 * d * R)) +
+        r * r * Math.acos((d * d + r * r - R * R) / (2 * d * r)) -
+        0.5 * Math.sqrt((-d + r + R) * (d + r - R) * (d - r + R) * (d + r + R))
+      coverage = lens / (Math.PI * R * R)
+    }
+    best = Math.max(best, Math.min(1, coverage))
+  }
+  return best
 }
 
 // distantBodyApparentScale ramp, in distance/radius: at NEAR the body is
