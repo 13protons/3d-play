@@ -95,3 +95,48 @@ export function vehicleSceneSunLightPosition(
 export function vehicleSceneSunLightIntensity(sunOccluded: boolean): number {
   return sunOccluded ? 0 : 2
 }
+
+/**
+ * Perceptual sun-disc exaggeration that yields to eclipses. The vehicle view
+ * draws the sun `maxScale`× its true angular size (cameras make it read far
+ * smaller than the eye's impression) — but an eclipsing body's disc is drawn
+ * at TRUE size, so a full exaggeration would leave a bright ring around a
+ * body that geometrically covers the sun. As any occluder's disc approaches
+ * the sun's, the scale eases back to 1 so totality plays out at honest scale.
+ */
+export function sunApparentScale(
+  observerPosition: Vec3,
+  sunPosition: Vec3,
+  sunRadius: number,
+  occluders: SunOccluder[],
+  maxScale: number,
+): number {
+  const sx = sunPosition[0] - observerPosition[0]
+  const sy = sunPosition[1] - observerPosition[1]
+  const sz = sunPosition[2] - observerPosition[2]
+  const sunDistance = Math.hypot(sx, sy, sz)
+  if (sunDistance === 0) return maxScale
+  const sunAngular = sunRadius / sunDistance
+
+  let scale = maxScale
+  for (const occluder of occluders) {
+    const ox = occluder.position[0] - observerPosition[0]
+    const oy = occluder.position[1] - observerPosition[1]
+    const oz = occluder.position[2] - observerPosition[2]
+    const occDistance = Math.hypot(ox, oy, oz)
+    if (occDistance === 0 || occDistance >= sunDistance) continue
+    const occAngular = occluder.radius / occDistance
+
+    // Angular separation between the sun's and the occluder's centres.
+    const cos = (sx * ox + sy * oy + sz * oz) / (sunDistance * occDistance)
+    const separation = Math.acos(Math.min(1, Math.max(-1, cos)))
+
+    // Discs touching at true scale → fully honest size; ease the exaggeration
+    // back in as the occluder moves one exaggerated-sun-diameter away.
+    const touch = occAngular + sunAngular
+    const clear = occAngular + sunAngular * (2 * maxScale)
+    const t = Math.min(1, Math.max(0, (separation - touch) / (clear - touch)))
+    scale = Math.min(scale, 1 + (maxScale - 1) * t)
+  }
+  return scale
+}
