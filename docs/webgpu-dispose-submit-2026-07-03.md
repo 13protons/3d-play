@@ -1,7 +1,21 @@
 # WebGPU: disposed buffers in cached submits (2026-07-03)
 
-Status: **mostly fixed** — the catastrophic form is gone; a rare transient
-remains, parked here with the diagnosis so it isn't re-derived.
+Status: **mostly fixed** — the editor-apply form is gone (preserveScene) and
+the page-load form is gone (StrictMode removed, see update below); a rare
+transient remains, parked here with the diagnosis so it isn't re-derived.
+
+## Update 2026-07-06 — StrictMode made it deterministic on Chrome 149
+
+On Chrome 149 every page load wedged (60 rejected submits/sec, starfield or
+body pass dead), across code versions — verified by stashing to a known-good
+commit, fresh dev server, fresh browser process. Root cause: **React
+StrictMode's dev double-mount** — mount → unmount (mass geometry/material
+disposal, same class of event as the old editor teardown) → remount, on every
+load. On earlier Chrome builds the disposal race hit intermittently; Chrome
+149's timing makes it hit every time. Fixed by removing StrictMode from
+`src/main.tsx` (comment there explains). Re-enable only if the underlying
+dispose-while-cached-submit bug is fixed (three upgrade or the in-place-update
+direction below).
 
 ## What happened
 
