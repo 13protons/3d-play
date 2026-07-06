@@ -14,9 +14,10 @@ import { evaluateCurve } from '../sim/curves';
 import { evaluateCurveVelocity } from '../sim/curves';
 import { computeFlightReferenceFrame, rotationAxisFromAxialTilt, surfaceFrame } from '../sim/vehicle/referenceFrame';
 import {
-  isSunOccluded,
+  distantBodyApparentScale,
   projectDistantSphere,
   type SunOccluder,
+  sunCoverageFraction,
   type Vec3,
   vehicleSceneSunLightIntensity,
   vehicleSceneSunLightPosition,
@@ -42,6 +43,10 @@ import { RenderPipeline } from './RenderPipeline';
 import { makeWebGPURenderer } from './webgpuRenderer';
 
 const SUN_RENDER_DISTANCE = 5e8;
+// Perceptual exaggeration cap for distant bodies (sun, moon, far planets) —
+// see distantBodyApparentScale. One shared factor keeps eclipse coverage
+// honest: sun and occluder inflate together.
+const DISTANT_BODY_APPARENT_SCALE = 2.5;
 
 // How far the vehicle camera may orbit out from the craft, as a multiple of the
 // parent body's radius. Tiny bodies cap on radius; larger ones hit the absolute
@@ -136,9 +141,24 @@ function VehicleBody({
       : false;
     const bodyPos = evaluateCurve(bodyCurve, t);
     const vehiclePos = evaluateCurve(vehicleCurve, t);
+    const vehicleDistance = Math.hypot(
+      bodyPos[0] - vehiclePos[0],
+      bodyPos[1] - vehiclePos[1],
+      bodyPos[2] - vehiclePos[2],
+    );
+    const apparentScale = distantBodyApparentScale(
+      vehicleDistance,
+      body.radius,
+      DISTANT_BODY_APPARENT_SCALE,
+    );
     const renderBody =
       body.emissive ?
-        projectDistantSphere(vehiclePos as Vec3, bodyPos as Vec3, body.radius, SUN_RENDER_DISTANCE)
+        projectDistantSphere(
+          vehiclePos as Vec3,
+          bodyPos as Vec3,
+          body.radius * apparentScale,
+          SUN_RENDER_DISTANCE,
+        )
       : null;
 
     // Floating origin centered on vehicle. Keep placement on the rotating group
@@ -170,7 +190,9 @@ function VehicleBody({
     if (renderBody) {
       mesh.scale.setScalar(renderBody.radius / body.radius);
     } else {
-      mesh.scale.setScalar(1);
+      // Non-emissive bodies render at real positions; distant ones inflate in
+      // place by the same perceptual factor as the sun (see lighting.ts).
+      mesh.scale.setScalar(apparentScale);
     }
 
     if (spinGroup) {
@@ -184,11 +206,15 @@ function VehicleBody({
       );
     }
 
-    const sunOccluded =
+    // True-geometry covered fraction of the sun's disc (0 clear → 1 totality),
+    // independent of the drawn exaggeration: the sun dims with its uncovered
+    // photosphere area, so partial phases fade smoothly and totality goes dark.
+    const sunCoverage =
       body.emissive ?
-        isSunOccluded(
+        sunCoverageFraction(
           vehiclePos as Vec3,
           bodyPos as Vec3,
+          body.radius,
           visibleBodyIds
             .filter((id) => id !== bodyId)
             .map((id): SunOccluder | null => {
@@ -203,14 +229,17 @@ function VehicleBody({
             })
             .filter((occluder): occluder is SunOccluder => occluder !== null),
         )
-      : false;
+      : 0;
 
-    mesh.visible = !sunOccluded && !hideForLocalSurface && surfaceDecision.showFallbackSphere;
+    mesh.visible = !hideForLocalSurface && surfaceDecision.showFallbackSphere;
 
     if (body.emissive && mesh.material && 'opacity' in mesh.material) {
       const material = mesh.material as MeshBasicMaterial;
-      material.opacity = sunOccluded ? 0 : 1;
-      material.transparent = sunOccluded;
+      // Dim with coverage but keep a corona remnant: at totality the occluder's
+      // depth-tested disc blacks out the centre and the ~12% leftover reads as
+      // the corona ring around its silhouette.
+      material.opacity = 1 - sunCoverage * 0.88;
+      material.transparent = sunCoverage > 0;
     }
   });
 
@@ -230,10 +259,15 @@ function VehicleBody({
   );
 }
 
+// How quickly the sun light chases its occlusion target (per second). ~6/s
+// settles in a few tenths of a second: fast enough to read as entering shadow,
+// slow enough not to pop in a single frame.
+const SUN_LIGHT_EASE_RATE = 6;
+
 function VehicleSunLight({ vehicleId, visibleBodyIds }: { vehicleId: string; visibleBodyIds: string[] }) {
   const lightRef = useRef<DirectionalLight>(null);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     if (useModeStore.getState().activeView !== 'vehicle') return;
 
     const light = lightRef.current;
@@ -250,9 +284,10 @@ function VehicleSunLight({ vehicleId, visibleBodyIds }: { vehicleId: string; vis
 
     const sunPos = evaluateCurve(sunCurve, t) as Vec3;
     const vehiclePos = evaluateCurve(vehicleCurve, t) as Vec3;
-    const sunOccluded = isSunOccluded(
+    const sunCoverage = sunCoverageFraction(
       vehiclePos,
       sunPos,
+      sun.radius,
       visibleBodyIds
         .filter((id) => id !== sun.id)
         .map((id): SunOccluder | null => {
@@ -269,7 +304,10 @@ function VehicleSunLight({ vehicleId, visibleBodyIds }: { vehicleId: string; vis
     );
     const lightPosition = vehicleSceneSunLightPosition(vehiclePos, sunPos, SUN_RENDER_DISTANCE);
     light.position.set(...lightPosition);
-    light.intensity = vehicleSceneSunLightIntensity(sunOccluded);
+    // Ease toward the coverage target so shadow entry/exit sweeps instead of
+    // popping; partial eclipse phases dim the world proportionally.
+    const target = vehicleSceneSunLightIntensity(sunCoverage);
+    light.intensity += (target - light.intensity) * Math.min(1, delta * SUN_LIGHT_EASE_RATE);
   });
 
   return (
@@ -391,9 +429,14 @@ function VehicleSceneContent() {
       <VehicleAmbientLight />
       <VehicleSky />
       <VehicleViewControls />
+      {/* God-rays replace the lens flare: the same sun glow + terrain/planet
+          occlusion the flare approximated, but anchored to the real sun and
+          shadowed by the actual scene depth. */}
       <RenderPipeline
         withBloom
-        withLensFlare
+        withGodRays
+        reversedDepth
+        godRaysOrigin='vehicle'
       />
       <EnableSceneLayers />
       <VehicleMesh />

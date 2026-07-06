@@ -49,7 +49,11 @@ export function WebGPULine({
   opacity = 1,
   transparent,
   depthTest = true,
-  depthWrite = true,
+  // Lines are overlay/trace geometry: depth-TESTED so planets hide them, but
+  // never depth-WRITTEN — a 2px orbit line in the depth buffer reads as solid
+  // geometry to depth-based post effects (the god-rays march treated traces as
+  // occluders, casting screen-wide shadow bands through the sun's glow).
+  depthWrite = false,
   ...rest
 }: WebGPULineProps) {
   // Build geometry + material + line together as a pure function of the props,
