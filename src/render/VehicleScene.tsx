@@ -14,6 +14,7 @@ import { evaluateCurve } from '../sim/curves';
 import { evaluateCurveVelocity } from '../sim/curves';
 import { computeFlightReferenceFrame, rotationAxisFromAxialTilt, surfaceFrame } from '../sim/vehicle/referenceFrame';
 import {
+  distantBodyApparentScale,
   isSunOccluded,
   projectDistantSphere,
   type SunOccluder,
@@ -42,11 +43,10 @@ import { RenderPipeline } from './RenderPipeline';
 import { makeWebGPURenderer } from './webgpuRenderer';
 
 const SUN_RENDER_DISTANCE = 5e8;
-// Perceptual exaggeration of the sun disc. At the camera's 50° fov the sun's
-// true 0.53° disc is ~a dozen pixels — optically correct but it reads far
-// smaller than the eye's impression of the sun (the same reason sunsets look
-// tiny in photos). Games conventionally draw it 2–4× its optical size.
-const SUN_APPARENT_SCALE = 2.5;
+// Perceptual exaggeration cap for distant bodies (sun, moon, far planets) —
+// see distantBodyApparentScale. One shared factor keeps eclipse coverage
+// honest: sun and occluder inflate together.
+const DISTANT_BODY_APPARENT_SCALE = 2.5;
 
 // How far the vehicle camera may orbit out from the craft, as a multiple of the
 // parent body's radius. Tiny bodies cap on radius; larger ones hit the absolute
@@ -141,12 +141,22 @@ function VehicleBody({
       : false;
     const bodyPos = evaluateCurve(bodyCurve, t);
     const vehiclePos = evaluateCurve(vehicleCurve, t);
+    const vehicleDistance = Math.hypot(
+      bodyPos[0] - vehiclePos[0],
+      bodyPos[1] - vehiclePos[1],
+      bodyPos[2] - vehiclePos[2],
+    );
+    const apparentScale = distantBodyApparentScale(
+      vehicleDistance,
+      body.radius,
+      DISTANT_BODY_APPARENT_SCALE,
+    );
     const renderBody =
       body.emissive ?
         projectDistantSphere(
           vehiclePos as Vec3,
           bodyPos as Vec3,
-          body.radius * SUN_APPARENT_SCALE,
+          body.radius * apparentScale,
           SUN_RENDER_DISTANCE,
         )
       : null;
@@ -180,7 +190,9 @@ function VehicleBody({
     if (renderBody) {
       mesh.scale.setScalar(renderBody.radius / body.radius);
     } else {
-      mesh.scale.setScalar(1);
+      // Non-emissive bodies render at real positions; distant ones inflate in
+      // place by the same perceptual factor as the sun (see lighting.ts).
+      mesh.scale.setScalar(apparentScale);
     }
 
     if (spinGroup) {

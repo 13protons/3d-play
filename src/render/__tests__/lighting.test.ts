@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  distantBodyApparentScale,
   isSunOccluded,
   projectDistantSphere,
   vehicleSceneSunLightIntensity,
@@ -84,5 +85,31 @@ describe('vehicleSceneSunLightPosition', () => {
     // ambient term (earthshine stand-in) lights the craft.
     expect(vehicleSceneSunLightIntensity(proxyOccluded)).toBe(0)
     expect(vehicleSceneSunLightIntensity(false)).toBe(2)
+  })
+})
+
+describe('distantBodyApparentScale', () => {
+  const MAX = 2.5
+
+  it('keeps a body you are at (landed / low orbit) at true size', () => {
+    // Earth from LEO: distance ≈ 1.05 radii.
+    expect(distantBodyApparentScale(6.7e6, 6.371e6, MAX)).toBe(1)
+  })
+
+  it('fully exaggerates far bodies — and by the SAME factor for sun and moon', () => {
+    // Moon from Earth (d/r ≈ 221) and Sun from Earth (d/r ≈ 215) both hit the
+    // cap, so a body that geometrically covers the sun still covers it drawn.
+    expect(distantBodyApparentScale(3.844e8, 1.737e6, MAX)).toBe(MAX)
+    expect(distantBodyApparentScale(1.496e11, 6.96e8, MAX)).toBe(MAX)
+  })
+
+  it('ramps smoothly through the approach', () => {
+    const mid = distantBodyApparentScale(30 * 1.737e6, 1.737e6, MAX)
+    expect(mid).toBeGreaterThan(1)
+    expect(mid).toBeLessThan(MAX)
+  })
+
+  it('is safe for degenerate radii', () => {
+    expect(distantBodyApparentScale(1e9, 0, MAX)).toBe(1)
   })
 })

@@ -95,3 +95,35 @@ export function vehicleSceneSunLightPosition(
 export function vehicleSceneSunLightIntensity(sunOccluded: boolean): number {
   return sunOccluded ? 0 : 2
 }
+
+// distantBodyApparentScale ramp, in distance/radius: at NEAR the body is
+// clearly "where you are" and draws true; by FAR it's celestial scenery and
+// gets the full perceptual exaggeration.
+const APPARENT_SCALE_NEAR_RATIO = 10
+const APPARENT_SCALE_FAR_RATIO = 50
+
+/**
+ * Perceptual size exaggeration for distant bodies in the vehicle view. At a
+ * 50° fov the sun's (or moon's) true half-degree disc is ~a dozen pixels —
+ * optically correct but far smaller than the eye's impression (why sunsets
+ * and moonrises disappoint in photos); games conventionally draw them 2–4×.
+ *
+ * Applying ONE distance-ramped factor to every body keeps eclipses honest for
+ * free: whenever an occluder's disc is comparable to the sun's, both bodies
+ * are deep in the "far" regime and inflate by the same factor, so a body that
+ * geometrically covers the sun still covers it on screen. Bodies you are
+ * landed on or orbiting stay true-size.
+ */
+export function distantBodyApparentScale(
+  distance: number,
+  radius: number,
+  maxScale: number,
+): number {
+  if (radius <= 0) return 1
+  const ratio = distance / radius
+  const t = Math.min(
+    1,
+    Math.max(0, (ratio - APPARENT_SCALE_NEAR_RATIO) / (APPARENT_SCALE_FAR_RATIO - APPARENT_SCALE_NEAR_RATIO)),
+  )
+  return 1 + (maxScale - 1) * t
+}
