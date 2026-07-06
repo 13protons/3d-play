@@ -16,7 +16,6 @@ import { computeFlightReferenceFrame, rotationAxisFromAxialTilt, surfaceFrame } 
 import {
   isSunOccluded,
   projectDistantSphere,
-  sunApparentScale,
   type SunOccluder,
   type Vec3,
   vehicleSceneSunLightIntensity,
@@ -142,32 +141,12 @@ function VehicleBody({
       : false;
     const bodyPos = evaluateCurve(bodyCurve, t);
     const vehiclePos = evaluateCurve(vehicleCurve, t);
-    const sunOccluders: SunOccluder[] =
-      body.emissive ?
-        visibleBodyIds
-          .filter((id) => id !== bodyId)
-          .map((id): SunOccluder | null => {
-            const occluder = store.bodies[id];
-            const occluderCurve = curves[id];
-            if (!occluder || !occluderCurve) return null;
-            return {
-              id,
-              position: evaluateCurve(occluderCurve, t) as Vec3,
-              radius: occluder.radius,
-            };
-          })
-          .filter((occluder): occluder is SunOccluder => occluder !== null)
-      : [];
     const renderBody =
       body.emissive ?
         projectDistantSphere(
           vehiclePos as Vec3,
           bodyPos as Vec3,
-          // The exaggeration yields to eclipses: near-occluding bodies are drawn
-          // at TRUE angular size, so the sun must shrink to match or totality
-          // leaves a bright ring around a body that geometrically covers it.
-          body.radius *
-            sunApparentScale(vehiclePos as Vec3, bodyPos as Vec3, body.radius, sunOccluders, SUN_APPARENT_SCALE),
+          body.radius * SUN_APPARENT_SCALE,
           SUN_RENDER_DISTANCE,
         )
       : null;
@@ -216,7 +195,25 @@ function VehicleBody({
     }
 
     const sunOccluded =
-      body.emissive ? isSunOccluded(vehiclePos as Vec3, bodyPos as Vec3, sunOccluders) : false;
+      body.emissive ?
+        isSunOccluded(
+          vehiclePos as Vec3,
+          bodyPos as Vec3,
+          visibleBodyIds
+            .filter((id) => id !== bodyId)
+            .map((id): SunOccluder | null => {
+              const occluder = store.bodies[id];
+              const occluderCurve = curves[id];
+              if (!occluder || !occluderCurve) return null;
+              return {
+                id,
+                position: evaluateCurve(occluderCurve, t) as Vec3,
+                radius: occluder.radius,
+              };
+            })
+            .filter((occluder): occluder is SunOccluder => occluder !== null),
+        )
+      : false;
 
     mesh.visible = !sunOccluded && !hideForLocalSurface && surfaceDecision.showFallbackSphere;
 
