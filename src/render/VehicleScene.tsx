@@ -42,6 +42,11 @@ import { RenderPipeline } from './RenderPipeline';
 import { makeWebGPURenderer } from './webgpuRenderer';
 
 const SUN_RENDER_DISTANCE = 5e8;
+// Perceptual exaggeration of the sun disc. At the camera's 50° fov the sun's
+// true 0.53° disc is ~a dozen pixels — optically correct but it reads far
+// smaller than the eye's impression of the sun (the same reason sunsets look
+// tiny in photos). Games conventionally draw it 2–4× its optical size.
+const SUN_APPARENT_SCALE = 2.5;
 
 // How far the vehicle camera may orbit out from the craft, as a multiple of the
 // parent body's radius. Tiny bodies cap on radius; larger ones hit the absolute
@@ -138,7 +143,12 @@ function VehicleBody({
     const vehiclePos = evaluateCurve(vehicleCurve, t);
     const renderBody =
       body.emissive ?
-        projectDistantSphere(vehiclePos as Vec3, bodyPos as Vec3, body.radius, SUN_RENDER_DISTANCE)
+        projectDistantSphere(
+          vehiclePos as Vec3,
+          bodyPos as Vec3,
+          body.radius * SUN_APPARENT_SCALE,
+          SUN_RENDER_DISTANCE,
+        )
       : null;
 
     // Floating origin centered on vehicle. Keep placement on the rotating group
