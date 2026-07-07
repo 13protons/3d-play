@@ -10,7 +10,7 @@
  * / CoM-pivoted / vehicle-layer group, so its markers line up with the craft.
  */
 
-import { useMemo, useRef } from 'react'
+import { Suspense, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import { Matrix4, Quaternion } from 'three'
@@ -152,6 +152,15 @@ export function Vessel({ vehicleId }: { vehicleId: string }) {
 
 /** A baked .glb part loaded by meshId. Materials travel with the asset. */
 function BakedPart({ meshId }: { meshId: string }) {
+  return (
+    <Suspense fallback={null}>
+      <BakedPartMesh meshId={meshId} />
+    </Suspense>
+  )
+}
+
+/** Loads and clones the baked .glb; suspends while loading (see BakedPart's boundary). */
+function BakedPartMesh({ meshId }: { meshId: string }) {
   const { scene } = useGLTF(partMeshUrl(meshId))
   const object = useMemo(() => scene.clone(true), [scene])
   return <primitive object={object} />
