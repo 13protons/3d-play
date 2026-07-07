@@ -10,12 +10,13 @@ import { HudTestPage } from './ui/HudTestPage';
 import { Flight } from './modes/Flight';
 import { SceneList } from './modes/SceneList';
 import { SceneEditor } from './modes/SceneEditor';
-import { editorPath, isKnownScenarioId, mainPath, missionPath, spikeEarthPath, spikeDawnPath, spikeAtmospherePath, testHudPath } from './appRoutes';
+import { editorPath, isKnownScenarioId, mainPath, missionPath, spikeEarthPath, spikeDawnPath, spikeAtmospherePath, spikePartsPath, testHudPath } from './appRoutes';
 
 // Lazy so the TSL spike deps stay out of the main flight bundle.
 const EarthSpikePage = lazy(() => import('./spike/EarthSpike').then((m) => ({ default: m.EarthSpikePage })));
 const DawnSpikePage = lazy(() => import('./spike/DawnSpike').then((m) => ({ default: m.DawnSpikePage })));
 const AtmosphereSpikePage = lazy(() => import('./spike/AtmosphereSpike').then((m) => ({ default: m.AtmosphereSpikePage })));
+const PartsSandboxPage = lazy(() => import('./spike/PartsSandbox').then((m) => ({ default: m.PartsSandboxPage })));
 
 export default function App() {
   return (
@@ -76,6 +77,20 @@ export default function App() {
             }
           >
             <AtmosphereSpikePage />
+          </Suspense>
+        }
+      />
+      <Route
+        path={spikePartsPath}
+        element={
+          <Suspense
+            fallback={
+              <div style={{ position: 'absolute', inset: 0, background: '#000', color: '#888', padding: 16 }}>
+                LOADING PARTS SANDBOX
+              </div>
+            }
+          >
+            <PartsSandboxPage />
           </Suspense>
         }
       />

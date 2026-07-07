@@ -23,6 +23,7 @@ export const editorBaseScenarios = [
 export const spikeEarthPath = '/_spike/earth';
 export const spikeDawnPath = '/_spike/dawn';
 export const spikeAtmospherePath = '/_spike/atmosphere';
+export const spikePartsPath = '/_spike/parts';
 
 export const scenarios = [
   { id: 'sun-earth-moon', label: 'Launch: Sun-Earth-Moon' },
@@ -36,6 +37,7 @@ export const mainMenuLinks = [
   { label: 'Earth Spike', path: spikeEarthPath },
   { label: 'Dawn Spike', path: spikeDawnPath },
   { label: 'Atmosphere Spike', path: spikeAtmospherePath },
+  { label: 'Parts Sandbox', path: spikePartsPath },
 ] as const;
 
 export type ScenarioId = (typeof scenarios)[number]['id'];
