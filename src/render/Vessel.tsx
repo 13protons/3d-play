@@ -12,6 +12,7 @@
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
+import { useGLTF } from '@react-three/drei'
 import { Matrix4, Quaternion } from 'three'
 import type { Group, Mesh } from 'three'
 import { useVehicleStore } from '../state/vehicle'
@@ -24,6 +25,7 @@ import { RENDER_LAYERS } from './renderLayers'
 import { countRender } from './perfCounters'
 import { allFinite } from './finite'
 import { FlightDebugOverlay, type DebugEngine } from './FlightDebugOverlay'
+import { partMeshUrl, usesBakedMesh } from './partMesh'
 
 /** Metres → scene units. A ~25 m rocket renders at a few units, like the old cylinder. */
 const VEHICLE_RENDER_SCALE = 0.15
@@ -35,6 +37,7 @@ interface PlacedPart {
   position: Vec3
   quaternion: [number, number, number, number]
   render: PartRender
+  meshId?: string
   /** Engine geometry when this part has an engine module. */
   engine?: { direction: Vec3, stage: number, nozzleZ: number }
 }
@@ -66,6 +69,7 @@ export function Vessel({ vehicleId }: { vehicleId: string }) {
           position: t.position,
           quaternion: quaternionFromMat3(t.rotation),
           render,
+          meshId: def.meshId,
           engine: engineMod && engineMod.kind === 'engine'
             ? {
                 direction: mat3MulVec(t.rotation, normalize(engineMod.thrustDirection ?? [0, 0, 1])),
@@ -122,7 +126,7 @@ export function Vessel({ vehicleId }: { vehicleId: string }) {
             position={[p.position[0], p.position[1], p.position[2]]}
             quaternion={[p.quaternion[0], p.quaternion[1], p.quaternion[2], p.quaternion[3]]}
           >
-            <PartShape render={p.render} />
+            {usesBakedMesh(p) ? <BakedPart meshId={p.meshId!} /> : <PartShape render={p.render} />}
             {p.engine && (
               <mesh
                 ref={(m) => {
@@ -144,6 +148,13 @@ export function Vessel({ vehicleId }: { vehicleId: string }) {
       )}
     </group>
   )
+}
+
+/** A baked .glb part loaded by meshId. Materials travel with the asset. */
+function BakedPart({ meshId }: { meshId: string }) {
+  const { scene } = useGLTF(partMeshUrl(meshId))
+  const object = useMemo(() => scene.clone(true), [scene])
+  return <primitive object={object} />
 }
 
 /** A single part's mesh, oriented so its length runs along the part's local +Z. */

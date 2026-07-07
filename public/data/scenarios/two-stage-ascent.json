@@ -78,6 +78,7 @@
       "partDefs": [
         ["booster", {
           "id": "booster",
+          "meshId": "booster",
           "dryMass": 5000,
           "inertia": [200000, 0, 0, 0, 200000, 0, 0, 0, 10000],
           "dragArea": 12,
@@ -89,6 +90,7 @@
         }],
         ["upper", {
           "id": "upper",
+          "meshId": "upper",
           "dryMass": 2000,
           "inertia": [60000, 0, 0, 0, 60000, 0, 0, 0, 4000],
           "dragArea": 2,
@@ -100,6 +102,7 @@
         }],
         ["capsule", {
           "id": "capsule",
+          "meshId": "capsule",
           "dryMass": 1000,
           "inertia": [8000, 0, 0, 0, 8000, 0, 0, 0, 3000],
           "dragArea": 1,
