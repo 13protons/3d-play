@@ -13,7 +13,7 @@
 import { Suspense, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
-import { Matrix4, Quaternion } from 'three'
+import { AdditiveBlending, DoubleSide, Matrix4, Quaternion } from 'three'
 import type { Group, Mesh } from 'three'
 import { useVehicleStore } from '../state/vehicle'
 import { useTrajectoriesStore } from '../state/trajectories'
@@ -26,11 +26,14 @@ import { countRender } from './perfCounters'
 import { allFinite } from './finite'
 import { FlightDebugOverlay, type DebugEngine } from './FlightDebugOverlay'
 import { partMeshUrl, usesBakedMesh } from './partMesh'
+import { createPlumeTexture } from './plume'
 
 /** Metres → scene units. A ~25 m rocket renders at a few units, like the old cylinder. */
 const VEHICLE_RENDER_SCALE = 0.15
 
 const DEFAULT_RENDER: PartRender = { shape: 'cylinder', radius: 1.5, length: 4, color: '#cccccc' }
+
+const PLUME_TEXTURE = createPlumeTexture()
 
 interface PlacedPart {
   instanceId: string
@@ -127,19 +130,31 @@ export function Vessel({ vehicleId }: { vehicleId: string }) {
             quaternion={[p.quaternion[0], p.quaternion[1], p.quaternion[2], p.quaternion[3]]}
           >
             {usesBakedMesh(p) ? <BakedPart meshId={p.meshId!} /> : <PartShape render={p.render} />}
-            {p.engine && (
-              <mesh
-                ref={(m) => {
-                  if (m) flames.current.set(p.instanceId, { mesh: m, stage: p.engine!.stage })
-                  else flames.current.delete(p.instanceId)
-                }}
-                position={[0, 0, p.engine.nozzleZ]}
-                visible={false}
-              >
-                <sphereGeometry args={[(p.render.radius ?? 1.5) * 0.6, 12, 8]} />
-                <meshBasicMaterial color="#ff8a18" />
-              </mesh>
-            )}
+            {p.engine && (() => {
+              const exitR = (p.render.radius ?? 1.5) * 0.7
+              const plumeLen = (p.render.radius ?? 1.5) * 3
+              return (
+                <mesh
+                  ref={(m) => {
+                    if (m) flames.current.set(p.instanceId, { mesh: m, stage: p.engine!.stage })
+                    else flames.current.delete(p.instanceId)
+                  }}
+                  position={[0, 0, p.engine.nozzleZ - plumeLen / 2]}
+                  rotation={[-Math.PI / 2, 0, 0]}
+                  visible={false}
+                >
+                  <coneGeometry args={[exitR, plumeLen, 20, 1, true]} />
+                  <meshBasicMaterial
+                    map={PLUME_TEXTURE}
+                    color="#ffd0a0"
+                    transparent
+                    depthWrite={false}
+                    blending={AdditiveBlending}
+                    side={DoubleSide}
+                  />
+                </mesh>
+              )
+            })()}
           </group>
         ))}
       </group>
