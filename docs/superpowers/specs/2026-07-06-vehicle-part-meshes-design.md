@@ -62,7 +62,11 @@ assets and no runtime procedural cost.
 - GPU wind-shadow aero (`docs/wind-shadow-aero-2026-06-17.md`, a separate trigger).
 - A headless build-time bake script (the manual Export button is enough now).
 - Parts beyond the demo craft; a VAB-style build editor.
-- Moving builders out of `src/spike/` (they graduate later if re-baking gets frequent).
+- Moving builders out of `src/spike/` now. This sandbox is the strongest candidate to
+  graduate into a permanent in-game custom-parts authoring feature, so the durable core
+  (pure builders + the `meshId` selector) is kept React-free and separate from the
+  disposable page/route — graduation becomes a relocation, not a rewrite. Doing that
+  relocation is out of scope for v1.
 
 ## Architecture — three seams
 
